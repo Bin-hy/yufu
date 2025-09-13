@@ -1,0 +1,10 @@
+[http]
+listen = "127.0.0.1:3001"
+
+# Default enabled `--features=net4mqtt`
+[net4mqtt]
+# Global unique alias
+alias = "cobotlet-1"
+# `client_id={alias}` use alias as MQTT `client_id`
+mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
+

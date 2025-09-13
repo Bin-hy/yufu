@@ -1,0 +1,54 @@
+[http]
+# Http Server Listen Address
+# listen = "[::]:4000"
+# Cross-Origin Resource Sharing (CORS)
+# reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+# cors = false
+
+# Headers["Authorization"] = "Bearer {token}"
+# [auth]
+# JSON WEB TOKEN secret
+# secret = "<jwt_secret>"
+# static JWT token, superadmin, debuggger can use this token
+# tokens = ["live777"]
+
+# Admin Dashboard Accounts
+# [[auth.accounts]]
+# username = "live777"
+# password = "live777"
+
+[log]
+# Env: `LOG_LEVEL`
+# Default: info
+# Values: off, error, warn, info, debug, trace
+# level = "warn"
+
+# [net4mqtt]
+# Global unique alias
+# alias = "liveman-0"
+# `client_id={alias}` use alias as MQTT `client_id`
+# mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
+# listen = "127.0.0.1:1077"
+# domain = "net4mqtt.local"
+
+# [[nodes]]
+# Globally unique id
+# alias = "static-0"
+# Auth token
+# token = "live777"
+# Live777 Address
+# url = "http://127.0.0.1:7777"
+
+# [[nodes]]
+# alias = "static-1"
+# token = "live777"
+# url = "http://127.0.0.1:7778"
+
+# [[nodes]]
+# Globally unique id
+# alias = "static-0"
+# Auth token
+# token = "live777"
+# Live777 Address
+# url = "http://liveion-0.net4mqtt.local:7777"
+
