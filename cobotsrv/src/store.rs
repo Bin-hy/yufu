@@ -12,11 +12,7 @@ pub struct Node {
 
 impl Node {
     pub fn new(token: String, kind: NodeKind, url: String) -> Self {
-        Self {
-            token,
-            kind,
-            url,
-        }
+        Self { token, kind, url }
     }
 }
 

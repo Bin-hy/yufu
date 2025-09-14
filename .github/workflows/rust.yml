@@ -1,0 +1,30 @@
+name: CI
+
+on: [ push, pull_request ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, windows-latest, ubuntu-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v5
+      - name: Show version information
+        run: |
+          cargo --version
+          cargo fmt --version
+          cargo clippy --version
+
+      - name: Cargo format
+        run: cargo fmt --all -- --check
+      - name: Cargo clippy
+        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
+      - name: Cargo build
+        run: cargo build --all-targets --all-features --release --verbose
+

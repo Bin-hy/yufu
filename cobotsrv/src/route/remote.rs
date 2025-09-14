@@ -18,13 +18,10 @@ pub struct QueryExtract {
 }
 
 pub fn route() -> Router<AppState> {
-    Router::new()
-        .route("/remote/{device}/{module}", 
-            get(remote).
-                post(remote).
-                patch(remote).
-                delete(remote)
-        )
+    Router::new().route(
+        "/remote/{device}/{module}",
+        get(remote).post(remote).patch(remote).delete(remote),
+    )
 }
 
 async fn remote(

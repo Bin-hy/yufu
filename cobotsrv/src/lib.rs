@@ -1,8 +1,8 @@
 use std::{future::Future, time::Duration};
 
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
-use reqwest::Client;
 use http::{StatusCode, Uri};
+use reqwest::Client;
 use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, info_span};
