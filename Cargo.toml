@@ -70,6 +70,11 @@ cobotlet = { path = "cobotlet" }
 cobotsrv = { path = "cobotsrv" }
 signal = { workspace = true }
 
+[dev-dependencies]
+portpicker = "0.1.1"
+futures = { version = "0.3", default-features = false }
+reqwest = { workspace = true, features = ["socks", "json"] }
+
 [features]
 default = ["net4mqtt"]
 webui = ["cobotlet/webui", "cobotsrv/webui"]

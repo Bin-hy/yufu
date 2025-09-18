@@ -23,8 +23,10 @@ jobs:
 
       - name: Cargo format
         run: cargo fmt --all -- --check
-      - name: Cargo clippy
-        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
       - name: Cargo build
-        run: cargo build --all-targets --all-features --release --verbose
+        run: cargo build --workspace --all-targets --all-features --release --verbose
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Cargo Test
+        run: cargo test --workspace --all-targets --all-features
 
