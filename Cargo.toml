@@ -35,10 +35,10 @@ authors = ["BinBat Ltd <hey@binbat.com>"]
 repository = "https://github.com/binbat/live777"
 
 [workspace.dependencies]
-net4mqtt = { git = "https://github.com/binbat/live777", rev = "996d034" }
-auth = { git = "https://github.com/binbat/live777", rev = "996d034" }
-signal = { git = "https://github.com/binbat/live777", rev = "996d034" }
-http-log = { git = "https://github.com/binbat/live777", rev = "996d034" }
+net4mqtt = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
+auth = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
+signal = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
+http-log = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
 
 axum = "0.8"
 tower-http = "0.6"
@@ -59,7 +59,7 @@ url = "2.5"
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["fs"] }
-net4mqtt = { workspace = true }
+net4mqtt = { workspace = true, features = ["test-utils"] }
 tracing = { workspace = true }
 serde = { workspace = true }
 

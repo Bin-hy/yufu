@@ -1,3 +1,5 @@
+use std::thread;
+
 use clap::Parser;
 use tracing::{debug, info, warn};
 
@@ -6,7 +8,10 @@ mod utils;
 
 use tokio::net::TcpListener;
 
+use net4mqtt::broker;
+
 const NAME: &str = "cobotsrv";
+const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
 
 #[derive(Parser)]
 #[command(name = "cobotnil", version)]
@@ -38,6 +43,10 @@ async fn main() {
     ));
 
     debug!("config : {:?}", cfg);
+
+    let broker_addr = MQTT_BROKER_ADDR.parse().unwrap();
+    thread::spawn(move || broker::up_mqtt_broker(broker_addr));
+    broker::wait_for_port_availabilty(broker_addr).await;
 
     let mut dir_entries = tokio::fs::read_dir(args.config.unwrap()).await.unwrap();
     let mut results = Vec::new();

@@ -8,18 +8,16 @@ CoBotrix (Co-Robotics Matrix) 协熵云枢
 
 ## 运行
 
-运行依赖
+运行依赖 **cobotnil 不需要 mqtt broker 依赖，目前内置了一个 mqtt broker**
 
 ```bash
-docker compose up -d
+# docker compose up -d
 ```
-
 
 运行集群 (启动一个 `Server` 和 三个 `Device`)
 
 ```bash
 cargo run -- -c conf/cobotnil
-
 ```
 
 ## 项目结构
