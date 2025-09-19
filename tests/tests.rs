@@ -7,8 +7,6 @@ use tracing::debug;
 
 use net4mqtt::broker;
 
-use cobotlet::config::{Http, Net4mqtt};
-
 const MQTT_TOPIC_PREFIX: &str = "net4mqtt";
 
 use serde::{Deserialize, Serialize};
@@ -33,20 +31,22 @@ async fn test_http_cluster() {
     thread::spawn(move || broker::up_mqtt_broker(broker_addr));
     broker::wait_for_port_availabilty(broker_addr).await;
 
-    use cobotlet::config::Config;
-    let devices: [Config; 3] = std::array::from_fn(|i| Config {
-        http: Http {
-            listen: SocketAddr::new(ip, 0),
+    let devices: [_; 3] = std::array::from_fn(|i| {
+        use cobotlet::config::{Config, Http, Net4mqtt};
+        Config {
+            http: Http {
+                listen: SocketAddr::new(ip, 0),
+                ..Default::default()
+            },
+            net4mqtt: Some(Net4mqtt {
+                alias: format!("test-cobotlet-{}", i),
+                mqtt_url: format!(
+                    "mqtt://{}/{}?client_id=test-cobotlet-{}",
+                    broker_addr, MQTT_TOPIC_PREFIX, i
+                ),
+            }),
             ..Default::default()
-        },
-        net4mqtt: Some(Net4mqtt {
-            alias: format!("test-cobotlet-{}", i),
-            mqtt_url: format!(
-                "mqtt://{}/{}?client_id=test-cobotlet-{}",
-                broker_addr, MQTT_TOPIC_PREFIX, i
-            ),
-        }),
-        ..Default::default()
+        }
     });
 
     let rs = devices.clone().map(async |cfg| {
@@ -59,7 +59,16 @@ async fn test_http_cluster() {
 
     let results = futures::future::join_all(rs).await;
 
-    let mut cfg = cobotsrv::config::Config::default();
+    let mut cfg = {
+        use cobotsrv::config::{Config, Http};
+        Config {
+            http: Http {
+                listen: SocketAddr::new(ip, 0),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    };
 
     cfg.nodes.extend(
         results
