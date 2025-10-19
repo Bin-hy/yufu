@@ -21,20 +21,15 @@ jobs:
           cargo fmt --version
           cargo clippy --version
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: pnpm
+        uses: actions/setup-node@v4 # 安装 node@20
         with:
-            node-version: 20
-            cache: 'pnpm'
+            node-version: "20"
+      - run: npm install -g pnpm
+      - run: pnpm install --frozen-lockfile
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
-        # build frontend
       - name: Build frontend
-        run: |
-            pnpm install
-            pnpm run build
+        run: pnpm run build
 
       - name: Cargo format
         run: cargo fmt --all -- --check
