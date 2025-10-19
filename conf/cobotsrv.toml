@@ -6,11 +6,13 @@
 # cors = false
 
 # Headers["Authorization"] = "Bearer {token}"
-# [auth]
+ [auth]
 # JSON WEB TOKEN secret
 # secret = "<jwt_secret>"
 # static JWT token, superadmin, debuggger can use this token
 # tokens = ["live777"]
+# expiration_seconds, default 2h.
+# exp_seconds = 7200
 
 # Admin Dashboard Accounts
 # [[auth.accounts]]
@@ -22,6 +24,13 @@
 # Default: info
 # Values: off, error, warn, info, debug, trace
 # level = "warn"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5432/cobotrix"
+# max connections (Default: 10, unit: second)
+max_connections = 10
+# timeout  (Default: 30 ,unit: second)
+connect_timeout = 30
 
 # [net4mqtt]
 # Global unique alias

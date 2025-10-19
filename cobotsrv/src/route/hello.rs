@@ -12,13 +12,22 @@ use crate::error::AppError;
 use crate::result::Result;
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "openapi")]
+use utoipa::openapi::OpenApi;
+
+#[cfg(feature = "openapi")]
+use utoipa_swagger_ui::SwaggerUi;
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Hello {
     #[serde(default)]
     pub alias: String,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 struct Code {
     #[serde(default)]
     code: u16,
@@ -30,6 +39,14 @@ pub fn route() -> Router<AppState> {
     Router::new()
         .route("/hello", get(hello))
         .route("/error", get(error).post(error).delete(error).patch(error))
+}
+
+#[cfg(feature = "openapi")]
+pub fn route_doc() -> utoipa_axum::router::OpenApiRouter<AppState> {
+    let routes = utoipa_axum::router::OpenApiRouter::new()
+        .route("/hello", get(hello))
+        .route("/error", get(error).post(error).delete(error).patch(error));
+    routes
 }
 
 async fn hello(State(state): State<AppState>) -> Result<Json<Hello>> {

@@ -6,8 +6,6 @@ use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{Level, error, info_span};
 
-use auth::{AuthState, access::access_middleware, validate_middleware};
-
 use crate::config::Config;
 use crate::route::{AppState, hello};
 
@@ -31,12 +29,11 @@ where
     };
     let app = Router::new()
         .merge(
-            hello::route()
-                .layer(middleware::from_fn(access_middleware))
-                .layer(middleware::from_fn_with_state(
-                    AuthState::new(cfg.auth.secret, cfg.auth.tokens),
-                    validate_middleware,
-                )),
+            hello::route(), // .layer(middleware::from_fn(access_middleware))
+                            // .layer(middleware::from_fn_with_state(
+                            //     AuthState::new(cfg.auth_old.secret, cfg.auth_old.tokens),
+                            //     validate_middleware,
+                            // )),
         )
         .with_state(app_state.clone())
         .layer(if cfg.http.cors {

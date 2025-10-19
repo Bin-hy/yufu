@@ -1,0 +1,23 @@
+[package]
+name = "auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+axum = { workspace = true }
+anyhow = { workspace = true, features = ["backtrace"] }
+tokio = { workspace = true, features = ["fs"] }
+http = {workspace = true}
+serde = { version = "1.0.226", features = ["derive"] }
+
+headers = "0.4"
+jsonwebtoken = "9.3"
+chrono = "0.4"
+log = "0.4.28"
+async-trait = "0.1.89"

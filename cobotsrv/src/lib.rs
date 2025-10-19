@@ -1,27 +1,36 @@
-use std::{future::Future, time::Duration};
-
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::{StatusCode, Uri};
 use reqwest::Client;
+use sea_orm::DatabaseConnection;
+use sea_orm_migration::MigratorTrait;
+use std::sync::Arc;
+use std::{future::Future, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, info_span};
 
-use auth::{AuthState, access::access_middleware, validate_middleware};
+use auth::{AuthState, access_middleware};
+#[cfg(feature = "openapi")]
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::config::Config;
+use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
-#[folder = "../cobotweb/"]
+#[folder = "../assets/cobotsrv"]
 struct Assets;
 
 pub mod config;
+mod entity;
 mod error;
+mod migration;
 mod result;
 mod route;
+mod service;
 mod store;
+mod swagger_docs;
 
 pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
 where
@@ -66,6 +75,14 @@ where
             .insert(v.alias, Node::new(v.token, NodeKind::Static, v.url));
     }
 
+    // Initialize database connection
+    let database_service = DatabaseService::new(&cfg.database)
+        .await
+        .expect("Failed to create database service");
+    migration::Migrator::up(&database_service.connection, None)
+        .await
+        .unwrap();
+    // migration::Migrator::down(&database_service.connection, Some(6)).await.unwrap();
     #[cfg(feature = "net4mqtt")]
     {
         if let Some(mut c) = cfg.net4mqtt.clone() {
@@ -136,22 +153,35 @@ where
         }
     }
 
+    // Middleware and AppState
+    let auth_state = AuthState {
+        token_manager: auth::token_manager::TokenManager::new(
+            &cfg.auth.secret,
+            cfg.auth.exp_seconds,
+        ),
+    };
+
     let app_state = AppState {
         config: cfg.clone(),
         client: client_req.build().unwrap(),
         storage: store,
+        database: Arc::new(database_service),
+        auth_state: Arc::new(auth_state.clone()),
     };
 
-    let app = Router::new()
-        .merge(
-            route::remote::route()
-                .merge(route::hello::route())
-                .layer(middleware::from_fn(access_middleware))
-                .layer(middleware::from_fn_with_state(
-                    AuthState::new(cfg.auth.secret, cfg.auth.tokens),
-                    validate_middleware,
-                )),
-        )
+    // routes need auth_old
+    let sub_auth_router = route::get_auth_routes().layer(middleware::from_fn_with_state(
+        auth_state,
+        access_middleware,
+    ));
+
+    // routes don't need auth_old,public routes
+    let sub_public_router = route::get_public_routes();
+
+    let api_prefix = "/api/v1";
+    let mut app = Router::new()
+        .nest(api_prefix, sub_auth_router)
+        .nest(api_prefix, sub_public_router)
         .layer(if cfg.http.cors {
             CorsLayer::permissive()
         } else {
@@ -176,6 +206,13 @@ where
             }),
         )
         .fallback(static_handler);
+    #[cfg(feature = "openapi")]
+    {
+        use crate::swagger_docs::doc::ApiDoc;
+        #[cfg(feature = "openapi")]
+        use utoipa::OpenApi;
+        app = app.merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", ApiDoc::openapi()));
+    }
 
     axum::serve(listener, app)
         .with_graceful_shutdown(signal)
@@ -208,4 +245,6 @@ struct AppState {
     config: Config,
     client: Client,
     storage: Storage,
+    database: Arc<DatabaseService>,
+    auth_state: Arc<AuthState>,
 }
