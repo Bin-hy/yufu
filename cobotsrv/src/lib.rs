@@ -222,16 +222,25 @@ where
 
 #[cfg(feature = "webui")]
 async fn static_handler(uri: Uri) -> impl IntoResponse {
-    let mut path = uri.path().trim_start_matches('/');
-    if path.is_empty() {
-        path = "index.html";
-    }
-    match Assets::get(path) {
+    let path = uri.path().trim_start_matches('/');
+
+    let file_path = if path.is_empty() { "index.html" } else { path };
+
+    match Assets::get(file_path) {
         Some(content) => {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
             ([(http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        None => {
+            // fallback to index.html
+            match Assets::get("index.html") {
+                Some(index) => {
+                    let mime = mime_guess::from_path("index.html").first_or_octet_stream();
+                    ([(http::header::CONTENT_TYPE, mime.as_ref())], index.data).into_response()
+                }
+                None => (StatusCode::NOT_FOUND, "not found").into_response(),
+            }
+        }
     }
 }
 
