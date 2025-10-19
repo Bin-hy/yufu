@@ -1,0 +1,14 @@
+{
+  "name": "cobotrix",
+  "private": true,
+  "version": "1.0.0",
+  "description": "cobotrix web config",
+  "scripts": {
+    "dev:cobotweb" : "pnpm --filter cobotweb dev",
+    "build:cobotweb": "pnpm --filter cobotweb build",
+    "build": "pnpm -r build"
+  },
+  "workspaces": [
+    "cobotweb"
+  ]
+}
