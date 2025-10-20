@@ -1,6 +1,6 @@
-use sea_orm_migration::{prelude::*, schema::*};
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use crate::entity::user::{self, ActiveModel as User};
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -22,8 +22,8 @@ impl MigrationTrait for Migration {
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
         }
-            .insert(conn)
-            .await?;
+        .insert(conn)
+        .await?;
 
         // 插入 User 角色
         let _ = User {
@@ -37,8 +37,8 @@ impl MigrationTrait for Migration {
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
         }
-            .insert(conn)
-            .await?;
+        .insert(conn)
+        .await?;
 
         Ok(())
     }

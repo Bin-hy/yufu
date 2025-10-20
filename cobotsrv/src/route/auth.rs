@@ -1,5 +1,4 @@
 use crate::AppState;
-use crate::result::ApiResponse;
 use crate::result::Result;
 use crate::service::user::UserService;
 
@@ -73,7 +72,7 @@ pub fn get_public_routes() -> Router<AppState> {
 pub async fn auth_register(
     State(state): State<AppState>,
     Json(payload): Json<RegistryData>,
-) -> Result<Json<ApiResponse<RegistryRespData>>> {
+) -> Result<Json<RegistryRespData>> {
     let username = payload.username;
     let password = payload.password;
     let nickname = payload.nickname;
@@ -91,7 +90,7 @@ pub async fn auth_register(
         username,
         nickname,
     };
-    Ok(Json(ApiResponse::success(resp)))
+    Ok(Json(resp))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -109,9 +108,9 @@ pub async fn auth_register(
     // tag = "Auth身份校验"
 ))]
 pub async fn login(
-    State(mut state): State<AppState>,
+    State(state): State<AppState>,
     Json(login_data): Json<LoginData>,
-) -> Result<Json<ApiResponse<LoginRespData>>> {
+) -> Result<Json<LoginRespData>> {
     let db = &state.database.connection;
 
     // 1. 校验请求数据
@@ -120,14 +119,14 @@ pub async fn login(
 
     // 2. 校验数据库账号密码
     let (token, user_vo) =
-        UserService::auth(&db, &state.auth_state.token_manager, username, password).await?;
+        UserService::auth(db, &state.auth_state.token_manager, username, password).await?;
 
     let resp = LoginRespData {
         token: token.to_string(),
         username: username.to_string(),
         nickname: user_vo.nickname.unwrap_or(username.to_string()), //
     };
-    Ok(Json(ApiResponse::success(resp)))
+    Ok(Json(resp))
 }
 
 #[cfg(feature = "openapi")]

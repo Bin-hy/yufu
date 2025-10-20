@@ -5,13 +5,12 @@ use crate::result::Result;
 use auth::claims::Claims;
 use axum::{
     Router,
-    extract::{Json, Query, State},
+    extract::{Json, State},
     routing::get,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::entity::user::Model as UserModel;
-use crate::result::ApiResponse;
 use crate::service::user::UserService;
 // request body
 
@@ -50,14 +49,10 @@ pub fn get_public_routes() -> Router<AppState> {
         (status = 200, description = "获取用户信息成功", body = UserVO),
     ),
 ))]
-pub async fn get_user_by_id(
-    claim: Claims,
-    State(state): State<AppState>,
-) -> Result<Json<ApiResponse<UserVO>>> {
+pub async fn get_user_by_id(claim: Claims, State(state): State<AppState>) -> Result<Json<UserVO>> {
     let db = &state.database.connection;
-    let db_user = UserService::get_user_by_id(&db, claim.id.to_string()).await?;
-    let user_vo: UserVO = UserVO::from(db_user);
-    Ok(Json(ApiResponse::success(user_vo)))
+    let user_vo = UserService::get_user_by_id(db, claim.id.to_string()).await?;
+    Ok(Json(user_vo))
 }
 
 #[cfg(feature = "openapi")]

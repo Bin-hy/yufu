@@ -9,18 +9,16 @@ pub mod user;
 
 pub fn get_auth_routes() -> Router<AppState> {
     // handle route merge
-
-    let routes = Router::new()
+    Router::new()
         .merge(user::get_auth_routes())
-        .merge(auth::get_auth_routes());
-
-    routes
+        .merge(auth::get_auth_routes())
+        .merge(role::get_auth_routes())
 }
 
 pub fn get_public_routes() -> Router<AppState> {
-    let routes = Router::new()
+    Router::new()
+        .merge(hello::route())
+        .merge(remote::route())
         .merge(user::get_public_routes())
-        .merge(auth::get_public_routes());
-
-    routes
+        .merge(auth::get_public_routes())
 }

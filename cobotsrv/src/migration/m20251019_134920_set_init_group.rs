@@ -1,6 +1,6 @@
+use crate::entity::group::{self, ActiveModel as Group};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-use sea_orm_migration::{prelude::*, schema::*};
-use crate::entity::group::{self ,ActiveModel as Group};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -28,8 +28,8 @@ impl MigrationTrait for Migration {
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
         }
-            .insert(conn)
-            .await?;
+        .insert(conn)
+        .await?;
 
         Ok(())
     }

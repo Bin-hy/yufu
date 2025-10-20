@@ -1,4 +1,4 @@
-use sea_orm_migration::{prelude::*, schema::*};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -17,7 +17,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Authority::Authority).string())
+                    .col(ColumnDef::new(Authority::Name).string())
                     .col(ColumnDef::new(Authority::CreateTime).date_time().not_null())
                     .col(ColumnDef::new(Authority::UpdateTime).date_time().not_null())
                     .to_owned(),
@@ -38,12 +38,8 @@ impl MigrationTrait for Migration {
 enum Authority {
     Table,
     Id,
-    Authority,
+    #[sea_orm(iden = "authority")]
+    Name,
     CreateTime,
     UpdateTime,
 }
-// #[sea_orm(primary_key, auto_increment = false)]
-// pub id: String,
-// pub authority: Option<String>,
-// pub create_time: DateTime,
-// pub update_time: DateTime,

@@ -1,7 +1,7 @@
 use crate::entity::role;
 use crate::entity::role::ActiveModel as Role;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-use sea_orm_migration::{prelude::*, schema::*};
+use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 

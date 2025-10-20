@@ -1,4 +1,4 @@
-use sea_orm_migration::{prelude::*, schema::*};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -53,8 +53,3 @@ enum AuthorityRole {
     CreateTime,
     UpdateTime,
 }
-// pub id: String,
-// pub role_id: Option<String>,
-// pub authority_id: Option<String>,
-// pub create_time: DateTime,
-// pub update_time: DateTime,

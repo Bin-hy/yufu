@@ -24,19 +24,4 @@ impl DatabaseService {
 
         Ok(Self { connection })
     }
-
-    // 使用现有的数据库连接创建DatabaseService
-    pub async fn new_with_connection(
-        _db_config: &config::Database,
-        connection: DatabaseConnection,
-    ) -> Result<Self> {
-        println!("Using existing database connection");
-        info!("Database connection established");
-
-        Ok(Self { connection })
-    }
-
-    pub fn get_connection(&self) -> &DatabaseConnection {
-        &self.connection
-    }
 }

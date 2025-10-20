@@ -21,12 +21,15 @@ jobs:
           cargo fmt --version
           cargo clippy --version
 
-      - name: pnpm
-        uses: actions/setup-node@v4 # 安装 node@20
+      - name: Setup Pnpm
+        uses: actions/setup-node@v6
         with:
-            node-version: "20"
-      - run: npm install -g pnpm
-      - run: pnpm install --frozen-lockfile
+            node-version: 24
+            cache: "pnpm"
+            cache-dependency-path: pnpm-lock.yaml
+            check-latest: true
+            registry-url: "https://registry.npmjs.org/"
+            package-manager: "pnpm"
 
       - name: Build frontend
         run: pnpm run build
@@ -39,4 +42,3 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Cargo Test
         run: cargo test --workspace --all-targets --all-features
-

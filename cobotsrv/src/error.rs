@@ -1,5 +1,4 @@
-use crate::result::{ApiResponse, BizCode};
-use axum::response::{IntoResponse, Json, Response};
+use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 
 #[derive(Debug)]
@@ -10,7 +9,6 @@ pub enum AppError {
     AlreadyExists(String),
     Throw(String),
     InternalServerError(anyhow::Error),
-
     Unauthorized(String),
 }
 
@@ -39,31 +37,23 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, biz_code, message) = match self {
+        match self {
             AppError::NoAvailableDevice => (
                 StatusCode::SERVICE_UNAVAILABLE,
-                BizCode::NoAvailableDevice,
-                BizCode::NoAvailableDevice.message().to_string(),
-            ),
-            AppError::RequestProxyError => (
-                StatusCode::BAD_REQUEST,
-                BizCode::RequestProxyError,
-                BizCode::RequestProxyError.message().to_string(),
-            ),
-            AppError::NotFound(err) => (StatusCode::NOT_FOUND, BizCode::NotFound, err),
-            AppError::AlreadyExists(err) => (StatusCode::CONFLICT, BizCode::AlreadyExists, err),
-            AppError::InternalServerError(err) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                BizCode::InternalServerError,
-                err.to_string(),
-            ),
-            AppError::Throw(err) => (StatusCode::BAD_REQUEST, BizCode::BizError, err),
-            AppError::Unauthorized(err) => (StatusCode::UNAUTHORIZED, BizCode::Unauthorized, err),
-        };
-
-        let message = message.as_str();
-        let body = ApiResponse::<()>::error_with_code(biz_code.code(), message);
-        (status, Json(body)).into_response()
+                "no available device".to_string(),
+            )
+                .into_response(),
+            AppError::RequestProxyError => {
+                (StatusCode::BAD_REQUEST, "request error".to_string()).into_response()
+            }
+            AppError::NotFound(err) => (StatusCode::NOT_FOUND, err).into_response(),
+            AppError::AlreadyExists(err) => (StatusCode::CONFLICT, err).into_response(),
+            AppError::InternalServerError(err) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
+            AppError::Throw(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+            AppError::Unauthorized(err) => (StatusCode::UNAUTHORIZED, err).into_response(),
+        }
     }
 }
 

@@ -1,7 +1,6 @@
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::{StatusCode, Uri};
 use reqwest::Client;
-use sea_orm::DatabaseConnection;
 use sea_orm_migration::MigratorTrait;
 use std::sync::Arc;
 use std::{future::Future, time::Duration};

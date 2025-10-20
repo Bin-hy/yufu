@@ -32,21 +32,21 @@ impl UserService {
                 let is_valid = password == password_db;
                 if is_valid {
                     // 2.1 校验成功，分发对应权限的token
-                    let token = token_manager.generate_token(&*exsiting_user.id)?;
-                    return Ok((token, exsiting_user.into()));
+                    let token = token_manager.generate_token(&exsiting_user.id)?;
+                    Ok((token, exsiting_user.into()))
                 } else {
                     // 2.2 失败，密码错误
-                    return Err(AppError::Unauthorized("password is error".into()));
-                };
+                    Err(AppError::Unauthorized("password is error".into()))
+                }
             } else {
                 // 2. 数据错误，没有设置密码
-                return Err(AppError::InternalServerError(anyhow!(
+                Err(AppError::InternalServerError(anyhow!(
                     "user database error"
-                )));
+                )))
             }
         } else {
             // 用户不存在
-            return Err(AppError::Unauthorized("username is not found".into()));
+            Err(AppError::Unauthorized("username is not found".into()))
         }
     }
 
@@ -58,10 +58,11 @@ impl UserService {
         nickname: &str,
     ) -> Result<String> {
         // 1. 检查用户是否存在
-        if let Some(_) = User::find()
+        if User::find()
             .filter(user::Column::Username.eq(username))
             .one(db)
             .await?
+            .is_some()
         {
             return Err(AppError::AlreadyExists("username already exists".into()));
         }
@@ -85,7 +86,7 @@ impl UserService {
         let inserted = new_user.insert(db).await?;
 
         // 4. 注册后直接生成 token
-        let token = token_manager.generate_token(&*inserted.id)?;
+        let token = token_manager.generate_token(&inserted.id)?;
 
         Ok(token)
     }

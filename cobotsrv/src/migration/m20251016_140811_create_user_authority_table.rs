@@ -1,4 +1,4 @@
-use sea_orm_migration::{prelude::*, schema::*};
+use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -55,11 +55,3 @@ enum UserAuthority {
     CreateTime,
     UpdateTime,
 }
-
-// #[sea_orm(primary_key, auto_increment = false)]
-// pub id: String,
-// pub user_id: String,
-// pub authority_id: String,
-// pub allow: bool,
-// pub create_time: DateTime,
-// pub update_time: DateTime
