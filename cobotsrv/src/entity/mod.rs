@@ -2,8 +2,6 @@
 
 pub mod authority;
 pub mod authority_role;
-pub mod group;
 pub mod role;
 pub mod spatial_ref_sys;
 pub mod user;
-pub mod user_authority_override;

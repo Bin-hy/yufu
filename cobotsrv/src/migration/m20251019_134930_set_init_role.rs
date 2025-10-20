@@ -14,16 +14,26 @@ impl MigrationTrait for Migration {
         // insert Admin
         let _ = Role {
             id: Set("1".into()),
-            name: Set(Some("Admin".to_string())),
+            name: Set(Some("SuperAdmin".to_string())),
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
         }
         .insert(conn)
         .await?;
 
-        // 插入 User 角色
+        // 插入 admin 角色
         let _ = Role {
             id: Set("2".into()),
+            name: Set(Some("Admin".to_string())),
+            create_time: Set(chrono::Utc::now().naive_utc()),
+            update_time: Set(chrono::Utc::now().naive_utc()),
+        }
+            .insert(conn)
+            .await?;
+
+        // 插入 User 角色
+        let _ = Role {
+            id: Set("3".into()),
             name: Set(Some("User".to_string())),
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),

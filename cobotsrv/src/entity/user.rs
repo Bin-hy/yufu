@@ -13,7 +13,6 @@ pub struct Model {
     pub create_time: DateTime,
     pub update_time: DateTime,
     pub nickname: Option<String>,
-    pub group_id: Option<String>,
     pub role_id: Option<String>,
     pub description: Option<String>,
 }

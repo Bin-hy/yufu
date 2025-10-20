@@ -77,7 +77,6 @@ impl UserService {
             create_time: Set(now),
             update_time: Set(now),
             nickname: Set(Some(nickname.to_owned())),
-            group_id: Set(None),
             role_id: Set(None),
             description: Set(None),
         };

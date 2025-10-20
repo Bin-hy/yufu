@@ -9,14 +9,12 @@ use crate::result::Result;
 #[derive(Serialize, Deserialize)]
 pub struct RoleUpdateReq {
     role: String,
-    group: String,
 }
 
 // resp
 #[derive(Serialize, Deserialize)]
 pub struct RoleUpdateResp {
     role: String,
-    group: String,
 }
 
 pub fn get_auth_routes() -> Router<AppState> {
@@ -25,7 +23,7 @@ pub fn get_auth_routes() -> Router<AppState> {
 
 pub async fn update_role(
     State(_state): State<AppState>,
-    Json(_payload): Json<RoleUpdateResp>,
+    Json(_payload): Json<RoleUpdateReq>,
 ) -> Result<Json<RoleUpdateResp>> {
     todo!()
 }
