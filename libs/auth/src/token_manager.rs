@@ -7,7 +7,7 @@ use jsonwebtoken::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Token管理器，用于统一生成与校验
+/// Token manager for centralized creation and validation of JWT tokens.
 #[derive(Clone)]
 pub struct TokenManager {
     secret: String,
@@ -22,8 +22,23 @@ pub enum TokenError {
     Other(String),
 }
 
+
 impl TokenManager {
-    /// create a new TokenManager
+
+    /// Creates a new [`TokenManager`].
+    ///
+    /// # Arguments
+    ///
+    /// * `secret` - Secret key used to sign the JWT token.
+    /// * `expire_seconds` - Token expiration time in seconds.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use auth::TokenManager;
+    ///
+    /// let manager = TokenManager::new("mysecret", 3600);
+    /// ```
     pub fn new(secret: impl Into<String>, expire_seconds: i64) -> Self {
         Self {
             secret: secret.into(),
@@ -31,7 +46,25 @@ impl TokenManager {
         }
     }
 
-    /// creat a JWT token
+    /// Creates a new JWT token for a given user ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The ID of the user for whom the token will be generated.
+    ///
+    /// # Returns
+    ///
+    /// Returns a signed JWT token string if successful.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use auth::TokenManager;
+    ///
+    /// let manager = TokenManager::new("mysecret", 3600);
+    /// let token = manager.generate_token("user123").unwrap();
+    /// println!("Generated token: {}", token);
+    /// ```
     pub fn generate_token(&self, user_id: &str) -> JwtResult<String> {
         let now = Utc::now();
         let exp = now + Duration::seconds(self.expire_seconds);
@@ -48,7 +81,37 @@ impl TokenManager {
         )
     }
 
-    /// Validate token, return Claims
+    /// Validates a JWT token and returns the decoded [`Claims`] if valid.
+    ///
+    /// # Arguments
+    ///
+    /// * `token` - The JWT token string to verify.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Claims`] on success, or a [`TokenError`] on failure.
+    ///
+    /// # Errors
+    ///
+    /// * [`TokenError::Expired`] - The token has expired.
+    /// * [`TokenError::InvalidSignature`] - The signature is invalid.
+    /// * [`TokenError::InvalidToken`] - The token format or content is invalid.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use auth::{TokenManager, TokenError};
+    ///
+    /// let manager = TokenManager::new("mysecret", 3600);
+    /// let token = manager.generate_token("user1").unwrap();
+    ///
+    /// match manager.verify_token(&token) {
+    ///     Ok(claims) => println!("Token valid, id: {}", claims.id),
+    ///     Err(TokenError::Expired) => println!("Token expired, please log in again."),
+    ///     Err(TokenError::InvalidSignature) => println!("Invalid token signature."),
+    ///     Err(e) => println!("Token validation error: {:?}", e),
+    /// }
+    /// ```
     pub fn verify_token(&self, token: &str) -> Result<Claims, TokenError> {
         let validation = Validation::default();
 
