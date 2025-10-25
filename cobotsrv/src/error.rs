@@ -10,6 +10,8 @@ pub enum AppError {
     Throw(String),
     InternalServerError(anyhow::Error),
     Unauthorized(String),
+    BadRequest(String),
+    Forbidden(String),
 }
 
 impl AppError {
@@ -53,6 +55,8 @@ impl IntoResponse for AppError {
             }
             AppError::Throw(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
             AppError::Unauthorized(err) => (StatusCode::UNAUTHORIZED, err).into_response(),
+            AppError::BadRequest(err) => (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
+            AppError::Forbidden(err) => (StatusCode::FORBIDDEN, err.to_string()).into_response(),
         }
     }
 }

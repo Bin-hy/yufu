@@ -67,7 +67,6 @@ pub fn get_public_routes() -> Router<AppState> {
         (status = 200, description = "用户注册成功并返回 token", body = RegistryRespData),
         (status = 409, description = "请求数据无效或用户名已存在")
     ),
-    // tag = "Auth身份校验"
 ))]
 pub async fn auth_register(
     State(state): State<AppState>,
@@ -76,6 +75,7 @@ pub async fn auth_register(
     let username = payload.username;
     let password = payload.password;
     let nickname = payload.nickname;
+
     // check username and password
     let token = UserService::register(
         &state.database.connection,
@@ -105,7 +105,6 @@ pub async fn auth_register(
         (status = 200, description = "登录成功并返回 token", body = LoginRespData),
         (status = 401, description = "用户名或密码错误"),
     ),
-    // tag = "Auth身份校验"
 ))]
 pub async fn login(
     State(state): State<AppState>,

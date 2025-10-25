@@ -1,6 +1,9 @@
+use axum::body::Body;
+use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::{StatusCode, Uri};
 use reqwest::Client;
+use sea_orm::EntityTrait;
 use sea_orm_migration::MigratorTrait;
 use std::sync::Arc;
 use std::{future::Future, time::Duration};
@@ -8,13 +11,14 @@ use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, info_span};
 
-use auth::{AuthState, access_middleware};
-#[cfg(feature = "openapi")]
-use utoipa_swagger_ui::SwaggerUi;
-
 use crate::config::Config;
+use crate::entity::user;
+use crate::rbac::authority_check_middleware;
+use crate::route::get_no_prefix_routes;
 use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
+use auth::claims::Claims;
+use auth::{AuthState, access_middleware_with_callback};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
@@ -25,8 +29,11 @@ pub mod config;
 mod entity;
 mod error;
 mod migration;
+mod rbac;
+mod recording_middleware;
 mod result;
 mod route;
+mod seed;
 mod service;
 mod store;
 mod swagger_docs;
@@ -81,7 +88,6 @@ where
     migration::Migrator::up(&database_service.connection, None)
         .await
         .unwrap();
-    // migration::Migrator::down(&database_service.connection, Some(6)).await.unwrap();
     #[cfg(feature = "net4mqtt")]
     {
         if let Some(mut c) = cfg.net4mqtt.clone() {
@@ -168,19 +174,51 @@ where
         auth_state: Arc::new(auth_state.clone()),
     };
 
-    // routes need auth_old
-    let sub_auth_router = route::get_auth_routes().layer(middleware::from_fn_with_state(
-        auth_state,
-        access_middleware,
-    ));
+    let app_state_for_middleware = app_state.clone();
+    // routes need auth
+    let sub_auth_router = route::get_auth_routes()
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            recording_middleware::recording_operation_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            authority_check_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            auth_state.clone(),
+            move |State(auth_state): State<AuthState>, req, next| {
+                let auth_state = auth_state.clone();
+                let app_state = app_state_for_middleware.clone(); // Arc clone
 
-    // routes don't need auth_old,public routes
+                async move {
+                    access_middleware_with_callback(
+                        State(auth_state),
+                        req,
+                        next,
+                        move |claims, req| {
+                            let claims = claims.clone();
+                            let app_state = app_state.clone();
+                            async move {
+                                // 调用 access_callback 获取 Request 所有权
+                                let req = access_callback(claims, req, app_state).await?;
+                                Ok::<Request<Body>, (StatusCode, String)>(req)
+                            }
+                        },
+                    )
+                    .await
+                }
+            },
+        )); // 靠下的拦截器先执行
+
+    // routes don't need auth,public routes
     let sub_public_router = route::get_public_routes();
 
-    let api_prefix = "/api/v1";
+    let api_prefix = &cfg.http.api_prefix;
     let mut app = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
+        .merge(get_no_prefix_routes())
         .layer(if cfg.http.cors {
             CorsLayer::permissive()
         } else {
@@ -208,8 +246,8 @@ where
     #[cfg(feature = "openapi")]
     {
         use crate::swagger_docs::doc::ApiDoc;
-        #[cfg(feature = "openapi")]
         use utoipa::OpenApi;
+        use utoipa_swagger_ui::SwaggerUi;
         app = app.merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", ApiDoc::openapi()));
     }
 
@@ -248,6 +286,23 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
+/// 鉴权成功后回调：将用户信息注入
+async fn access_callback(
+    claim: Claims,
+    mut req: Request<Body>, // 拥有 Request 所有权
+    app_state: AppState,
+) -> Result<Request<Body>, (StatusCode, String)> {
+    let db = &app_state.database.connection;
+
+    let user = user::Entity::find_by_id(&claim.id)
+        .one(db)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "No user id".to_string()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
+    req.extensions_mut().insert(user);
+
+    Ok(req)
+}
 #[derive(Clone)]
 struct AppState {
     config: Config,

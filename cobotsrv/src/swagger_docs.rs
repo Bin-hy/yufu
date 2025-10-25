@@ -1,6 +1,9 @@
 #[cfg(feature = "openapi")]
 pub mod doc {
     use crate::route::auth::AuthApi;
+    use crate::route::authority::AuthorityApi;
+    use crate::route::recording::RecordingApi;
+    use crate::route::role::RoleApi;
     use crate::route::user::UserApi;
     use utoipa::OpenApi;
 
@@ -17,6 +20,9 @@ pub mod doc {
         nest(
             (path ="/api/v1",api = AuthApi, tags= ["Auth身份校验"]),
             (path ="/api/v1",api = UserApi, tags= ["User 用户"]),
+            (path ="/api/v1",api = RoleApi, tags= ["角色信息相关CRUD"]),
+            (path ="/api/v1",api = AuthorityApi, tags= ["所有请求的权限信息CRUD"]),
+            (path ="/api/v1",api = RecordingApi, tags= ["用户操作记录查询"]),
         ),
     )]
     pub struct ApiDoc;

@@ -2,6 +2,7 @@
 
 use sea_orm::entity::prelude::*;
 
+#[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "authority_role")]
 pub struct Model {
@@ -11,9 +12,11 @@ pub struct Model {
     pub authority_id: Option<String>,
     pub create_time: DateTime,
     pub update_time: DateTime,
-}
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+    #[sea_orm(belongs_to, from = "role_id", to = "id")]
+    pub role: Option<super::role::Entity>,
+    #[sea_orm(belongs_to, from = "authority_id", to = "id")]
+    pub authority: Option<super::authority::Entity>,
+}
 
 impl ActiveModelBehavior for ActiveModel {}

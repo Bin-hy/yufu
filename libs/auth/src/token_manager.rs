@@ -22,9 +22,7 @@ pub enum TokenError {
     Other(String),
 }
 
-
 impl TokenManager {
-
     /// Creates a new [`TokenManager`].
     ///
     /// # Arguments

@@ -82,6 +82,8 @@ pub struct Http {
     pub cors: bool,
     #[serde(default)]
     pub public: String,
+    #[serde(default = "default_api_prefix")]
+    pub api_prefix: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -151,12 +153,17 @@ fn default_http_listen() -> SocketAddr {
     .expect("invalid listen address")
 }
 
+fn default_api_prefix() -> String {
+    "/api/v1".to_string()
+}
+
 impl Default for Http {
     fn default() -> Self {
         Self {
             listen: default_http_listen(),
             public: Default::default(),
             cors: Default::default(),
+            api_prefix: default_api_prefix(),
         }
     }
 }

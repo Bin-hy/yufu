@@ -1,7 +1,7 @@
-use crate::entity::user::{self, Entity as User};
+use crate::entity::role::{self, Entity as Role, RoleEnum, RoleVO};
+use crate::entity::user::{self, Entity as User, UserVO};
 use crate::error::AppError;
 use crate::result::Result;
-use crate::route::user::UserVO;
 use anyhow::anyhow;
 use auth::token_manager::TokenManager;
 use chrono::Utc;
@@ -72,12 +72,12 @@ impl UserService {
         let now = Utc::now().naive_utc();
         let new_user = user::ActiveModel {
             id: Set(new_id.clone()),
-            username: Set(Some(username.to_owned())),
+            username: Set(username.to_owned()),
             password: Set(Some(password.to_owned())), // ⚠️ 可以换成加密密码
             create_time: Set(now),
             update_time: Set(now),
             nickname: Set(Some(nickname.to_owned())),
-            role_id: Set(None),
+            role_id: Set(RoleEnum::User.default_id().to_string()),
             description: Set(None),
         };
 
@@ -91,18 +91,44 @@ impl UserService {
     }
 
     pub async fn get_user_by_id(db: &DatabaseConnection, user_id: String) -> Result<UserVO> {
-        if let Some(db_user) = User::find()
+        if let Some((user_db, role_db_opt)) = user::Entity::find()
+            .find_also_related(role::Entity)
             .filter(user::Column::Id.eq(user_id))
             .one(db)
             .await?
         {
-            Ok(UserVO {
-                username: db_user.username.unwrap(),
-                nickname: db_user.nickname,
-                role: "admin".to_string(), // todo
-            })
+            let mut user_vo = UserVO::from(user_db);
+            if let Some(role) = role_db_opt {
+                user_vo.set_role(RoleVO::from(role));
+            }
+            Ok(user_vo)
         } else {
             Err(AppError::InternalServerError(anyhow!("获取用户失败")))
         }
+    }
+
+    /// 获取用户角色
+    pub async fn _get_user_role(db: &DatabaseConnection, user_id: String) -> Result<RoleVO> {
+        // 查询用户
+        let user = match User::find_by_id(user_id).one(db).await? {
+            Some(u) => u,
+            None => return Err(AppError::NotFound("user not found".into())),
+        };
+
+        // 获取 role_id
+        let role_id = user.role_id;
+
+        // 查询角色
+        let role_db = match Role::find()
+            .filter(role::Column::Id.eq(role_id))
+            .one(db)
+            .await?
+        {
+            Some(r) => r,
+            None => return Err(AppError::InternalServerError(anyhow!("role is not found"))),
+        };
+
+        // 转换为 VO
+        Ok(role_db.into())
     }
 }

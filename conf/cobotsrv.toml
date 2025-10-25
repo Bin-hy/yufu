@@ -4,6 +4,7 @@
 # Cross-Origin Resource Sharing (CORS)
 # reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
 # cors = false
+# api_prefix = "/api/v1"
 
 # Headers["Authorization"] = "Bearer {token}"
  [auth]
@@ -13,7 +14,9 @@
 # tokens = ["live777"]
 # expiration_seconds, default 2h.
 # exp_seconds = 7200
-
+# [auth.superadmin]
+# username = "superadmin"
+# password = "superadmin"
 # Admin Dashboard Accounts
 # [[auth.accounts]]
 # username = "live777"
