@@ -131,9 +131,8 @@ impl Default for Database {
 }
 
 fn default_db_url() -> String {
-    env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://postgres_user:postgres_password@localhost:6379/database_name".to_string()
-    })
+    env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/test".to_string())
 }
 
 fn default_db_max_connections() -> u32 {
