@@ -75,24 +75,7 @@ impl UserVO {
     }
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize, Deserialize)]
-pub struct UserEntity {
-    pub id: String,
-    pub nickname: Option<String>,
-    pub role_id: String,
-}
 impl ActiveModelBehavior for ActiveModel {}
-
-impl From<Model> for UserEntity {
-    fn from(value: Model) -> Self {
-        UserEntity {
-            id: value.id,
-            nickname: value.nickname,
-            role_id: value.role_id,
-        }
-    }
-}
 
 // req
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

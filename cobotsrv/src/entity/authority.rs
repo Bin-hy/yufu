@@ -64,11 +64,5 @@ pub struct AuthorityDeleteReq {
 }
 
 // resp
-#[derive(Serialize, Deserialize, Clone)]
-pub struct PageSelectRecordingResp {
-    pub page_size: u64,
-    pub page_number: u64,
-    pub total_pages: u64,
-    pub authority_vo_list: Vec<AuthorityVO>,
-}
+
 impl ActiveModelBehavior for ActiveModel {}

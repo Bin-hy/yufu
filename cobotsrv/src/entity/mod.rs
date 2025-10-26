@@ -6,7 +6,6 @@ pub mod authority;
 pub mod authority_role;
 pub mod recording;
 pub mod role;
-pub mod spatial_ref_sys;
 pub mod user;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
