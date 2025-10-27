@@ -1,14 +1,16 @@
-use crate::AppState;
+use crate::entity::authority::AuthorityVO;
+use crate::entity::authority_role::{AuthRoleAddReq, AuthRoleDeleteReq, AuthorityRoleVO};
 use crate::entity::role::RoleEnum::Superadmin;
 use crate::entity::role::{RoleAddReq, RoleDeleteReq, RolePatchReq, RoleVO};
-use crate::entity::{PageSelectQuery, PageSelectQueryResult, role};
+use crate::entity::{authority, authority_role, role, PageSelectQuery, PageSelectQueryResult};
 use crate::error::AppError;
 use crate::result::Result;
-use axum::extract::{Query, State};
+use crate::AppState;
+use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, EntityTrait, PaginatorTrait, Set, SqlErr};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Set, SqlErr};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -22,7 +24,15 @@ pub fn get_auth_routes() -> Router<AppState> {
                 .delete(delete_role)
                 .patch(patch_role),
         )
+        .route(
+            "/role_authority",
+            post(add_role_authority).delete(delete_role_authority),
+        )
         .route("/role/modifiable", get(get_modifiable_page_role))
+        .route(
+            "/role_authority/{role_id}",
+            get(get_role_authority_by_role_id),
+        )
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -205,7 +215,156 @@ pub async fn delete_role(
     }
 }
 
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/role_authority",
+    description = "给角色添加权限",
+    request_body(
+        content = AuthRoleAddReq,
+        description = "添加角色信息",
+        content_type = "application/json"
+    ),
+    responses(
+        (status = 200, description = "添加成功", body = AuthorityRoleVO),
+        (status = 409, description = "权限已存在")
+    ),
+))]
+pub async fn add_role_authority(
+    State(state): State<AppState>,
+    Json(payload): Json<AuthRoleAddReq>,
+) -> Result<Json<AuthorityRoleVO>> {
+    let db = &state.database.connection;
+    // 检查 role_id, authority_id 合法性
+    let authority_vo =
+        crate::service::authority::Service::get_authority_vo(db, payload.clone().authority_id)
+            .await?;
+    let role_vo = crate::service::role::Service::get_role_vo(db, payload.clone().role_id).await?;
+
+    let new_auth_role = authority_role::ActiveModel {
+        role_id: Set(payload.role_id.to_owned()),
+        authority_id: Set(payload.authority_id.to_owned()),
+        create_time: Set(Utc::now().naive_utc()),
+        update_time: Set(Utc::now().naive_utc()),
+    };
+
+    match new_auth_role.insert(db).await {
+        Ok(model) => {
+            let mut auth_role_vo = AuthorityRoleVO::from(model);
+            auth_role_vo = auth_role_vo.set_role_authority(role_vo, authority_vo);
+            Ok(Json(auth_role_vo))
+        }
+        Err(e) => {
+            if let Some(sql_err) = e.sql_err() {
+                match sql_err {
+                    SqlErr::UniqueConstraintViolation(_) => {
+                        return Err(AppError::AlreadyExists("权限已存在！".to_string()));
+                    }
+                    SqlErr::ForeignKeyConstraintViolation(_) => {
+                        return Err(AppError::BadRequest("外键约束失败".to_string()));
+                    }
+                    // 可根据需要添加更多 SqlErr 分支
+                    _ => {}
+                }
+            }
+            // 其他未知错误，统一返回或转换为你的通用错误类型
+            Err(AppError::from(e))
+        }
+    }
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(
+    delete,
+    path = "/role_authority",
+    description = "给角色删除权限",
+    request_body(
+        content = AuthRoleDeleteReq,
+        description = "添加角色信息",
+        content_type = "application/json"
+    ),
+    responses(
+        (status = 200, description = "删除成功", body = String ,example="删除成功"),
+        (status = 404, description = "删除失败", body = String ,example="未找到角色 {} 对应的权限 {}"),
+    ),
+))]
+pub async fn delete_role_authority(
+    State(state): State<AppState>,
+    Json(payload): Json<AuthRoleDeleteReq>,
+) -> Result<Json<String>> {
+    let db = &state.database.connection;
+
+    // 删除 role_id + authority_id 对应的记录
+    let delete_result: DeleteResult = authority_role::Entity::delete_many()
+        .filter(authority_role::Column::RoleId.eq(payload.role_id.clone()))
+        .filter(authority_role::Column::AuthorityId.eq(payload.authority_id.clone()))
+        .exec(db)
+        .await
+        .map_err(AppError::from)?;
+
+    if delete_result.rows_affected == 0 {
+        return Err(AppError::NotFound(format!(
+            "未找到角色 {} 对应的权限 {}",
+            payload.role_id, payload.authority_id
+        )));
+    }
+
+    Ok(Json("删除成功".to_string()))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    path = "/role_authority/{role_id}",
+    params(PageSelectQuery),
+    description ="分页获取某个角色的所有权限信息",
+    responses(
+        (status = 200, description = "成功", body = PageSelectQueryResult<AuthorityVO>),
+    ),
+))]
+pub async fn get_role_authority_by_role_id(
+    State(state): State<AppState>,
+    Path(role_id): Path<String>,
+    Query(page): Query<PageSelectQuery>,
+) -> Result<Json<PageSelectQueryResult<AuthorityVO>>> {
+    let db = &state.database.connection;
+    let page_size = page.page_size;
+    let page_number = page.page_number;
+
+    // 使用 join 查询 role_id 对应的 authority
+    let paginator = authority::Entity::find()
+        .join(
+            JoinType::InnerJoin,
+            authority_role::Relation::Authority.def()
+        )
+        .filter(authority_role::Column::RoleId.eq(role_id.clone()))
+        .paginate(db, page_size);
+
+    let total_pages = paginator.num_pages().await?;
+
+    // 获取分页数据
+    let page_records: Vec<authority::Model> =
+        paginator.fetch_page(page_number - 1).await?;
+
+    // 将 authority::Model 转成 AuthorityVO
+    let data_list = page_records
+        .into_iter()
+        .map(AuthorityVO::from)
+        .collect::<Vec<_>>();
+
+    Ok(Json(PageSelectQueryResult::<AuthorityVO> {
+        page_size,
+        page_number,
+        total_pages,
+        data_list,
+    }))
+}
+
 #[cfg(feature = "openapi")]
 #[derive(OpenApi)]
-#[openapi(paths(delete_role, patch_role, add_role, get_page_role))]
+#[openapi(paths(
+    delete_role,
+    patch_role,
+    add_role,
+    get_page_role,
+    delete_role_authority,
+    get_role_authority_by_role_id
+))]
 pub struct RoleApi;

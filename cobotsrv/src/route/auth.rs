@@ -14,16 +14,16 @@ use utoipa::OpenApi;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LoginData {
-    username: String,
-    password: String,
+    pub username: String,
+    pub password: String,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegistryData {
-    username: String,
-    nickname: String,
-    password: String,
+    pub username: String,
+    pub nickname: String,
+    pub password: String,
 }
 
 // response body

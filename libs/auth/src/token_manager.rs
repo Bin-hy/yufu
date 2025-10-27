@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 /// Token manager for centralized creation and validation of JWT tokens.
 #[derive(Clone)]
 pub struct TokenManager {
-    secret: String,
-    expire_seconds: i64,
+    pub secret: String,
+    pub expire_seconds: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,14 +9,14 @@ pub mod role;
 pub mod user;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct PageSelectQuery {
     pub page_size: u64,
     pub page_number: u64,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Deserialize)]
 pub struct PageSelectQueryResult<T>
 where
     T: Serialize + Clone,
@@ -25,4 +25,13 @@ where
     pub page_number: u64,
     pub total_pages: u64,
     pub data_list: Vec<T>,
+}
+
+impl Default for PageSelectQuery {
+    fn default() -> Self {
+        Self {
+            page_size: 10,
+            page_number: 1,
+        }
+    }
 }

@@ -26,13 +26,13 @@ use auth::{AuthState, access_middleware_with_callback};
 struct Assets;
 
 pub mod config;
-mod entity;
-mod error;
+pub mod entity;
+pub mod error;
 mod migration;
 mod rbac;
 mod recording_middleware;
 mod result;
-mod route;
+pub mod route;
 mod seed;
 mod service;
 mod store;
@@ -304,7 +304,7 @@ async fn access_callback(
     Ok(req)
 }
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
     config: Config,
     client: Client,
     storage: Storage,

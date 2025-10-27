@@ -12,14 +12,12 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(AuthorityRole::Table)
                     .if_not_exists()
+                    .col(ColumnDef::new(AuthorityRole::RoleId).string().not_null())
                     .col(
-                        ColumnDef::new(AuthorityRole::Id)
+                        ColumnDef::new(AuthorityRole::AuthorityId)
                             .string()
-                            .not_null()
-                            .primary_key(),
+                            .not_null(),
                     )
-                    .col(ColumnDef::new(AuthorityRole::RoleId).string())
-                    .col(ColumnDef::new(AuthorityRole::AuthorityId).string())
                     .col(
                         ColumnDef::new(AuthorityRole::CreateTime)
                             .date_time()
@@ -29,6 +27,11 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(AuthorityRole::UpdateTime)
                             .date_time()
                             .not_null(),
+                    )
+                    .primary_key(
+                        Index::create()
+                            .col(AuthorityRole::AuthorityId)
+                            .col(AuthorityRole::RoleId),
                     )
                     .to_owned(),
             )
@@ -47,7 +50,6 @@ impl MigrationTrait for Migration {
 #[derive(DeriveIden)]
 enum AuthorityRole {
     Table,
-    Id,
     RoleId,
     AuthorityId,
     CreateTime,

@@ -5,8 +5,8 @@ use crate::result::Result;
 use crate::entity::user::{UserPatchReq, UserRolePatchReq, UserVO};
 use crate::service::user::UserService;
 use auth::claims::Claims;
-use axum::extract::Query;
-use axum::routing::patch;
+use axum::extract::{Path, Query};
+use axum::routing::{delete, patch};
 use axum::{
     Router,
     extract::{Json, State},
@@ -21,6 +21,7 @@ pub fn get_auth_routes() -> Router<AppState> {
         .route("/user", get(get_user_by_id))
         .route("/user", patch(patch_user_basic_data))
         .route("/user/role", patch(patch_user_role))
+        .route("/user/{user_id}", delete(delete_user_by_id))
 }
 
 pub fn get_public_routes() -> Router<AppState> {
@@ -160,6 +161,28 @@ pub async fn patch_user_basic_data(
     let updated_user = user_dbam.update(db).await?;
 
     Ok(Json(updated_user.into()))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(
+    delete,
+    path = "/user/{user_id}",
+    description = "删除某个用户",
+    responses(
+        (status = 200, description = "删除成功", body = String, example = json!("删除成功")),
+        (status = 404, description = "删除失败", body = String, example = json!("用户不存在或删除失败")),
+    ),
+))]
+pub async fn delete_user_by_id(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<String> {
+    let db = &state.database.connection;
+    let delete_result = user::Entity::delete_by_id(user_id.clone()).exec(db).await?;
+    if delete_result.rows_affected == 1 {
+        Ok("删除成功".to_string())
+    } else {
+        Err(AppError::NotFound("用户不存在或删除失败".to_string()))
+    }
 }
 
 use crate::entity::role::{RoleEnum, RoleVO};
