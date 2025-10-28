@@ -5,6 +5,9 @@ import { useUserStore } from '@/pinia/stores/user'
 import { setRememberUser, removeRememberUser, getRememberUser } from '@/common/cache/localstorage'
 import { loginApi } from './api'
 import { showModal } from '@/utils/modal'
+import UiInput from '@/components/ui/input/input.vue'
+import UiCheckbox from '@/components/ui/checkbox/checkbox.vue'
+import UiButton from '@/components/ui/button/button.vue'
 // 表单数据
 const form = reactive({
   username: '',
@@ -101,8 +104,8 @@ if (rememberedUser) {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-base-200 p-4">
-    <div class="w-full max-w-md bg-white rounded-lg shadow-xl overflow-hidden">
+  <div class="min-h-screen flex items-center justify-center bg-muted p-4">
+    <div class="w-full max-w-md bg-card text-card-foreground rounded-lg shadow-xl overflow-hidden">
       <!-- 登录表单头部 - 使用daisyui的卡片 -->
       <div class="bg-gradient-to-r from-primary to-secondary p-8 text-white">
         <div class="text-center mb-2">
@@ -121,7 +124,7 @@ if (rememberedUser) {
         <form @submit.prevent="handleLogin">
           <!-- 用户名输入框 - 使用daisyui的输入框 -->
           <div class="mb-6">
-            <label for="username" class="label block mb-2 text-base font-medium text-gray-700">
+            <label for="username" class="block mb-2 text-sm font-medium text-foreground">
               用户名
             </label>
             <div class="relative">
@@ -130,22 +133,21 @@ if (rememberedUser) {
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
                 </svg>
               </div>
-              <input
+              <UiInput
                 id="username"
                 v-model="form.username"
                 type="text"
-                class="input input-lg w-full pl-10 pr-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary transition duration-200 ease-in-out"
-                :class="{ 'border-error': errors.username, 'border-gray-300': !errors.username }"
+                :class="errors.username ? 'pl-10 border-destructive' : 'pl-10'"
                 placeholder="请输入用户名"
                 @blur="validateForm"
               />
             </div>
-            <p v-if="errors.username" class="text-error text-sm mt-1">{{ errors.username }}</p>
+            <p v-if="errors.username" class="text-destructive text-sm mt-1">{{ errors.username }}</p>
           </div>
 
           <!-- 密码输入框 - 使用daisyui的输入框 -->
           <div class="mb-6">
-            <label for="password" class="label block mb-2 text-base font-medium text-gray-700">
+            <label for="password" class="block mb-2 text-sm font-medium text-foreground">
               密码
             </label>
             <div class="relative">
@@ -154,29 +156,26 @@ if (rememberedUser) {
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                 </svg>
               </div>
-              <input
+              <UiInput
                 id="password"
                 v-model="form.password"
                 type="password"
-                class="input input-lg w-full pl-10 pr-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary transition duration-200 ease-in-out"
-                :class="{ 'border-error': errors.password, 'border-gray-300': !errors.password }"
+                :class="errors.password ? 'pl-10 border-destructive' : 'pl-10'"
                 placeholder="请输入密码"
                 @blur="validateForm"
               />
             </div>
-            <p v-if="errors.password" class="text-error text-sm mt-1">{{ errors.password }}</p>
+            <p v-if="errors.password" class="text-destructive text-sm mt-1">{{ errors.password }}</p>
           </div>
 
           <!-- 记住我和忘记密码 - 使用daisyui的复选框 -->
           <div class="flex items-center justify-between mb-6">
             <div class="flex items-center space-x-2">
-              <input
+              <UiCheckbox
                 id="remember"
                 v-model="form.remember"
-                type="checkbox"
-                class="checkbox h-5 w-5 rounded border-primary/30 focus:ring-primary focus:ring-offset-0"
               />
-              <label for="remember" class="text-sm text-gray-700 cursor-pointer hover:text-primary transition-colors">
+              <label for="remember" class="text-sm text-foreground cursor-pointer hover:text-primary transition-colors">
                 记住我
               </label>
             </div>
@@ -186,24 +185,24 @@ if (rememberedUser) {
           </div>
 
           <!-- 登录按钮 - 使用daisyui的按钮 -->
-          <button
+          <UiButton
             type="submit"
-            class="btn btn-lg btn-primary w-full py-3 font-medium rounded-lg bg-primary text-white hover:bg-primary/90 focus:ring-4 focus:ring-primary/30 transition-all duration-200 active:scale-95"
-            :class="{ 'opacity-70 cursor-not-allowed': loading }"
+            size="lg"
+            class="w-full"
             :disabled="loading"
           >
             <span v-if="loading" class="mr-2 h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
             登录
-          </button>
+          </UiButton>
         </form>
 
         <!-- 注册账号提示 -->
         <div class="mt-8 text-center">
           <p class="text-sm text-gray-600">
             还没有账号？
-            <a href="#" class="font-medium text-primary hover:text-primary/80 transition-colors">
+            <router-link to="/register" class="font-medium text-primary hover:text-primary/80 transition-colors">
               立即注册
-            </a>
+            </router-link>
           </p>
         </div>
       </div>

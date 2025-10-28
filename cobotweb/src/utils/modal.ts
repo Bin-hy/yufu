@@ -1,5 +1,5 @@
 import { createVNode, render } from 'vue'
-import DaisyModal from '@/components/DaisyModal.vue'
+import UiDialog from '@/components/ui/dialog/dialog.vue'
 
 interface ModalOptions {
   title: string
@@ -19,8 +19,10 @@ export function showModal(options: ModalOptions): Promise<boolean> {
     const container = document.createElement('div')
     document.body.appendChild(container)
     handle_default_value(options)
-    const vnode = createVNode(DaisyModal, {
+    const vnode = createVNode(UiDialog as any, {
       ...options,
+      title: options.title,
+      open: true,
       onConfirm: () => {
         options.confirmCallback? options.confirmCallback():""
         resolve(true)
@@ -31,7 +33,7 @@ export function showModal(options: ModalOptions): Promise<boolean> {
         resolve(false)
         cleanup()
       },
-      onClose: cleanup,
+      'onUpdate:open': (v: boolean) => { if (!v) cleanup() },
     })
 
     function cleanup() {
@@ -41,8 +43,7 @@ export function showModal(options: ModalOptions): Promise<boolean> {
 
     render(vnode, container)
     // 弹出 modal
-    const instance = vnode.component?.exposed
-    instance?.open?.()
+    // UiDialog 通过 open: true 初始化显示
   })
 }
 function handle_default_value(options: ModalOptions){
