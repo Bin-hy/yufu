@@ -1,16 +1,19 @@
+use crate::AppState;
 use crate::entity::authority::AuthorityVO;
 use crate::entity::authority_role::{AuthRoleAddReq, AuthRoleDeleteReq, AuthorityRoleVO};
 use crate::entity::role::RoleEnum::Superadmin;
 use crate::entity::role::{RoleAddReq, RoleDeleteReq, RolePatchReq, RoleVO};
-use crate::entity::{authority, authority_role, role, PageSelectQuery, PageSelectQueryResult};
+use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority, authority_role, role};
 use crate::error::AppError;
 use crate::result::Result;
-use crate::AppState;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Set, SqlErr};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, JoinType, PaginatorTrait,
+    QueryFilter, QuerySelect, RelationTrait, Set, SqlErr,
+};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -332,7 +335,7 @@ pub async fn get_role_authority_by_role_id(
     let paginator = authority::Entity::find()
         .join(
             JoinType::InnerJoin,
-            authority_role::Relation::Authority.def()
+            authority_role::Relation::Authority.def(),
         )
         .filter(authority_role::Column::RoleId.eq(role_id.clone()))
         .paginate(db, page_size);
@@ -340,8 +343,7 @@ pub async fn get_role_authority_by_role_id(
     let total_pages = paginator.num_pages().await?;
 
     // 获取分页数据
-    let page_records: Vec<authority::Model> =
-        paginator.fetch_page(page_number - 1).await?;
+    let page_records: Vec<authority::Model> = paginator.fetch_page(page_number - 1).await?;
 
     // 将 authority::Model 转成 AuthorityVO
     let data_list = page_records

@@ -3,8 +3,8 @@ use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
 mod common;
-use cobotsrv::entity::role::{RoleAddReq, RolePatchReq, RoleVO};
 use cobotsrv::entity::PageSelectQueryResult;
+use cobotsrv::entity::role::{RoleAddReq, RolePatchReq, RoleVO};
 use cobotsrv::error::AppError;
 use common::*;
 
