@@ -57,13 +57,15 @@ impl UserService {
         password: &str,
         nickname: &str,
     ) -> Result<String> {
-        let (_user_db,token) :(UserVO, String) = UserService::add_user_with_role(
+        let (_user_db, token): (UserVO, String) = UserService::add_user_with_role(
             db,
             token_manager,
             username,
             password,
             nickname,
-            RoleEnum::User.default_id()).await?; // 注册默认只能使用user用户
+            RoleEnum::User.default_id(),
+        )
+        .await?; // 注册默认只能使用user用户
         Ok(token)
     }
 
@@ -73,7 +75,7 @@ impl UserService {
         username: &str,
         password: &str,
         nickname: &str,
-        role_id: &str
+        role_id: &str,
     ) -> Result<(UserVO, String)> {
         // 1. 检查用户是否存在
         if User::find()
@@ -112,7 +114,7 @@ impl UserService {
         // 4. 注册后直接生成 token
         let token = token_manager.generate_token(user_vo.clone().id.as_str())?;
 
-        Ok((user_vo,token))
+        Ok((user_vo, token))
     }
 
     pub async fn get_user_by_id(db: &DatabaseConnection, user_id: String) -> Result<UserVO> {
