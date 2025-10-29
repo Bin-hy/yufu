@@ -3,93 +3,29 @@ name: CI
 on: [ push, pull_request ]
 
 env:
-  CARGO_TERM_COLOR: always
-  DATABASE_URL: postgres://postgres:postgres@localhost:5432/test
+    CARGO_TERM_COLOR: always
 
 jobs:
-  check-db-job:
-    runs-on: ubuntu-latest
-    services:
-       postgres:
-          image: postgis/postgis:16-3.4
-          env:
-              POSTGRES_USER: postgres
-              POSTGRES_PASSWORD: postgres
-              POSTGRES_DB: test
-          ports:
-              - 5432:5432
-          options: >-
-              --health-cmd pg_isready
-              --health-interval 10s
-              --health-timeout 5s
-              --health-retries 5
-    steps:
-        - name: Checkout source code
-          uses: actions/checkout@v5
-        - name: Show version information
-          run: |
-              cargo --version
-              cargo fmt --version
-              cargo clippy --version
+    check:
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ macos-latest, windows-latest, ubuntu-latest ]
+        runs-on: ${{ matrix.os }}
+        steps:
+            - name: Checkout source code
+              uses: actions/checkout@v5
+            - name: Show version information
+              run: |
+                  cargo --version
+                  cargo fmt --version
+                  cargo clippy --version
 
-        - uses: pnpm/action-setup@v4
-          name: Install pnpm
-          with:
-              version: 10
-              run_install: false
-
-        - name: Install Node.js
-          uses: actions/setup-node@v4
-          with:
-              node-version: 24
-              cache: 'pnpm'
-
-        - name: Install dependencies
-          run: pnpm install
-
-        - name: Build frontend
-          run: pnpm run build
-
-        - name: Cargo format
-          run: cargo fmt --all -- --check
-        - name: Cargo build
-          run: cargo build --workspace --all-targets --all-features --release --verbose
-        - name: Cargo clippy
-          run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-        - name: Cargo Test
-          run: cargo test --workspace --all-targets --all-features
-  check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ macos-latest, windows-latest ]
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v5
-      - name: Show version information
-        run: |
-          cargo --version
-          cargo fmt --version
-          cargo clippy --version
-
-      - name: Setup Pnpm
-        uses: actions/setup-node@v6
-        with:
-            node-version: 24
-            cache: "pnpm"
-            cache-dependency-path: pnpm-lock.yaml
-            check-latest: true
-            registry-url: "https://registry.npmjs.org/"
-            package-manager: "pnpm"
-
-      - name: Build frontend
-        run: pnpm run build
-
-      - name: Cargo format
-        run: cargo fmt --all -- --check
-      - name: Cargo build
-        run: cargo build --workspace --all-targets --all-features --release --verbose
-      - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+            - name: Cargo format
+              run: cargo fmt --all -- --check
+            - name: Cargo build
+              run: cargo build --workspace --all-targets --all-features --release --verbose
+            - name: Cargo clippy
+              run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+            - name: Cargo Test
+              run: cargo test --workspace --all-targets --all-features

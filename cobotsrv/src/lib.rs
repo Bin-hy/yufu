@@ -22,7 +22,7 @@ use auth::{AuthState, access_middleware_with_callback};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
-#[folder = "../assets/cobotsrv"]
+#[folder = "../cobotweb/"]
 struct Assets;
 
 pub mod config;
