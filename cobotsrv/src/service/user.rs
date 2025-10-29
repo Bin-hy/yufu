@@ -57,6 +57,24 @@ impl UserService {
         password: &str,
         nickname: &str,
     ) -> Result<String> {
+        let (_user_db,token) :(UserVO, String) = UserService::add_user_with_role(
+            db,
+            token_manager,
+            username,
+            password,
+            nickname,
+            RoleEnum::User.default_id()).await?; // 注册默认只能使用user用户
+        Ok(token)
+    }
+
+    pub async fn add_user_with_role(
+        db: &DatabaseConnection,
+        token_manager: &TokenManager,
+        username: &str,
+        password: &str,
+        nickname: &str,
+        role_id: &str
+    ) -> Result<(UserVO, String)> {
         // 1. 检查用户是否存在
         if User::find()
             .filter(user::Column::Username.eq(username))
@@ -66,6 +84,12 @@ impl UserService {
         {
             return Err(AppError::AlreadyExists("username already exists".into()));
         }
+
+        // 2. 检查role是否存在
+        let role = role::Entity::find_by_id(role_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| AppError::NotFound("role_id does not exist".to_string()))?;
 
         // 2. 构造 ActiveModel
         let new_id = Uuid::new_v4().to_string();
@@ -77,17 +101,18 @@ impl UserService {
             create_time: Set(now),
             update_time: Set(now),
             nickname: Set(Some(nickname.to_owned())),
-            role_id: Set(RoleEnum::User.default_id().to_string()),
+            role_id: Set(role.id.to_string()),
             description: Set(None),
         };
 
         // 3. 插入数据库
         let inserted = new_user.insert(db).await?;
-
+        let mut user_vo = UserVO::from(inserted);
+        user_vo.set_role(role::RoleVO::from(role));
         // 4. 注册后直接生成 token
-        let token = token_manager.generate_token(&inserted.id)?;
+        let token = token_manager.generate_token(user_vo.clone().id.as_str())?;
 
-        Ok(token)
+        Ok((user_vo,token))
     }
 
     pub async fn get_user_by_id(db: &DatabaseConnection, user_id: String) -> Result<UserVO> {

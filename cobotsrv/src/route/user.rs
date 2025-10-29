@@ -1,15 +1,15 @@
-use crate::AppState;
 use crate::result::Result;
+use crate::AppState;
 
-use crate::entity::user::{UserPatchReq, UserRolePatchReq, UserVO};
+use crate::entity::user::{UserAddWithRoleReq, UserPatchReq, UserRolePatchReq, UserVO};
 use crate::service::user::UserService;
 use auth::claims::Claims;
 use axum::extract::{Path, Query};
 use axum::routing::{delete, patch};
 use axum::{
-    Router,
     extract::{Json, State},
     routing::get,
+    Router,
 };
 use sea_orm::{ActiveModelTrait, EntityTrait, NotSet, PaginatorTrait, Set};
 
@@ -17,8 +17,7 @@ use sea_orm::{ActiveModelTrait, EntityTrait, NotSet, PaginatorTrait, Set};
 pub fn get_auth_routes() -> Router<AppState> {
     Router::new()
         .route("/users", get(get_page_user))
-        .route("/user", get(get_user_by_id))
-        .route("/user", patch(patch_user_basic_data))
+        .route("/user", get(get_user_by_id).post(add_user_with_role).patch(patch_user_basic_data))
         .route("/user/role", patch(patch_user_role))
         .route("/user/{user_id}", delete(delete_user_by_id))
 }
@@ -81,6 +80,39 @@ pub async fn get_page_user(
         total_pages,
         data_list: result,
     }))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/user",
+    request_body(
+        content = UserAddWithRoleReq,
+        description = "添加用户",
+        content_type = "application/json"
+    ),
+    description ="超级管理员创建带role的用户",
+    responses(
+        (status = 200, description = "成功", body = UserVO),
+    ),
+))]
+pub async fn add_user_with_role(
+    State(state): State<AppState>,
+    Json(payload): Json<UserAddWithRoleReq>
+)-> Result<Json<UserVO>>{
+    let db = &state.database.connection;
+    let username = payload.username;
+    let nickname = payload.nickname.unwrap_or(username.clone().to_string());
+
+    let (user_vo,_token) = UserService::add_user_with_role(
+        db,
+        &state.auth_state.token_manager,
+        username.as_str(),
+        payload.password.as_str(),
+        nickname.as_str(),
+        payload.role_id.as_str()
+    ).await?;
+
+    Ok(Json(user_vo))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -185,7 +217,7 @@ pub async fn delete_user_by_id(
 }
 
 use crate::entity::role::{RoleEnum, RoleVO};
-use crate::entity::{PageSelectQuery, PageSelectQueryResult, role, user};
+use crate::entity::{role, user, PageSelectQuery, PageSelectQueryResult};
 use crate::error::AppError;
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
@@ -194,6 +226,7 @@ use utoipa::OpenApi;
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        add_user_with_role,
         get_user_by_id,
         get_page_user,
         patch_user_role,

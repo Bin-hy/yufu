@@ -3,9 +3,11 @@ use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
 mod common;
-use cobotsrv::entity::PageSelectQueryResult;
 use cobotsrv::entity::role::{RoleAddReq, RolePatchReq, RoleVO};
+use cobotsrv::entity::PageSelectQueryResult;
 use cobotsrv::error::AppError;
+use common::get_postgres_container;
+use common::get_test_token;
 use common::*;
 
 #[tokio::test]

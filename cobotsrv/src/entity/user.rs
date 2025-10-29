@@ -93,6 +93,16 @@ pub struct UserPatchReq {
     pub nickname: Option<String>,
 }
 
+// 创建用户同时设置角色
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, Deserialize)]
+pub struct UserAddWithRoleReq {
+    pub username: String,
+    pub role_id: String,
+    pub password: String,
+    pub nickname: Option<String>,
+}
+
 /// 为 在req的 extension中的user设置提取器
 impl<S> FromRequestParts<S> for Model
 where

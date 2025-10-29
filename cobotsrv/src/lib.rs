@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::extract::State;
-use axum::{Router, extract::Request, middleware, response::IntoResponse};
+use axum::{extract::Request, middleware, response::IntoResponse, Router};
 use http::{StatusCode, Uri};
 use reqwest::Client;
 use sea_orm::EntityTrait;
@@ -18,7 +18,7 @@ use crate::route::get_no_prefix_routes;
 use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
 use auth::claims::Claims;
-use auth::{AuthState, access_middleware_with_callback};
+use auth::{access_middleware_with_callback, AuthState};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
@@ -34,7 +34,7 @@ mod recording_middleware;
 mod result;
 pub mod route;
 mod seed;
-mod service;
+pub mod service;
 mod store;
 mod swagger_docs;
 
