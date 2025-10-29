@@ -1,9 +1,9 @@
 // 处理权限查询
 
-use crate::AppState;
 use crate::entity::role::RoleEnum;
 use crate::entity::{authority, authority_role, user};
 use crate::error::AppError;
+use crate::AppState;
 use auth::claims::Claims;
 use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::Next;
@@ -67,7 +67,7 @@ pub async fn authority_check_middleware(
     let exists = authority_role::Entity::find()
         .filter(authority_role::Column::RoleId.eq(&role_id))
         .find_also_related(authority::Entity)
-        .filter(authority::Column::Authority.eq(&authority_uri_no_prefix))
+        .filter(authority::Column::AuthorityUri.eq(&authority_uri_no_prefix))
         .one(db)
         .await;
     match exists {

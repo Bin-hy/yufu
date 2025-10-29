@@ -12,7 +12,7 @@ pub struct Model {
     #[sea_orm(unique_key = "unique_name")]
     pub name: String,
     #[sea_orm(unique_key = "unique_authority")]
-    pub authority: String, // uri
+    pub authority_uri: String, // uri
     pub create_time: DateTime,
     pub update_time: DateTime,
 
@@ -25,7 +25,7 @@ pub struct Model {
 pub struct AuthorityVO {
     pub id: String,
     pub name: String,
-    pub authority: String, // uri
+    pub authority_uri: String, // uri
     pub create_time: String,
     pub update_time: String,
 }
@@ -35,7 +35,7 @@ impl From<Model> for AuthorityVO {
         Self {
             id: value.id,
             name: value.name,
-            authority: value.authority,
+            authority_uri: value.authority_uri,
             create_time: value.create_time.format("%Y-%m-%d %H:%M:%S").to_string(),
             update_time: value.update_time.format("%Y-%m-%d %H:%M:%S").to_string(),
         }
@@ -47,14 +47,14 @@ impl From<Model> for AuthorityVO {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AuthorityInsertReq {
     pub name: String,
-    pub authority: String,
+    pub authority_uri: String,
 }
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AuthorityPatchReq {
     pub id: String,
     pub name: String,
-    pub authority: String,
+    pub authority_uri: String,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

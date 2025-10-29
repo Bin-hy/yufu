@@ -71,7 +71,21 @@ pub struct AuthRoleAddReq {
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Serialize, Deserialize)]
+pub struct AuthRoleBatchAddReq {
+    pub role_id: String,
+    pub authority_ids: Vec<String>, // 批量 authority_id
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AuthRoleDeleteReq {
     pub role_id: String,
     pub authority_id: String,
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AuthRoleBatchDeleteReq {
+    pub role_id: String,
+    pub authority_ids: Vec<String>, // 批量删除这些权限
 }

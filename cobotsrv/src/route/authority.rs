@@ -50,7 +50,7 @@ pub async fn add_authority(
     let new_authority = authority::ActiveModel {
         id: Set(Uuid::new_v4().to_string()),
         name: Set(insert_payload.name.clone()),
-        authority: Set(insert_payload.authority.clone()),
+        authority_uri: Set(insert_payload.authority_uri.clone()),
         create_time: Set(now),
         update_time: Set(now),
     };
@@ -64,7 +64,7 @@ pub async fn add_authority(
                     SqlErr::UniqueConstraintViolation(_) => {
                         return Err(AppError::AlreadyExists(format!(
                             "权限名称 '{}' 或 权限路径 '{}' 已存在！",
-                            insert_payload.name, insert_payload.authority
+                            insert_payload.name, insert_payload.authority_uri
                         )));
                     }
                     SqlErr::ForeignKeyConstraintViolation(_) => {
@@ -132,7 +132,7 @@ pub async fn patch_authority(
     // 更新
     let mut new_authority: authority::ActiveModel = authority_db.into();
     new_authority.name = Set(patch_payload.name.to_owned());
-    new_authority.authority = Set(patch_payload.authority.to_owned());
+    new_authority.authority_uri = Set(patch_payload.authority_uri.to_owned());
     new_authority.update_time = Set(Utc::now().naive_utc());
 
     let db_authority = new_authority.update(db).await?;

@@ -18,7 +18,11 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Authority::Name).string().unique_key())
-                    .col(ColumnDef::new(Authority::Authority_).string().unique_key())
+                    .col(
+                        ColumnDef::new(Authority::_AuthorityUri)
+                            .string()
+                            .unique_key(),
+                    )
                     .col(ColumnDef::new(Authority::CreateTime).date_time().not_null())
                     .col(ColumnDef::new(Authority::UpdateTime).date_time().not_null())
                     .to_owned(),
@@ -40,8 +44,8 @@ enum Authority {
     Table,
     Id,
     Name,
-    #[sea_orm(iden = "authority")]
-    Authority_,
+    #[sea_orm(column_name = "authority_uri")]
+    _AuthorityUri,
     CreateTime,
     UpdateTime,
 }

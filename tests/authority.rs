@@ -30,7 +30,7 @@ async fn test_add_authority() -> Result<(), AppError> {
     // build body
     let body = AuthorityInsertReq {
         name: "test_authority".to_string(),
-        authority: "test.authority.path".to_string(),
+        authority_uri: "test.authority.path".to_string(),
     };
 
     let resp = client
@@ -44,7 +44,7 @@ async fn test_add_authority() -> Result<(), AppError> {
     assert!(resp.status().is_success());
     let authority: AuthorityVO = resp.json().await?;
     assert_eq!(authority.name, "test_authority");
-    assert_eq!(authority.authority, "test.authority.path");
+    assert_eq!(authority.authority_uri, "test.authority.path");
 
     Ok(())
 }
@@ -99,7 +99,7 @@ async fn test_patch_authority() -> Result<(), AppError> {
     // 先创建一个权限
     let create_body = AuthorityInsertReq {
         name: "patch_test_authority".to_string(),
-        authority: "patch.test.authority".to_string(),
+        authority_uri: "patch.test.authority".to_string(),
     };
 
     let resp = client
@@ -116,7 +116,7 @@ async fn test_patch_authority() -> Result<(), AppError> {
     let patch_body = AuthorityPatchReq {
         id: authority.id,
         name: "patched_authority".to_string(),
-        authority: "get?/patch_test_authority".to_string(),
+        authority_uri: "get?/patch_test_authority".to_string(),
     };
 
     let resp = client
@@ -152,7 +152,7 @@ async fn test_delete_authority() -> Result<(), AppError> {
     // 先创建一个权限
     let create_body = AuthorityInsertReq {
         name: "delete_test_authority".to_string(),
-        authority: "delete.test.authority".to_string(),
+        authority_uri: "delete.test.authority".to_string(),
     };
 
     let resp = client
