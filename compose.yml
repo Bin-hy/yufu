@@ -6,3 +6,17 @@ services:
       - 1883:1883
       - 18083:18083
 
+
+  postgis:
+      image: postgis/postgis:16-3.4
+      container_name: postgis
+      restart: always
+      ports:
+          - "${POSTGRES_PORT:-5432}:5432"
+      env_file:
+          - .env.local
+      volumes:
+          - cobotrix_postgis:/var/lib/postgresql/data
+
+volumes:
+  cobotrix_postgis:
