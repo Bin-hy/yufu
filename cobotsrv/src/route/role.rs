@@ -369,6 +369,7 @@ pub async fn get_role_authority_by_role_id(
     get_page_role,
     get_modifiable_page_role,
     delete_role_authority,
-    get_role_authority_by_role_id
+    get_role_authority_by_role_id,
+    add_role_authority
 ))]
 pub struct RoleApi;
