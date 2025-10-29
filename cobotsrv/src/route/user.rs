@@ -46,7 +46,7 @@ pub async fn get_user_by_id(claim: Claims, State(state): State<AppState>) -> Res
     params(PageSelectQuery),
     description ="分页获取所有用户信息",
     responses(
-        (status = 200, description = "成功", body = UserVO),
+        (status = 200, description = "成功", body = PageSelectQueryResult<UserVO>),
     ),
 ))]
 pub async fn get_page_user(
@@ -65,13 +65,14 @@ pub async fn get_page_user(
     let users_db = paginator.fetch_page(page.page_number - 1).await?;
 
     let result = users_db
-        .iter()
+        .into_iter()
         .map(|(user_db, role_db_opt)| {
             let role = role_db_opt.as_ref().unwrap();
             let mut user_vo = UserVO::from(user_db.clone());
             user_vo.role = Some(RoleVO::from(role.clone()));
             user_vo
         })
+        .filter(|item| item.id != Superadmin.default_id())
         .collect();
 
     Ok(Json(PageSelectQueryResult::<UserVO> {
@@ -221,6 +222,7 @@ use crate::entity::{role, user, PageSelectQuery, PageSelectQueryResult};
 use crate::error::AppError;
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
+use crate::entity::role::RoleEnum::Superadmin;
 
 #[cfg(feature = "openapi")]
 #[derive(OpenApi)]
@@ -229,6 +231,7 @@ use utoipa::OpenApi;
         add_user_with_role,
         get_user_by_id,
         get_page_user,
+        delete_user_by_id,
         patch_user_role,
         patch_user_basic_data
     ),

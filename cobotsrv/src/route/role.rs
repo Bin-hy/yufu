@@ -1,11 +1,11 @@
-use crate::AppState;
 use crate::entity::authority::AuthorityVO;
 use crate::entity::authority_role::{AuthRoleAddReq, AuthRoleDeleteReq, AuthorityRoleVO};
 use crate::entity::role::RoleEnum::Superadmin;
 use crate::entity::role::{RoleAddReq, RoleDeleteReq, RolePatchReq, RoleVO};
-use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority, authority_role, role};
+use crate::entity::{authority, authority_role, role, PageSelectQuery, PageSelectQueryResult};
 use crate::error::AppError;
 use crate::result::Result;
+use crate::AppState;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -122,6 +122,7 @@ pub async fn get_page_role(
     get,
     path = "/role/modifiable",
     description = "分页获取可修改的角色",
+    params(PageSelectQuery),
     responses(
         (status = 200, description = "", body = PageSelectQueryResult<RoleVO>),
     ),
@@ -366,6 +367,7 @@ pub async fn get_role_authority_by_role_id(
     patch_role,
     add_role,
     get_page_role,
+    get_modifiable_page_role,
     delete_role_authority,
     get_role_authority_by_role_id
 ))]
