@@ -8,6 +8,7 @@ pub async fn shutdown_signal() {
     let _str = signal::wait_for_stop_signal().await;
 }
 
+#[allow(dead_code)]
 pub async fn get_postgres_container()
 -> Result<(testcontainers::ContainerAsync<Postgres>, String), AppError> {
     // 启动 Postgres 模块容器
@@ -24,7 +25,7 @@ pub async fn get_postgres_container()
 
     Ok((container, db_url))
 }
-
+#[allow(dead_code)]
 pub fn get_test_token(secret: String) -> String {
     let token_manager = TokenManager {
         secret,
