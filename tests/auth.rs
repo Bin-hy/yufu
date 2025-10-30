@@ -2,18 +2,24 @@ use cobotsrv::config::Config;
 use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
+use cobotsrv::error::AppError;
+
 mod common;
 use common::*;
 
 use cobotsrv::route::auth::{LoginData, RegistryData};
 
 #[tokio::test]
-async fn test_register() -> anyhow::Result<()> {
+async fn test_register() -> Result<(), AppError> {
+    // 运行一个docker镜像
+    let (_pg, db_url) = get_postgres_container().await?;
+
     let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let cfg = Config::default();
+    let mut cfg = Config::default();
+    cfg.database.url = db_url.clone();
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;
@@ -39,12 +45,16 @@ async fn test_register() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn test_login() -> anyhow::Result<()> {
+async fn test_login() -> Result<(), AppError> {
+    // 运行一个docker镜像
+    let (_pg, db_url) = get_postgres_container().await?;
+
     let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let cfg = Config::default();
+    let mut cfg = Config::default();
+    cfg.database.url = db_url.clone();
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;
