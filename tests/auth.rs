@@ -1,8 +1,8 @@
 use cobotsrv::config::Config;
+use cobotsrv::error::AppError;
 use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
-use cobotsrv::error::AppError;
 
 mod common;
 use common::*;
