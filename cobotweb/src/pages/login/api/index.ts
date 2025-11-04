@@ -9,3 +9,11 @@ export function loginApi(data: Auth.LoginRequestData) {
     data
   })
 }
+
+export function registerApi(data: Auth.RegisterRequestData){
+    return request<Auth.RegisterResponseData>({
+        url: "register", // auth_old/register
+        method: "post",
+        data
+    })
+}

@@ -1,27 +1,32 @@
 <script lang="ts" setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { showModal } from '@/utils/modal'
 import UiInput from '@/components/ui/input/input.vue'
 import UiSelect from '@/components/ui/select/select.vue'
 import UiButton from '@/components/ui/button/button.vue'
+import * as userApi from '../api'
+import type { RoleVO } from '@/types/models'
 
 // 表单数据
 const form = reactive({
   username: '',
   nickname: '',
-  email: '',
   password: '',
   confirmPassword: '',
   role: 'user',
-  status: 'active'
 })
 
+const modifiableRoles = ref<RoleVO[]>([])
+
+const roleOptions = computed(() => modifiableRoles.value.map(role => ({
+  label: role.name || '',
+  value: role.id || '',
+})))
 // 表单验证错误
 const errors = reactive({
   username: '',
   nickname: '',
-  email: '',
   password: '',
   confirmPassword: ''
 })
@@ -37,7 +42,6 @@ function validateForm(): boolean {
   // 重置错误
   errors.username = ''
   errors.nickname = ''
-  errors.email = ''
   errors.password = ''
   errors.confirmPassword = ''
 
@@ -56,15 +60,6 @@ function validateForm(): boolean {
     isValid = false
   } else if (form.nickname.length < 2 || form.nickname.length > 20) {
     errors.nickname = '昵称长度应在2-20个字符之间'
-    isValid = false
-  }
-
-  // 邮箱验证
-  if (!form.email.trim()) {
-    errors.email = '请输入邮箱'
-    isValid = false
-  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-    errors.email = '请输入有效的邮箱地址'
     isValid = false
   }
 
@@ -98,19 +93,21 @@ async function handleCreate() {
   try {
     loading.value = true
 
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
-
-    // 显示成功提示
-    showModal({
-      title: '创建成功',
-      content: '用户已成功创建'
+    let res = await userApi.createUserWithRole({
+      username: form.username,
+      password: form.password,
+      nickname: form.nickname,
+      role_id: form.role,
     })
 
-    // 跳转到用户列表
-    setTimeout(() => {
-      router.push('/dashboard/users')
-    }, 1500)
+    // 显示成功提示并在确认后返回列表
+    const ok = await showModal({
+      title: '创建成功',
+      content: `用户‘${res.username}’已成功创建`
+    })
+    if (ok) {
+      router.push({ name: 'user-list' })
+    }
 
   } catch (error: any) {
     console.error('创建用户失败:', error)
@@ -127,12 +124,30 @@ async function handleCreate() {
 function handleCancel() {
   if (Object.values(form).some(value => value)) {
     if (confirm('确定要放弃当前编辑吗？')) {
-      router.push('/dashboard/users')
+      router.push({ name: 'user-list' })
     }
   } else {
-    router.push('/dashboard/users')
+    router.push({ name: 'user-list' })
   }
 }
+//加载可修改的角色列表
+async function loadModifiableRoles(){
+    let data = await userApi.getModifiableRoles();
+    modifiableRoles.value = data?.data_list
+    // 角色下拉默认选中第一项（当当前值为空或不在可选项中时）
+    const firstId = modifiableRoles.value?.[0]?.id || ''
+    const exists = modifiableRoles.value?.some(r => r.id === (form.role as any))
+    if (!exists) {
+      // 确保为字符串，避免类型不一致
+      form.role = (firstId || '') as any
+    }
+}
+
+onMounted(
+  async () => {
+    loadModifiableRoles();
+  }
+)
 </script>
 
 <template>
@@ -186,20 +201,6 @@ function handleCancel() {
             </div>
 
             <div>
-              <label for="email" class="block text-sm font-medium mb-1">
-                邮箱 <span class="text-red-500">*</span>
-              </label>
-              <UiInput
-                id="email"
-                v-model="form.email"
-                type="email"
-                :class="errors.email ? 'border-destructive' : ''"
-                placeholder="请输入邮箱地址"
-              />
-              <p v-if="errors.email" class="mt-1 text-sm text-destructive">{{ errors.email }}</p>
-            </div>
-
-            <div>
               <label for="role" class="block text-sm font-medium mb-1">
                 角色 <span class="text-red-500">*</span>
               </label>
@@ -208,22 +209,7 @@ function handleCancel() {
                 v-model="form.role"
                 class="w-full"
               >
-                <option value="user">普通用户</option>
-                <option value="admin">管理员</option>
-              </UiSelect>
-            </div>
-
-            <div>
-              <label for="status" class="block text-sm font-medium mb-1">
-                状态 <span class="text-red-500">*</span>
-              </label>
-              <UiSelect
-                id="status"
-                v-model="form.status"
-                class="w-full"
-              >
-                <option value="active">激活</option>
-                <option value="inactive">未激活</option>
+                <option v-for="role in roleOptions" :key="role.value" :value="role.value">{{ role.label }}</option>
               </UiSelect>
             </div>
           </div>
@@ -262,12 +248,12 @@ function handleCancel() {
             <div v-if="form.password && !errors.password" class="bg-blue-50 p-4 rounded-md">
               <h3 class="text-sm font-medium text-blue-800 mb-2">密码强度</h3>
               <div class="w-full bg-gray-200 rounded-full h-2.5">
-                <div 
-                  class="h-2.5 rounded-full" 
-                  :class="form.password.length >= 8 
-                    ? 'bg-green-500 w-full' 
-                    : form.password.length >= 6 
-                      ? 'bg-yellow-500 w-2/3' 
+                <div
+                  class="h-2.5 rounded-full"
+                  :class="form.password.length >= 8
+                    ? 'bg-green-500 w-full'
+                    : form.password.length >= 6
+                      ? 'bg-yellow-500 w-2/3'
                       : 'bg-red-500 w-1/3'"
                 ></div>
               </div>

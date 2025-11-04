@@ -69,3 +69,38 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+/* 兼容性增强：暗色模式下提升硬编码灰度文字的可读性
+   项目部分页面使用了 tailwind 的 text-gray-* 类（更偏向浅色主题），
+   这里在 .dark 下将其映射到语义化颜色，确保对比度充足。 */
+@layer utilities {
+  .dark .text-gray-900,
+  .dark .text-gray-800,
+  .dark .text-gray-700,
+  .dark .text-neutral-900,
+  .dark .text-neutral-800,
+  .dark .text-neutral-700,
+  .dark .text-slate-900,
+  .dark .text-slate-800,
+  .dark .text-slate-700,
+  .dark .text-zinc-900,
+  .dark .text-zinc-800,
+  .dark .text-zinc-700 {
+    @apply text-foreground;
+  }
+
+  .dark .text-gray-600,
+  .dark .text-gray-500,
+  .dark .text-gray-400,
+  .dark .text-neutral-600,
+  .dark .text-neutral-500,
+  .dark .text-neutral-400,
+  .dark .text-slate-600,
+  .dark .text-slate-500,
+  .dark .text-slate-400,
+  .dark .text-zinc-600,
+  .dark .text-zinc-500,
+  .dark .text-zinc-400 {
+    @apply text-muted-foreground;
+  }
+}

@@ -1,35 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useToastStore } from '@/pinia/stores/toast'
 
-interface ToastItem {
-  id: number
-  type: 'success' | 'error' | 'info' | 'warning'
-  message: string
-}
-
-const toasts = ref<ToastItem[]>([])
-let uid = 0
-
-function pushToast(type: ToastItem['type'], message: string, durationMs = 3000) {
-  const id = ++uid
-  toasts.value.push({ id, type, message })
-  setTimeout(() => {
-    toasts.value = toasts.value.filter(t => t.id !== id)
-  }, durationMs)
-}
-
-function handleEvent(e: Event) {
-  const { type, message, durationMs } = (e as CustomEvent).detail || {}
-  pushToast(type || 'info', String(message || ''), durationMs ?? 3000)
-}
-
-onMounted(() => {
-  window.addEventListener('app:toast', handleEvent as EventListener)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('app:toast', handleEvent as EventListener)
-})
+const toastStore = useToastStore()
+const { toasts } = storeToRefs(toastStore)
 </script>
 
 <template>

@@ -31,12 +31,10 @@
         <div v-if="m.children && m.children.length">
           <UiButton
             variant="ghost"
-            class="flex w-full items-center justify-between rounded-md px-3 py-2 text-left font-medium transition-colors duration-150"
-            :class="[
-              isParentOpen(m)
-                ? 'bg-muted text-primary'
-                : 'text-muted-foreground hover:bg-accent'
-            ]"
+            :class="cn(
+              'flex w-full items-center justify-between rounded-md px-3 py-2 text-left font-medium transition-colors duration-150',
+              isParentOpen(m) ? 'bg-muted text-primary' : 'text-muted-foreground hover:bg-accent'
+            )"
             @click="toggleParent(m.key)"
           >
             <span class="truncate">
@@ -104,6 +102,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMenu, type MenuItem } from '@/composables/use-menu.ts'
 import UiButton from '@/components/ui/button/button.vue'
+import { cn } from '@/lib/utils'
 
 const props = defineProps<{ collapsed?: boolean }>()
 const collapsed = computed(() => props.collapsed ?? false)

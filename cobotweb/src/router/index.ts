@@ -1,7 +1,6 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { createRouter } from 'vue-router'
 import { routerConfig } from './config'
 import { flatMultiLevelRoutes } from './helper'
-import { useUserStore } from '@/pinia/stores/user'
 import { RegistryRouterGuard } from './guard'
 import { constantRoutes } from './routes'
 

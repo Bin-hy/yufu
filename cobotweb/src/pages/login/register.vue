@@ -9,7 +9,7 @@ import { createUser } from '@/pages/users/api'
 
 interface RegisterForm {
   username: string
-  email: string
+  nickname: string
   password: string
   confirmPassword: string
   agree: boolean
@@ -18,7 +18,7 @@ interface RegisterForm {
 const router = useRouter()
 const form = reactive<RegisterForm>({
   username: '',
-  email: '',
+  nickname: '',
   password: '',
   confirmPassword: '',
   agree: false,
@@ -26,7 +26,7 @@ const form = reactive<RegisterForm>({
 
 const errors = reactive({
   username: '',
-  email: '',
+  nickname: '',
   password: '',
   confirmPassword: '',
   agree: '',
@@ -37,14 +37,14 @@ const loading = ref(false)
 function validateForm(): boolean {
   // 重置错误
   errors.username = ''
-  errors.email = ''
+  errors.nickname = ''
   errors.password = ''
   errors.confirmPassword = ''
   errors.agree = ''
 
   let ok = true
   if (!form.username.trim()) { errors.username = '请输入用户名'; ok = false }
-  if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) { errors.email = '邮箱格式不正确'; ok = false }
+  if (!form.nickname.trim()) { errors.nickname = '请输入昵称'; ok = false }
   if (!form.password) { errors.password = '请输入密码'; ok = false }
   else if (form.password.length < 6) { errors.password = '密码长度不能少于6位'; ok = false }
   if (form.confirmPassword !== form.password) { errors.confirmPassword = '两次密码输入不一致'; ok = false }
@@ -60,11 +60,7 @@ async function handleRegister() {
     await createUser({
       username: form.username,
       password: form.password,
-      email: form.email || undefined,
-      // 可选：根据后端需求补充
-      // nickname: undefined,
-      // role: 'User',
-      // status: 'active'
+      nickname: form.nickname,
     })
     showModal({ title: '注册成功', content: '账号已创建，请使用新账号登录' })
     router.push('/login')
@@ -96,9 +92,9 @@ async function handleRegister() {
         </div>
 
         <div>
-          <label class="block text-sm font-medium mb-1">邮箱（可选）</label>
-          <UiInput v-model="form.email" type="email" placeholder="name@example.com" />
-          <p v-if="errors.email" class="mt-1 text-xs text-destructive">{{ errors.email }}</p>
+          <label class="block text-sm font-medium mb-1">昵称</label>
+          <UiInput v-model="form.nickname" placeholder="请输入昵称" />
+          <p v-if="errors.nickname" class="mt-1 text-xs text-destructive">{{ errors.nickname }}</p>
         </div>
 
         <div>

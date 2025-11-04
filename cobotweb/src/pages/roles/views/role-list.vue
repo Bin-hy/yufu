@@ -1,23 +1,18 @@
 <script lang="ts" setup>
 import { ref, onMounted } from 'vue'
-import Pagination from '@/components/pagination.vue'
+import Pagination from '@/components/ui/pagination/pagination.vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getRolesByPage, addRole, patchRole, addRoleAuthority, deleteRoleAuthority } from '../api'
-import * as authorityApi from '@/pages/authority/api'
+import { getRolesByPage, addRole, patchRole} from '../api'
 import { emitToast } from '@/utils/toast'
 import type { RoleVO } from '@/types/models'
-import type { Authority } from '@/pages/authority/api/type'
 import UiButton from '@/components/ui/button/button.vue'
 import UiInput from '@/components/ui/input/input.vue'
-import UiSelect from '@/components/ui/select/select.vue'
 import UiDialog from '@/components/ui/dialog/dialog.vue'
 
 const loading = ref(false)
 const roles = ref<RoleVO[]>([])
-const authorities = ref<Authority[]>([])
 const creating = ref(false)
 const editing = ref(false)
-const assigning = ref(false)
 const currentRole = ref<RoleVO | null>(null)
 // 创建表单
 const createForm = ref<{ name: string; role_enum: string }>({ name: '', role_enum: 'Admin' })
@@ -45,14 +40,6 @@ async function loadRoles() {
     console.error('加载角色失败', e)
   } finally {
     loading.value = false
-  }
-}
-
-async function loadAuthorities() {
-  try {
-    authorities.value = await authorityApi.getAllAuthorities()
-  } catch (e) {
-    console.error('加载权限失败', e)
   }
 }
 
@@ -94,24 +81,6 @@ async function submitEdit() {
   }
 }
 
-async function openAssignDialog(role: RoleVO) {
-  currentRole.value = role
-  assigning.value = true
-  await loadAuthorities()
-}
-
-async function grantAuthority(authorityId: string) {
-  if (!currentRole.value) return
-  const ok = await addRoleAuthority({ role_id: currentRole.value.id, authority_id: authorityId })
-  emitToast({ type: ok ? 'success' : 'error', message: ok ? '授予成功' : '授予失败' })
-}
-
-async function revokeAuthority(authorityId: string) {
-  if (!currentRole.value) return
-  const ok = await deleteRoleAuthority({ role_id: currentRole.value.id, authority_id: authorityId })
-  emitToast({ type: ok ? 'success' : 'error', message: ok ? '移除成功' : '移除失败' })
-}
-
 onMounted(async () => {
   const pn = Number(route.query.page_number ?? 1)
   const ps = Number(route.query.page_size ?? 10)
@@ -123,50 +92,86 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl font-semibold">角色列表</h2>
-      <div class="flex items-center gap-2">
-        <UiButton size="sm" @click="openCreateDialog">创建角色</UiButton>
+  <div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div>
+        <h2 class="text-2xl font-bold text-foreground">角色管理</h2>
+        <p class="text-sm text-muted-foreground mt-1">维护系统角色与权限分配</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <UiButton size="sm" @click="openCreateDialog">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+          </svg>
+          创建角色
+        </UiButton>
       </div>
     </div>
 
-    <div class="overflow-x-auto bg-card text-card-foreground rounded-md shadow-sm border border-border">
-      <table class="min-w-full divide-y divide-border text-sm">
-        <thead>
-          <tr>
-            <th class="px-4 py-2 text-left">角色名称</th>
-            <th class="px-4 py-2 text-left">类型</th>
-            <th class="px-4 py-2 text-left">创建时间</th>
-            <th class="px-4 py-2 text-left">更新时间</th>
-            <th class="px-4 py-2 text-left">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in roles" :key="r.id" class="border-t border-border">
-            <td class="px-4 py-2">{{ r.name }}</td>
-            <td class="px-4 py-2">{{ r.role_enum }}</td>
-            <td class="px-4 py-2">{{ r.create_time }}</td>
-            <td class="px-4 py-2">{{ r.update_time }}</td>
-            <td class="px-4 py-2">
-              <div class="flex gap-2">
-                <UiButton size="sm" variant="ghost" :disabled="r.role_enum==='Superadmin'" @click="openEditDialog(r)">重命名</UiButton>
-                <UiButton size="sm" variant="ghost" :disabled="r.role_enum==='Superadmin'" @click="openAssignDialog(r)">权限</UiButton>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="bg-card rounded-lg border border-border shadow-sm">
+      <div class="px-6 py-4 border-b border-border">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-medium text-foreground">角色列表</h3>
+          <div class="text-sm text-muted-foreground">共 {{ roles.length }} 个角色</div>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-border bg-muted/50">
+              <th class="px-6 py-4 text-left text-sm font-medium text-muted-foreground">角色名称</th>
+              <th class="px-6 py-4 text-left text-sm font-medium text-muted-foreground">类型</th>
+              <th class="px-6 py-4 text-left text-sm font-medium text-muted-foreground">创建时间</th>
+              <th class="px-6 py-4 text-left text-sm font-medium text-muted-foreground">更新时间</th>
+              <th class="px-6 py-4 text-left text-sm font-medium text-muted-foreground">操作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            <tr v-for="r in roles" :key="r.id" class="hover:bg-muted/30 transition-colors">
+              <td class="px-6 py-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A1 1 0 014 17V7a1 1 0 011.121-.804l13 3A1 1 0 0119 10v4a1 1 0 01-.879.993l-13 2.81z"></path>
+                    </svg>
+                  </div>
+                  <div>
+                    <div class="text-sm font-medium text-foreground">{{ r.name }}</div>
+                    <div class="text-xs text-muted-foreground">ID: {{ r.id }}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4">{{ r.role_enum }}</td>
+              <td class="px-6 py-4">{{ r.create_time }}</td>
+              <td class="px-6 py-4">{{ r.update_time }}</td>
+              <td class="px-6 py-4">
+                <div class="flex gap-2">
+                  <UiButton size="sm" variant="outline" :disabled="r.role_enum==='Superadmin'" @click="openEditDialog(r)">重命名</UiButton>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!loading && roles.length === 0" class="text-center py-12">
+          <svg class="w-12 h-12 text-muted-foreground mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 1.343-3 3s1.343 3 3 3 3-1.343 3-3-1.343-3-3-3z"></path>
+          </svg>
+          <h3 class="text-lg font-medium text-foreground mb-2">暂无角色数据</h3>
+          <p class="text-muted-foreground">请先创建角色以进行权限管理</p>
+        </div>
+      </div>
       <div v-if="loading" class="p-4 text-center text-sm text-muted-foreground">正在加载...</div>
     </div>
 
-    <Pagination
-      :page-number="pageNumber"
-      :total-pages="totalPages"
-      :page-size="pageSize"
-      @change="(p:number) => { pageNumber = p; updateQuery(); loadRoles(); }"
-      @size-change="(s:number) => { pageSize = s; pageNumber = 1; updateQuery(); loadRoles(); }"
-    />
+    <div class="flex justify-center">
+      <Pagination
+        :page="pageNumber"
+        :page-count="totalPages"
+        :size="pageSize"
+        @page-change="(p:number) => { pageNumber = p; updateQuery(); loadRoles(); }"
+        @update:size="(s:number) => { pageSize = s; pageNumber = 1; updateQuery(); loadRoles(); }"
+      />
+    </div>
 
     <!-- 创建角色对话框（shadcn/ui） -->
     <UiDialog v-model:open="creating" title="创建角色" @confirm="submitCreate" @cancel="() => (creating = false)">
@@ -177,11 +182,8 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-sm mb-1">角色枚举</label>
-          <UiSelect v-model="createForm.role_enum">
-            <option value="Admin">Admin</option>
-            <option value="User">User</option>
-            <option value="Superadmin">Superadmin</option>
-          </UiSelect>
+          <UiInput v-model="createForm.role_enum" placeholder="请输入后端已存在的枚举值，例如：Admin" />
+          <p class="text-xs text-muted-foreground mt-1">自定义的唯一枚举，例如 Admin, DogAdmin,BirdAdmin</p>
         </div>
       </div>
     </UiDialog>
@@ -194,33 +196,6 @@ onMounted(async () => {
           <UiInput v-model="editForm.name" />
         </div>
         <p class="text-xs text-muted-foreground">枚举：{{ editForm.role_enum }}（不建议修改）</p>
-      </div>
-    </UiDialog>
-
-    <!-- 权限分配对话框（shadcn/ui） -->
-    <UiDialog v-model:open="assigning" :title="`角色权限：${currentRole?.name || ''}`" @cancel="() => (assigning=false)">
-      <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-border text-sm">
-          <thead>
-            <tr>
-              <th class="px-3 py-2 text-left">权限名称</th>
-              <th class="px-3 py-2 text-left">URI</th>
-              <th class="px-3 py-2 text-left">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="a in authorities" :key="a.id" class="border-t border-border">
-              <td class="px-3 py-2">{{ a.name }}</td>
-              <td class="px-3 py-2 font-mono text-xs">{{ a.authority }}</td>
-              <td class="px-3 py-2">
-                <div class="flex gap-2">
-                  <UiButton size="sm" variant="ghost" @click="grantAuthority(a.id)">授予</UiButton>
-                  <UiButton size="sm" variant="ghost" @click="revokeAuthority(a.id)">移除</UiButton>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
       </div>
     </UiDialog>
   </div>

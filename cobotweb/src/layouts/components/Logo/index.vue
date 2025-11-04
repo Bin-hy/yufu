@@ -6,5 +6,4 @@
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{ collapse?: boolean }>()
 </script>

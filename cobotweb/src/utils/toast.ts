@@ -6,11 +6,10 @@ export interface ToastPayload {
   durationMs?: number
 }
 
+import { useToastStore } from '@/pinia/stores/toast'
+import { pinia } from '@/pinia'
+
 export function emitToast(payload: ToastPayload) {
-  const detail = {
-    type: payload.type ?? 'info',
-    message: payload.message,
-    durationMs: payload.durationMs ?? 3000
-  }
-  window.dispatchEvent(new CustomEvent('app:toast', { detail }))
+  const store = useToastStore(pinia)
+  store.push(payload.type ?? 'info', payload.message, payload.durationMs ?? 3000)
 }

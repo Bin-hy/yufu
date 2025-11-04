@@ -1,18 +1,19 @@
-<script setup>
-import { ref } from 'vue'
+<script setup lang="ts">
+import { computed } from 'vue'
 import NavigationBar from '@/layouts/components/NavigationBar/index.vue'
 import Sidebar from '@/layouts/components/Sidebar/index.vue'
 import TagsView from '@/layouts/components/TagsView/index.vue'
 import Footer from '@/layouts/components/Footer/index.vue'
-
-const collapsed = ref(false)
+import { useLayoutStore } from '@/pinia/stores/layout'
+const layout = useLayoutStore()
+const collapsed = computed(() => layout.sidebarCollapsed)
 </script>
 
 <template>
   <div class="flex flex-col h-screen bg-muted">
     <!-- 头部：精简为单一导航栏 + 标签栏，减少空白 -->
     <header class="sticky top-0 z-20 bg-background/95 backdrop-blur-md border-b border-border shadow-sm">
-      <NavigationBar @toggle-sidebar="collapsed = !collapsed" />
+      <NavigationBar :collapsed="collapsed" />
       <TagsView />
     </header>
 

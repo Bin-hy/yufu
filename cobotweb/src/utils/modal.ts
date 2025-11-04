@@ -19,22 +19,28 @@ export function showModal(options: ModalOptions): Promise<boolean> {
     const container = document.createElement('div')
     document.body.appendChild(container)
     handle_default_value(options)
-    const vnode = createVNode(UiDialog as any, {
-      ...options,
-      title: options.title,
-      open: true,
-      onConfirm: () => {
-        options.confirmCallback? options.confirmCallback():""
-        resolve(true)
-        cleanup()
+    // 通过 UiDialog 的默认插槽渲染内容，避免 content 作为 props 被忽略
+    const vnode = createVNode(
+      UiDialog as any,
+      {
+        title: options.title,
+        open: true,
+        onConfirm: () => {
+          options.confirmCallback ? options.confirmCallback() : ''
+          resolve(true)
+          cleanup()
+        },
+        onCancel: () => {
+          options.cancleCallback ? options.cancleCallback() : ''
+          resolve(false)
+          cleanup()
+        },
+        'onUpdate:open': (v: boolean) => { if (!v) cleanup() },
       },
-      onCancel: () => {
-        options.cancleCallback? options.cancleCallback():""
-        resolve(false)
-        cleanup()
-      },
-      'onUpdate:open': (v: boolean) => { if (!v) cleanup() },
-    })
+      {
+        default: () => options.content,
+      }
+    )
 
     function cleanup() {
       render(null, container)

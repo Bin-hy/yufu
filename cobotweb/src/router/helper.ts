@@ -5,8 +5,8 @@ import { routerConfig } from "./config"
 
 /** 路由降级（把三级及其以上的路由转化为二级路由） */
 export function flatMultiLevelRoutes(routes: RouteRecordRaw[]) {
-    const routesMirror = cloneDeep(routes)
-    routesMirror.forEach((route) => {
+    const routesMirror: RouteRecordRaw[] = cloneDeep(routes)
+    routesMirror.forEach((route: RouteRecordRaw) => {
         // 如果路由是三级及其以上路由，对其进行降级处理
         isMultipleRoute(route) && promoteRouteLevel(route)
     })

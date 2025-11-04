@@ -3,7 +3,7 @@ interface ClassDictionary { [id: string]: any }
 interface ClassArray extends Array<ClassValue> {}
 
 function toVal(mix: ClassValue) {
-  let k, y, str = ''
+  let k, str = ''
   if (typeof mix === 'string' || typeof mix === 'number') {
     str += mix
   } else if (Array.isArray(mix)) {

@@ -45,10 +45,4 @@ function go(path: string) {
 function close(path: string) {
   tabs.remove(path)
 }
-function closeOthers() {
-  tabs.closeOthers(route.path)
-}
-function refresh() {
-  router.replace({ path: route.path, query: { ...route.query, _r: Date.now() } })
-}
 </script>

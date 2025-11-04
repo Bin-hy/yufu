@@ -1,101 +1,134 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-// 暂时注释掉，避免构建错误
-// import { ElMessage } from 'element-plus';
-import * as authorityApi from '../api';
-import type { Authority, Role, AuthorityAssignReq } from '../api/type';
+import { ref, onMounted, computed } from 'vue'
+import { emitToast } from '@/utils/toast'
+import * as authorityApi from '../api'
+import * as roleApi from '@/pages/roles/api'
+import type { Role, AuthRoleAddBatchReq, AuthRoleDeleteReq } from '../api/type'
 import UiCheckbox from '@/components/ui/checkbox/checkbox.vue'
 import UiButton from '@/components/ui/button/button.vue'
+import type { AuthorityVO } from '@/types/models'
 
 // 权限列表数据
-const authorities = ref<Authority[]>([]);
+const authorities = ref<AuthorityVO[]>([])
 // 角色列表数据
-const roles = ref<Role[]>([]);
+const roles = ref<Role[]>([])
 // 加载状态
-const loading = ref(false);
+const loading = ref(false)
 // 当前选中的角色
-const selectedRole = ref<Role | null>(null);
-// 选中的权限ID列表
-const selectedAuthorityIds = ref<string[]>([]);
+const selectedRole = ref<Role | null>(null)
+// 选中的权限ID列表（当前勾选）
+const selectedAuthorityIds = ref<string[]>([])
+// 原始权限ID集合（用于 diff 计算）
+const originalAuthorityIdSet = ref<Set<string>>(new Set())
 // 权限分配对话框
-const showAssignDialog = ref(false);
+const showAssignDialog = ref(false)
 
 // 获取权限列表
 const fetchAuthorities = async () => {
-  loading.value = true;
+  loading.value = true
   try {
-    authorities.value = await authorityApi.getAllAuthorities();
+    const MAX = 1000
+    const page = await authorityApi.getAuthoritiesByPage(1, MAX)
+    authorities.value = page.data_list
   } catch (error) {
-      console.error('获取权限列表失败');
+    console.error('获取权限列表失败', error)
+    emitToast({ type: 'error', message: '获取权限列表失败' })
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 // 获取角色列表
 const fetchRoles = async () => {
   try {
-    roles.value = await authorityApi.getAllRoles();
+    const MAX = 100
+    const page = await roleApi.getRolesByPage(1, MAX)
+    roles.value = page.data_list
   } catch (error) {
-      console.error('获取角色列表失败');
+    console.error('获取角色列表失败', error)
+    emitToast({ type: 'error', message: '获取角色列表失败' })
   }
-};
+}
 
 // 打开权限分配对话框
 const openAssignDialog = async (role: Role) => {
-  selectedRole.value = role;
-  selectedAuthorityIds.value = [];
-  
+  selectedRole.value = role
+  selectedAuthorityIds.value = []
+  originalAuthorityIdSet.value = new Set()
+  // 先打开对话框，随后异步拉取角色已有权限
+  showAssignDialog.value = true
+
   // 加载角色已有权限
-  loading.value = true;
+  loading.value = true
   try {
-    const roleAuthorities = await authorityApi.getRoleAuthorities(role.id);
-    selectedAuthorityIds.value = roleAuthorities.map(a => a.id);
-    showAssignDialog.value = true;
+    const res = await authorityApi.getAuthorityByRoleId(role.id)
+    const list = Array.isArray(res?.data_list) ? res.data_list : []
+    const ids = list.map(a => a.id)
+    selectedAuthorityIds.value = [...ids]
+    originalAuthorityIdSet.value = new Set(ids)
   } catch (error) {
-      console.error('获取角色权限失败');
+    console.error('获取角色权限失败', error)
+    emitToast({ type: 'error', message: '获取角色权限失败' })
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
+
+// 基于当前勾选结果进行实时分组（已分配/未分配）
+const selectedSet = computed(() => new Set(selectedAuthorityIds.value))
+const assignedAuthorities = computed(() => authorities.value.filter(a => selectedSet.value.has(a.id)))
+const unassignedAuthorities = computed(() => authorities.value.filter(a => !selectedSet.value.has(a.id)))
 
 // 保存权限分配
 const saveAuthorityAssign = async () => {
-  if (!selectedRole.value) return;
+  if (!selectedRole.value) return
 
-  loading.value = true;
+  // 计算差异：待新增、待删除
+  const currentSet = new Set(selectedAuthorityIds.value)
+  const originSet = originalAuthorityIdSet.value
+
+  const toAdd: string[] = []
+  const toDel: string[] = []
+  for (const id of currentSet) if (!originSet.has(id)) toAdd.push(id)
+  for (const id of originSet) if (!currentSet.has(id)) toDel.push(id)
+
+  if (toAdd.length === 0 && toDel.length === 0) {
+    emitToast({ type: 'info', message: '没有待提交的更改' })
+    showAssignDialog.value = false
+    return
+  }
+
+  loading.value = true
   try {
-    const req: AuthorityAssignReq = {
-      roleId: selectedRole.value.id,
-      authorityIds: selectedAuthorityIds.value
-    };
-    const success = await authorityApi.assignAuthorities(req);
-    if (success) {
-      console.log('权限分配成功');
-      showAssignDialog.value = false;
+    let okAdd = true
+    let okDel = true
+    if (toAdd.length > 0) {
+      const addReq: AuthRoleAddBatchReq = { role_id: selectedRole.value.id, authority_ids: toAdd }
+      await authorityApi.addRoleAuthBatch(addReq)
+    }
+    if (toDel.length > 0) {
+      const delReq: AuthRoleDeleteReq = { role_id: selectedRole.value.id, authority_ids: toDel }
+      await authorityApi.deleteRoleAuthBatch(delReq)
+    }
+    if (okAdd && okDel) {
+      emitToast({ type: 'success', message: '权限变更已保存' })
+      showAssignDialog.value = false
     }
   } catch (error) {
-    console.error('权限分配失败');
+    console.error('权限分配失败', error)
+    emitToast({ type: 'error', message: '权限分配失败' })
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
-// 切换权限选择
-const toggleAuthority = (authorityId: string) => {
-  const index = selectedAuthorityIds.value.indexOf(authorityId);
-  if (index > -1) {
-    selectedAuthorityIds.value.splice(index, 1);
-  } else {
-    selectedAuthorityIds.value.push(authorityId);
-  }
-};
+// 已使用 UiCheckbox 的 @update:modelValue 处理选中逻辑，无需额外切换函数
 
 // 初始化
 onMounted(async () => {
-  await fetchAuthorities();
-  await fetchRoles();
-});
+  await fetchAuthorities()
+  await fetchRoles()
+})
 </script>
 
 <template>
@@ -119,7 +152,7 @@ onMounted(async () => {
         >
           <div class="flex justify-between items-center mb-2">
             <h3 class="font-medium">{{ role.name }}</h3>
-            <span class="px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground">{{ role.roleEnum }}</span>
+            <span class="px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground">{{ role.role_enum }}</span>
           </div>
           <p class="text-sm text-muted-foreground">点击为该角色分配权限</p>
         </div>
@@ -142,30 +175,68 @@ onMounted(async () => {
         <div v-if="authorities.length === 0" class="text-center py-8 text-muted-foreground">
           暂无可用权限
         </div>
-        <div v-else class="space-y-2">
-          <div
-            v-for="authority in authorities"
-            :key="authority.id"
-            class="flex items-center p-3 border border-border rounded-md hover:bg-accent hover:text-accent-foreground transition-colors"
-          >
-            <UiCheckbox
-              :id="`authority-${authority.id}`"
-              :modelValue="selectedAuthorityIds.includes(authority.id)"
-              @update:modelValue="(val: boolean) => {
-                const idx = selectedAuthorityIds.indexOf(authority.id)
-                if (val && idx === -1) selectedAuthorityIds.push(authority.id)
-                if (!val && idx > -1) selectedAuthorityIds.splice(idx, 1)
-              }"
-            />
-            <label
-              :for="`authority-${authority.id}`"
-              class="ml-3 flex-1 text-sm font-medium cursor-pointer"
-            >
-              <div class="flex justify-between items-center w-full">
-                <span>{{ authority.name }}</span>
-                <span class="text-xs text-muted-foreground">{{ authority.authority }}</span>
+
+        <div v-else class="space-y-6">
+          <!-- 已分配 -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-sm font-semibold">已分配（{{ assignedAuthorities.length }}）</h4>
+            </div>
+            <div v-if="assignedAuthorities.length === 0" class="text-xs text-muted-foreground py-2">暂无</div>
+            <div v-else class="space-y-2">
+              <div
+                v-for="authority in assignedAuthorities"
+                :key="`assigned-${authority.id}`"
+                class="flex items-center p-3 border border-border rounded-md hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                <UiCheckbox
+                  :id="`authority-${authority.id}`"
+                  :modelValue="selectedAuthorityIds.includes(authority.id)"
+                  @update:modelValue="(val: boolean) => {
+                    const idx = selectedAuthorityIds.indexOf(authority.id)
+                    if (val && idx === -1) selectedAuthorityIds.push(authority.id)
+                    if (!val && idx > -1) selectedAuthorityIds.splice(idx, 1)
+                  }"
+                />
+                <label :for="`authority-${authority.id}`" class="ml-3 flex-1 text-sm font-medium cursor-pointer">
+                  <div class="flex justify-between items-center w-full">
+                    <span>{{ authority.name }}</span>
+                    <span class="text-xs text-muted-foreground">{{ authority.authority_uri }}</span>
+                  </div>
+                </label>
               </div>
-            </label>
+            </div>
+          </div>
+
+          <!-- 未分配 -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <h4 class="text-sm font-semibold">未分配（{{ unassignedAuthorities.length }}）</h4>
+            </div>
+            <div v-if="unassignedAuthorities.length === 0" class="text-xs text-muted-foreground py-2">暂无</div>
+            <div v-else class="space-y-2">
+              <div
+                v-for="authority in unassignedAuthorities"
+                :key="`unassigned-${authority.id}`"
+                class="flex items-center p-3 border border-border rounded-md hover:bg-accent hover:text-accent-foreground transition-colors"
+              >
+                <UiCheckbox
+                  :id="`authority-${authority.id}`"
+                  :modelValue="selectedAuthorityIds.includes(authority.id)"
+                  @update:modelValue="(val: boolean) => {
+                    const idx = selectedAuthorityIds.indexOf(authority.id)
+                    if (val && idx === -1) selectedAuthorityIds.push(authority.id)
+                    if (!val && idx > -1) selectedAuthorityIds.splice(idx, 1)
+                  }"
+                />
+                <label :for="`authority-${authority.id}`" class="ml-3 flex-1 text-sm font-medium cursor-pointer">
+                  <div class="flex justify-between items-center w-full">
+                    <span>{{ authority.name }}</span>
+                    <span class="text-xs text-muted-foreground">{{ authority.authority_uri }}</span>
+                  </div>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -1,18 +1,23 @@
 export interface LoginRequestData {
-    // role: string
     /** 用户名 */
     username: string
     /** 密码 */
     password: string
-    /** 验证码 */
-    // code: string
 }
-/** 验证码响应格式 */
-export type CaptchaResponseData = ApiResponseData<string>
-
 /** 登陆响应格式 */
-export type LoginResponseData = ApiResponseData<{
+export type LoginResponseData = {
     token: string,
     username: string,
     nickname: string,
- }>
+ }
+
+ export interface RegisterRequestData {
+    /** 用户名 */
+    username: string
+    /** 密码 */
+    password: string
+    /** 昵称 */
+    nickname: string
+ }
+
+export type RegisterResponseData = LoginResponseData

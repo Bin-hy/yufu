@@ -1,4 +1,4 @@
-import type { RouteRecordRaw, RouterHistory } from "vue-router"
+import type { RouterHistory } from "vue-router"
 import { createWebHistory, createWebHashHistory } from 'vue-router'
 
 /** 路由配置 */

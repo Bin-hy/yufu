@@ -1,2 +1,0 @@
-import {pinia} from '@/pinia'
-

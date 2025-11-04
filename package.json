@@ -6,7 +6,8 @@
   "scripts": {
     "dev:cobotweb" : "pnpm --filter cobotweb dev",
     "build:cobotweb": "pnpm --filter cobotweb build",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "dev": "pnpm -r dev"
   },
   "workspaces": [
     "cobotweb"

@@ -69,9 +69,9 @@ async function handleLogin () {
 
         // 假设登录成功，存储用户信息
         userStore.setUserInfo({
-            username: data.data.username,
-            token: data.data.token,
-            nickname: data.data.nickname
+            username: data.username,
+            token: data.token,
+            nickname: data.nickname
         })
 
         // 如果勾选了记住我，可以在这里存储到本地存储
@@ -86,17 +86,20 @@ async function handleLogin () {
 
     } catch (error) {
         console.error('登录失败:', error)
-        showModal({
-            title: '登录失败',
-            content: error.message || '请检查用户名和密码'
-        })
+        if (error instanceof Error){
+            showModal({
+                title: '登录失败',
+                content: error.message || '请检查用户名和密码'
+            })
+        }
+
     } finally {
         loading.value = false
     }
 }
 
-// 检查是否有记住的用户
-const rememberedUser = localStorage.getItem('rememberedUser')
+// 检查是否有记住的用户（使用统一工具函数，避免键名不一致）
+const rememberedUser = getRememberUser()
 if (rememberedUser) {
   form.username = rememberedUser
   form.remember = true
@@ -119,10 +122,9 @@ if (rememberedUser) {
         <p class="text-white text-opacity-80 text-center mt-1">欢迎回来，请登录您的账号</p>
       </div>
 
-      <!-- 登录表单内容 - 使用daisyui的表单组件 -->
       <div class="p-8">
+
         <form @submit.prevent="handleLogin">
-          <!-- 用户名输入框 - 使用daisyui的输入框 -->
           <div class="mb-6">
             <label for="username" class="block mb-2 text-sm font-medium text-foreground">
               用户名
@@ -168,7 +170,6 @@ if (rememberedUser) {
             <p v-if="errors.password" class="text-destructive text-sm mt-1">{{ errors.password }}</p>
           </div>
 
-          <!-- 记住我和忘记密码 - 使用daisyui的复选框 -->
           <div class="flex items-center justify-between mb-6">
             <div class="flex items-center space-x-2">
               <UiCheckbox
@@ -184,7 +185,6 @@ if (rememberedUser) {
             </a>
           </div>
 
-          <!-- 登录按钮 - 使用daisyui的按钮 -->
           <UiButton
             type="submit"
             size="lg"
@@ -205,6 +205,38 @@ if (rememberedUser) {
             </router-link>
           </p>
         </div>
+
+        <!-- 登录提示（悬浮气泡） -->
+        <div class="mb-4 flex justify-end">
+          <div class="relative group inline-flex items-center">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded px-1"
+              aria-describedby="login-tip"
+            >
+              <!-- info 图标 -->
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4" />
+                <path d="M12 8h.01" />
+              </svg>
+              <span class="hidden sm:inline">登录提示</span>
+            </button>
+            <!-- tooltip 内容 -->
+            <div
+              id="login-tip"
+              role="tooltip"
+              class="pointer-events-none absolute right-0 top-full mt-2 w-[min(22rem,90vw)] rounded-md border border-border bg-popover text-popover-foreground shadow-lg opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0 transition-all duration-150 p-3 z-50"
+            >
+              <p class="text-sm leading-6">
+                <span class="font-medium">提示：</span>
+                默认超级管理账户与密码均为
+                <code class="mx-1 rounded bg-muted px-1.5 py-0.5 text-foreground">sadmin</code>
+              </p>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
 

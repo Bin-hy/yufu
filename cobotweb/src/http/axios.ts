@@ -3,12 +3,15 @@ import { getToken } from "@/common/cache/cookies"
 import { get, merge } from "lodash-es"
 import { useUserStore } from "@/pinia/stores/user"
 import { emitToast } from "@/utils/toast"
+import { router } from "@/router"
 
-// /** 退出登录并强制刷新页面（会重定向到登录页） */
-// function logout() {
-//   useUserStore().logout()
-//   location.reload()
-// }
+/** 退出登录并强制刷新页面（会重定向到登录页） */
+function logout() {
+  const userStore = useUserStore()
+  userStore.logout()
+  // 跳转到登录页面
+  router.push('/login')
+}
 
 /** 创建请求实例 */
 function createInstance() {
@@ -24,9 +27,7 @@ function createInstance() {
   // 响应拦截器（可根据具体业务作出相应的调整）
   instance.interceptors.response.use(
     (response) => {
-      // requestData 是 api 返回的数据
-        console.log(response.data.message)
-      return response
+      return response.data
     },
     (error) => {
       // status 是 HTTP 状态码
@@ -37,10 +38,12 @@ function createInstance() {
           error.message = "请求错误"
           break
         case 401:
-          // Token 过期时
-          console.log("error.message:",error.message)
-          error.message = message || "未授权1"
-        //   logout()
+          // Token 过期或未授权时
+          error.message = message || "登录已过期，请重新登录"
+          emitToast({ type: 'error', message: error.message || String(message) })
+          setTimeout(() => {
+            logout()
+          }, 3000)
           break
         case 403:
           error.message = message || "拒绝访问"
