@@ -85,6 +85,7 @@ pub async fn authority_check_middleware(
     }
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CheckRequest {
     token: Option<String>,
@@ -92,11 +93,26 @@ pub struct CheckRequest {
     method: String,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CheckResponse {
     allow: bool,
 }
-// 作为lib包进行rbac权限校验
+
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/rbac",
+    request_body(
+        content = CheckRequest,
+        description = "作为lib包进行rbac权限校验",
+        content_type = "application/json"
+    ),
+    description = "检查权限能力（RBAC）",
+    responses(
+        (status = 200, description = "具有权限", body = CheckRequest),
+        (status = 403, description = "权限不足...")
+    ),
+))]
 pub async fn check_authority(
     State(state): State<AppState>,
     Json(check_request): Json<CheckRequest>,
