@@ -2,6 +2,7 @@
 pub mod doc {
     use crate::route::auth::AuthApi;
     use crate::route::authority::AuthorityApi;
+    use crate::route::rbac::RbacApi;
     use crate::route::recording::RecordingApi;
     use crate::route::role::RoleApi;
     use crate::route::user::UserApi;
@@ -23,6 +24,7 @@ pub mod doc {
             (path ="/api/v1",api = RoleApi, tags= ["角色信息相关CRUD"]),
             (path ="/api/v1",api = AuthorityApi, tags= ["所有请求的权限信息CRUD"]),
             (path ="/api/v1",api = RecordingApi, tags= ["用户操作记录查询"]),
+            (path ="/api/v1",api = RbacApi, tags= ["RBAC权限校验"]),
         ),
     )]
     pub struct ApiDoc;
