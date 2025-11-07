@@ -58,6 +58,24 @@ async fn test_login() -> Result<(), AppError> {
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;
+
+    // 1. 注册用户
+    let uri_register = "/register";
+    let client_register = Client::new();
+    let body_register = RegistryData{
+        username: "test_user".to_string(),
+        nickname: "test_user".to_string(),
+        password: "test_user".to_string(),
+    };
+    let resp_register = client_register
+        .post(format!("http://{}{}{}", addr.clone(), api_prefix, uri_register))
+        .json(&body_register)
+        .send()
+        .await?
+        .error_for_status()?;
+    assert!(resp_register.status().is_success());
+
+    // 2. 登陆用户
     let uri = "/login";
 
     let client = Client::new();
