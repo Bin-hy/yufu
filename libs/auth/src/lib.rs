@@ -80,6 +80,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use serde::{Deserialize, Serialize};
 
 /// Shared authentication state that holds the [`TokenManager`].
 ///
@@ -136,11 +137,14 @@ pub struct AuthState {
 ///     .route("/profile", get(profile))
 ///     .layer(middleware::from_fn_with_state(auth_state, access_middleware));
 /// ```
-pub async fn access_middleware(
+pub async fn access_middleware<IDTYPE>(
     State(auth_state): State<AuthState>,
     mut request: Request,
     next: Next,
-) -> Response {
+) -> Response
+where
+    for<'de> IDTYPE: Clone + Send + Sync + 'static + Serialize + Deserialize<'de>,
+{
     // 1. Extract token from the Authorization header.
     let auth_header = request.headers().get("Authorization");
 
@@ -161,7 +165,7 @@ pub async fn access_middleware(
     let token_manager = &auth_state.token_manager;
 
     // 3. Validate the token and inject Claims into request extensions.
-    match token_manager.verify_token(token) {
+    match token_manager.verify_token::<IDTYPE>(token) {
         Ok(claims) => {
             request.extensions_mut().insert(claims);
 
@@ -330,14 +334,15 @@ pub async fn access_middleware(
 ///     println!("✅ Middleware with callback ready!");
 /// }
 /// ```
-pub async fn access_middleware_with_callback<F, Fut>(
+pub async fn access_middleware_with_callback<IDTYPE, F, Fut>(
     State(auth_state): State<AuthState>,
     mut request: Request<Body>,
     next: Next,
     callback: F,
 ) -> Response
 where
-    for<'a> F: Fn(Claims, Request<Body>) -> Fut + Send + Sync + 'static,
+    for<'de> IDTYPE: Clone + Send + Sync + 'static + Serialize + Deserialize<'de>,
+    for<'a> F: Fn(Claims<IDTYPE>, Request<Body>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<Request<Body>, (StatusCode, String)>> + Send + 'static,
 {
     // 1. extract Token from Header
@@ -359,7 +364,7 @@ where
 
     // 2. validate Token
     let token_manager = &auth_state.token_manager;
-    match token_manager.verify_token(token) {
+    match token_manager.verify_token::<IDTYPE>(token) {
         Ok(claims) => {
             // 3. add Claims
             request.extensions_mut().insert(claims.clone());

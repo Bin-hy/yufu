@@ -2,6 +2,7 @@ use crate::claims::Claims;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use http::StatusCode;
+use serde::Serialize;
 
 /// Allows extracting [`Claims`] from request parts in Axum handlers.
 ///
@@ -41,16 +42,17 @@ use http::StatusCode;
 ///
 /// - [`axum::extract::FromRequestParts`]
 /// - [`axum::Extension`]
-impl<S> FromRequestParts<S> for Claims
+impl<S, IDTYPE> FromRequestParts<S> for Claims<IDTYPE>
 where
     S: Send + Sync,
+    IDTYPE: Clone + Send + Sync + 'static + Serialize,
 {
     type Rejection = (StatusCode, &'static str);
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         parts
             .extensions
-            .get::<Claims>()
+            .get::<Claims<IDTYPE>>()
             .cloned()
             .ok_or((StatusCode::UNAUTHORIZED, "Missing or invalid token claims"))
     }

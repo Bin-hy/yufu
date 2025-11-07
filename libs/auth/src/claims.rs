@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 /// Represents the payload (claims) contained within a JWT token.
 ///
@@ -25,13 +25,19 @@ use std::fmt::Display;
 /// println!("{}", claims);
 /// ```
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct Claims {
-    pub id: String,
+pub struct Claims<IDTYPE>
+where
+    IDTYPE: Clone + Send + Sync + 'static + Serialize,
+{
+    pub id: IDTYPE,
     pub exp: u64, // expiration
 }
 
-impl Display for Claims {
+impl<IDTYPE> Display for Claims<IDTYPE>
+where
+    IDTYPE: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "id: {} expire:{}", self.id, self.exp)
+        write!(f, "id: {:?}, expire: {}", self.id, self.exp)
     }
 }
