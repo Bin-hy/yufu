@@ -15,7 +15,6 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(ColumnDef::new(Role::Id).string().not_null().primary_key())
                     .col(ColumnDef::new(Role::Name).string().unique_key())
-                    .col(ColumnDef::new(Role::ERoleEnum).string().unique_key())
                     .col(ColumnDef::new(Role::CreateTime).date_time().not_null())
                     .col(ColumnDef::new(Role::UpdateTime).date_time().not_null())
                     .to_owned(),
@@ -37,8 +36,6 @@ enum Role {
     Table,
     Id,
     Name,
-    #[sea_orm(iden = "role_enum")]
-    ERoleEnum,
     CreateTime,
     UpdateTime,
 }

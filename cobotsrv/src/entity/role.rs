@@ -11,8 +11,6 @@ pub struct Model {
     pub id: String,
     #[sea_orm(unique_key = "unique_name")]
     pub name: String,
-    #[sea_orm(unique_key = "unique_role_enum")]
-    pub role_enum: String,
     pub create_time: DateTime,
     pub update_time: DateTime,
 
@@ -28,8 +26,7 @@ pub struct Model {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RoleVO {
     pub id: String,
-    pub role_enum: String, // ADMIN
-    pub name: String,      // 管理员
+    pub name: String, // 管理员
     pub create_time: String,
     pub update_time: String,
 }
@@ -69,7 +66,6 @@ impl From<Model> for RoleVO {
     fn from(value: Model) -> Self {
         Self {
             id: value.id,
-            role_enum: value.role_enum,
             name: value.name,
             create_time: value.create_time.format("%Y-%m-%d %H:%M:%S").to_string(),
             update_time: value.update_time.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -82,14 +78,12 @@ impl From<Model> for RoleVO {
 #[derive(Deserialize, Serialize)]
 pub struct RoleAddReq {
     pub name: String,
-    pub role_enum: String,
 }
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize)]
 pub struct RolePatchReq {
     pub id: String,
     pub name: String,
-    pub role_enum: String,
 }
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize)]

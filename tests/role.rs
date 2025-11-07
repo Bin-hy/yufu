@@ -30,10 +30,7 @@ async fn test_add_role() -> Result<(), AppError> {
     let client = Client::new();
     let role_name = format!("test_role_{}", uuid::Uuid::new_v4());
 
-    let role_req = RoleAddReq {
-        name: role_name,
-        role_enum: "TestRole".to_string(),
-    };
+    let role_req = RoleAddReq { name: role_name };
 
     let resp = client
         .post(format!("http://{}{}{}", addr, api_prefix, uri))
@@ -101,10 +98,7 @@ async fn test_patch_role() -> Result<(), AppError> {
     // 先创建一个角色
     let role_name = format!("test_role_{}", uuid::Uuid::new_v4());
 
-    let role_req = RoleAddReq {
-        name: role_name,
-        role_enum: "TestRole".to_string(),
-    };
+    let role_req = RoleAddReq { name: role_name };
 
     let resp = client
         .post(format!("http://{}{}{}", addr, api_prefix, uri))
@@ -121,7 +115,6 @@ async fn test_patch_role() -> Result<(), AppError> {
     let patch_req = RolePatchReq {
         id: role.id.clone(),
         name: new_name.to_string(),
-        role_enum: "TestRole".to_string(),
     };
 
     let resp = client

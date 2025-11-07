@@ -1,13 +1,13 @@
-use crate::AppState;
 use crate::entity::authority::AuthorityVO;
 use crate::entity::authority_role::{
     AuthRoleAddReq, AuthRoleBatchAddReq, AuthRoleBatchDeleteReq, AuthRoleDeleteReq, AuthorityRoleVO,
 };
 use crate::entity::role::RoleEnum::Superadmin;
 use crate::entity::role::{RoleAddReq, RoleDeleteReq, RolePatchReq, RoleVO};
-use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority, authority_role, role};
+use crate::entity::{authority, authority_role, role, PageSelectQuery, PageSelectQueryResult};
 use crate::error::AppError;
 use crate::result::Result;
+use crate::AppState;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -68,7 +68,6 @@ pub async fn add_role(
     let new_role = role::ActiveModel {
         id: Set(Uuid::new_v4().to_string()),
         name: Set(insert_payload.name.to_string().to_owned()),
-        role_enum: Set(insert_payload.role_enum.to_owned()),
         create_time: Set(now.to_owned()),
         update_time: Set(now.to_owned()),
     };
@@ -79,8 +78,8 @@ pub async fn add_role(
                 match sql_err {
                     SqlErr::UniqueConstraintViolation(_) => {
                         return Err(AppError::AlreadyExists(format!(
-                            "角色名称 '{}' 或 类型 '{}' 已存在！",
-                            insert_payload.name, insert_payload.role_enum
+                            "角色名称 '{}' 已存在！",
+                            insert_payload.name
                         )));
                     }
                     SqlErr::ForeignKeyConstraintViolation(_) => {
@@ -186,7 +185,6 @@ pub async fn patch_role(
     // 更新
     let mut new_role: role::ActiveModel = role_db.into();
     new_role.name = Set(patch_payload.name.to_owned());
-    new_role.role_enum = Set(patch_payload.role_enum.to_owned());
     new_role.update_time = Set(Utc::now().naive_utc());
 
     let db_role = new_role.update(db).await?;

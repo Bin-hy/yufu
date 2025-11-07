@@ -14,7 +14,6 @@ impl MigrationTrait for Migration {
         Role {
             id: Set(RoleEnum::Superadmin.default_id().to_owned()),
             name: Set(RoleEnum::Superadmin.get_name().to_string()),
-            role_enum: Set(RoleEnum::Superadmin.as_str().to_string()),
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
         }
@@ -25,7 +24,6 @@ impl MigrationTrait for Migration {
         Role {
             id: Set(RoleEnum::Admin.default_id().to_owned()),
             name: Set(RoleEnum::Admin.get_name().to_string()),
-            role_enum: Set(RoleEnum::Admin.as_str().to_string()),
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
         }
@@ -35,7 +33,6 @@ impl MigrationTrait for Migration {
         Role {
             id: Set(RoleEnum::User.default_id().to_owned()),
             name: Set(RoleEnum::User.get_name().to_string()),
-            role_enum: Set(RoleEnum::User.as_str().to_string()),
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
         }
