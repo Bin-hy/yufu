@@ -1,6 +1,6 @@
+use crate::AppState;
 use crate::entity::{authority, recording};
 use crate::error::AppError;
-use crate::AppState;
 use auth::claims::Claims;
 use axum::extract::{Request, State};
 use axum::middleware::Next;

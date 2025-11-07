@@ -9,7 +9,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter, Set};
 use sea_orm::{DatabaseConnection, EntityTrait};
 use uuid::Uuid;
 
-
 #[derive(Clone)]
 pub struct UserService;
 

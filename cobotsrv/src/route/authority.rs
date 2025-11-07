@@ -1,10 +1,10 @@
+use crate::AppState;
 use crate::entity::authority::{
     AuthorityDeleteReq, AuthorityInsertReq, AuthorityPatchReq, AuthorityVO,
 };
-use crate::entity::{authority, PageSelectQuery, PageSelectQueryResult};
+use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
-use crate::AppState;
 use axum::extract::{Query, State};
 use axum::routing::post;
 use axum::{Json, Router};

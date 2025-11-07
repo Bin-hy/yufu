@@ -3,15 +3,16 @@ use crate::entity::{authority, authority_role, user};
 use crate::error::AppError;
 use crate::result::Result;
 
-use crate::service::recording;
 use crate::AppState;
+use crate::service::recording;
 use auth::claims::Claims;
+use axum::Json;
 use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 // 目前精细化到query只处理到path例如：get?/user/{user_id}
 // 检查每个请求的每个角色是否符合他的角色权限
@@ -53,7 +54,7 @@ pub async fn authority_check_middleware(
 
     let uri_no_prefix = handler_prefix(prefix_api, uri.clone());
 
-    println!(
+    info!(
         "{}?{}",
         request.method().clone().as_str().to_lowercase(),
         uri_no_prefix.clone()
