@@ -62,13 +62,18 @@ async fn test_login() -> Result<(), AppError> {
     // 1. 注册用户
     let uri_register = "/register";
     let client_register = Client::new();
-    let body_register = RegistryData{
+    let body_register = RegistryData {
         username: "test_user".to_string(),
         nickname: "test_user".to_string(),
         password: "test_user".to_string(),
     };
     let resp_register = client_register
-        .post(format!("http://{}{}{}", addr.clone(), api_prefix, uri_register))
+        .post(format!(
+            "http://{}{}{}",
+            addr.clone(),
+            api_prefix,
+            uri_register
+        ))
         .json(&body_register)
         .send()
         .await?
