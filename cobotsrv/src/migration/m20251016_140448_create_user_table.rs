@@ -17,7 +17,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(User::Username).string().unique_key())
                     .col(ColumnDef::new(User::Password).string())
                     .col(ColumnDef::new(User::Nickname).string())
-                    .col(ColumnDef::new(User::GroupId).string())
                     .col(ColumnDef::new(User::RoleId).string())
                     .col(ColumnDef::new(User::Description).string())
                     .col(ColumnDef::new(User::CreateTime).date_time().not_null())
@@ -45,7 +44,6 @@ enum User {
     CreateTime,
     UpdateTime,
     Nickname,
-    GroupId,
     RoleId,
     Description,
 }
