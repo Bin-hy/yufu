@@ -1,7 +1,8 @@
-use crate::AppState;
 use crate::rbac::check_authority;
-use axum::Router;
+use crate::AppState;
 use axum::routing::post;
+use axum::Router;
+#[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 
 pub fn get_public_routes() -> Router<AppState> {
