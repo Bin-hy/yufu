@@ -1,7 +1,7 @@
-use crate::AppState;
 use crate::entity::recording::RecordingVO;
 use crate::entity::{PageSelectQuery, PageSelectQueryResult, recording, user};
 use crate::result::Result;
+use crate::{AppState, IdType};
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -58,7 +58,7 @@ pub async fn get_recording_by_page(
 ))]
 pub async fn get_recording_by_user_id(
     State(state): State<AppState>,
-    Path(user_id): Path<String>,
+    Path(user_id): Path<IdType>,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<RecordingVO>>> {
     let db = &state.database.connection;

@@ -13,7 +13,13 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Role::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(Role::Id).string().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(Role::Id)
+                            .integer()
+                            .auto_increment()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(Role::Name).string().unique_key())
                     .col(ColumnDef::new(Role::CreateTime).date_time().not_null())
                     .col(ColumnDef::new(Role::UpdateTime).date_time().not_null())

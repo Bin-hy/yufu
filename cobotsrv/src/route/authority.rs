@@ -9,10 +9,9 @@ use axum::extract::{Query, State};
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, EntityTrait, PaginatorTrait, Set};
+use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, PaginatorTrait, Set};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
-use uuid::Uuid;
 
 pub fn get_auth_routes() -> Router<AppState> {
     Router::new().route(
@@ -48,7 +47,7 @@ pub async fn add_authority(
     let now = Utc::now().naive_utc();
 
     let new_authority = authority::ActiveModel {
-        id: Set(Uuid::new_v4().to_string()),
+        id: ActiveValue::NotSet,
         name: Set(insert_payload.name.clone()),
         authority_uri: Set(insert_payload.authority_uri.clone()),
         create_time: Set(now),

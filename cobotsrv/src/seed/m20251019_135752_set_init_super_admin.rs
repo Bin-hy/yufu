@@ -12,11 +12,11 @@ impl MigrationTrait for Migration {
 
         // insert SuperAdmin
         User {
-            id: Set("1".into()),
+            id: Set(1),
             username: Set("sadmin".to_string()),
             password: Set(Some("sadmin".to_string())),
             nickname: Set(Some("sadmin".to_string())),
-            role_id: Set("1".to_string()),
+            role_id: Set(1),
             description: Set(Some("The System Admin.".to_string())),
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
@@ -25,11 +25,11 @@ impl MigrationTrait for Migration {
         .await?;
         // insert Admin
         User {
-            id: Set("2".into()),
+            id: Set(2),
             username: Set("admin".to_string()),
             password: Set(Some("admin".to_string())),
             nickname: Set(Some("admin".to_string())),
-            role_id: Set("2".to_string()),
+            role_id: Set(2),
             description: Set(Some("The System Admin.".to_string())),
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),

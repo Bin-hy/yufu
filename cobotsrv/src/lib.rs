@@ -288,13 +288,13 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
 
 /// 鉴权成功后回调：将用户信息注入
 async fn access_callback(
-    claim: Claims,
+    claim: Claims<IdType>,
     mut req: Request<Body>, // 拥有 Request 所有权
     app_state: AppState,
 ) -> Result<Request<Body>, (StatusCode, String)> {
     let db = &app_state.database.connection;
 
-    let user = user::Entity::find_by_id(&claim.id)
+    let user = user::Entity::find_by_id(claim.id)
         .one(db)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "No user id".to_string()))?
@@ -311,3 +311,4 @@ pub struct AppState {
     database: Arc<DatabaseService>,
     auth_state: Arc<AuthState>,
 }
+pub type IdType = i32;

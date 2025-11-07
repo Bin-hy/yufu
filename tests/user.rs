@@ -65,7 +65,7 @@ async fn test_patch_user() -> Result<(), AppError> {
     let uri = "/user";
     let new_nickname = "更新后的测试用户";
     let patch_req = UserPatchReq {
-        user_id: RoleEnum::Superadmin.default_id().into(),
+        user_id: RoleEnum::Superadmin.default_id(),
         nickname: Some(new_nickname.to_string()),
         password: None,
     };
@@ -142,7 +142,7 @@ async fn test_add_user_with_role() -> Result<(), AppError> {
     let test_password = uuid::Uuid::new_v4().to_string();
     let payload = UserAddWithRoleReq {
         username: test_user_name.clone(),
-        role_id: RoleEnum::Admin.default_id().to_string(),
+        role_id: RoleEnum::Admin.default_id(),
         password: test_password.clone(),
         nickname: None,
     };

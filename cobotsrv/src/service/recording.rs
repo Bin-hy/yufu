@@ -1,17 +1,18 @@
+use crate::IdType;
 use crate::entity::{authority, recording};
 use crate::error::AppError;
 use crate::result::Result;
 use anyhow::anyhow;
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
-use uuid::Uuid;
+use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, Set};
+
 pub struct Service;
 impl Service {
     pub async fn add_recording(
         db: &DatabaseConnection,
         method: String,
         uri: String,
-        user_id: String,
+        user_id: IdType,
     ) -> Result<()> {
         // 获取到用户的操作 get user operations.
         // 查找权限表记录该操作 find the authority in the table.
@@ -29,7 +30,7 @@ impl Service {
 
         // save into db.
         let new_recording = recording::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set(operation_name.to_owned()),
             authority_uri: Set(operation_uri.to_owned()),
             user_id: Set(user_id.to_owned()),

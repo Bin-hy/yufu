@@ -1,4 +1,3 @@
-use crate::AppState;
 use crate::entity::authority::AuthorityVO;
 use crate::entity::authority_role::{
     AuthRoleAddReq, AuthRoleBatchAddReq, AuthRoleBatchDeleteReq, AuthRoleDeleteReq, AuthorityRoleVO,
@@ -8,17 +7,17 @@ use crate::entity::role::{RoleAddReq, RoleDeleteReq, RolePatchReq, RoleVO};
 use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority, authority_role, role};
 use crate::error::AppError;
 use crate::result::Result;
+use crate::{AppState, IdType};
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, PaginatorTrait, QueryFilter, Set,
-    SqlErr, TransactionTrait,
+    ActiveModelTrait, ActiveValue, ColumnTrait, DeleteResult, EntityTrait, PaginatorTrait,
+    QueryFilter, Set, SqlErr, TransactionTrait,
 };
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
-use uuid::Uuid;
 
 pub fn get_auth_routes() -> Router<AppState> {
     Router::new()
@@ -66,7 +65,7 @@ pub async fn add_role(
     let db = &state.database.connection;
     let now = Utc::now().naive_utc();
     let new_role = role::ActiveModel {
-        id: Set(Uuid::new_v4().to_string()),
+        id: ActiveValue::NotSet,
         name: Set(insert_payload.name.to_string().to_owned()),
         create_time: Set(now.to_owned()),
         update_time: Set(now.to_owned()),
@@ -301,12 +300,12 @@ pub async fn add_role_authorities(
     let db = &state.database.connection;
 
     // 校验 role 是否存在
-    let role_vo = crate::service::role::Service::get_role_vo(db, payload.role_id.clone()).await?;
+    let role_vo = crate::service::role::Service::get_role_vo(db, payload.role_id).await?;
 
     // 校验每个 authority 是否存在，并收集对象
     let mut authorities = Vec::new();
     for aid in &payload.authority_ids {
-        let auth_vo = crate::service::authority::Service::get_authority_vo(db, aid.clone()).await?;
+        let auth_vo = crate::service::authority::Service::get_authority_vo(db, *aid).await?;
         authorities.push(auth_vo);
     }
 
@@ -316,8 +315,8 @@ pub async fn add_role_authorities(
     let mut inserted_vos = Vec::new();
     for authority_vo in &authorities {
         let new_auth_role = authority_role::ActiveModel {
-            role_id: Set(payload.role_id.clone()),
-            authority_id: Set(authority_vo.id.clone()),
+            role_id: Set(payload.role_id),
+            authority_id: Set(authority_vo.id),
             create_time: Set(Utc::now().naive_utc()),
             update_time: Set(Utc::now().naive_utc()),
         };
@@ -375,8 +374,8 @@ pub async fn delete_role_authority(
 
     // 删除 role_id + authority_id 对应的记录
     let delete_result: DeleteResult = authority_role::Entity::delete_many()
-        .filter(authority_role::Column::RoleId.eq(payload.role_id.clone()))
-        .filter(authority_role::Column::AuthorityId.eq(payload.authority_id.clone()))
+        .filter(authority_role::Column::RoleId.eq(payload.role_id))
+        .filter(authority_role::Column::AuthorityId.eq(payload.authority_id))
         .exec(db)
         .await
         .map_err(AppError::from)?;
@@ -413,7 +412,7 @@ pub async fn delete_role_authorities(
 
     // 执行批量删除
     let delete_result: DeleteResult = authority_role::Entity::delete_many()
-        .filter(authority_role::Column::RoleId.eq(payload.role_id.clone()))
+        .filter(authority_role::Column::RoleId.eq(payload.role_id))
         .filter(authority_role::Column::AuthorityId.is_in(payload.authority_ids.clone()))
         .exec(db)
         .await
@@ -443,7 +442,7 @@ pub async fn delete_role_authorities(
 ))]
 pub async fn get_role_authority_by_role_id(
     State(state): State<AppState>,
-    Path(role_id): Path<String>,
+    Path(role_id): Path<IdType>,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<AuthorityVO>>> {
     let db = &state.database.connection;
@@ -452,7 +451,7 @@ pub async fn get_role_authority_by_role_id(
 
     // 先查询 role，然后通过关联查询 authorities
     let paginator = authority_role::Entity::find()
-        .filter(authority_role::Column::RoleId.eq(role_id.clone()))
+        .filter(authority_role::Column::RoleId.eq(role_id))
         .find_also_related(authority::Entity)
         .paginate(db, page_size);
 

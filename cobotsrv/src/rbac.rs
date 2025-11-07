@@ -3,8 +3,8 @@ use crate::entity::{authority, authority_role, user};
 use crate::error::AppError;
 use crate::result::Result;
 
-use crate::AppState;
 use crate::service::recording;
+use crate::{AppState, IdType};
 use auth::claims::Claims;
 use axum::Json;
 use axum::extract::{MatchedPath, Request, State};
@@ -17,7 +17,7 @@ use tracing::info;
 // 目前精细化到query只处理到path例如：get?/user/{user_id}
 // 检查每个请求的每个角色是否符合他的角色权限
 pub async fn authority_check_middleware(
-    claim: Claims,
+    claim: Claims<IdType>,
     State(app_state): State<AppState>,
     request: Request,
     next: Next,
@@ -27,7 +27,7 @@ pub async fn authority_check_middleware(
     // 检查用户的角色role是否有请求该路径的权限
     // 检索role
     // 查找用户，不存在则返回自定义错误
-    let user = match user::Entity::find_by_id(&user_id).one(db).await {
+    let user = match user::Entity::find_by_id(user_id).one(db).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return AppError::NotFound(format!("User {} not found", &user_id)).into_response();
@@ -69,7 +69,7 @@ pub async fn authority_check_middleware(
     let role_id = user.role_id;
 
     let exists = authority_role::Entity::find()
-        .filter(authority_role::Column::RoleId.eq(&role_id))
+        .filter(authority_role::Column::RoleId.eq(role_id))
         .find_also_related(authority::Entity)
         .filter(authority::Column::AuthorityUri.eq(&authority_uri_no_prefix))
         .one(db)
@@ -137,7 +137,11 @@ pub async fn check_authority(
     {
         // 1. 校验
         // 校验token有效性
-        let claim = match state.auth_state.token_manager.verify_token(token.as_str()) {
+        let claim = match state
+            .auth_state
+            .token_manager
+            .verify_token::<IdType>(token.as_str())
+        {
             Ok(claim) => claim,
 
             Err(_) => {
@@ -148,7 +152,7 @@ pub async fn check_authority(
         // 检查用户的角色role是否有请求该路径的权限
         // 检索role
         // 查找用户，不存在则返回自定义错误
-        let user = match user::Entity::find_by_id(&user_id).one(db).await {
+        let user = match user::Entity::find_by_id(user_id).one(db).await {
             Ok(Some(u)) => u,
             Ok(None) => {
                 return Err(AppError::NotFound(format!("User {} not found", &user_id)));
@@ -165,7 +169,7 @@ pub async fn check_authority(
         let role_id = user.role_id;
 
         let exists = authority_role::Entity::find()
-            .filter(authority_role::Column::RoleId.eq(&role_id))
+            .filter(authority_role::Column::RoleId.eq(role_id))
             .find_also_related(authority::Entity)
             .filter(authority::Column::AuthorityUri.eq(&authority_uri))
             .one(db)

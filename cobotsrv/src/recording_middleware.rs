@@ -1,17 +1,16 @@
-use crate::AppState;
 use crate::entity::{authority, recording};
 use crate::error::AppError;
+use crate::{AppState, IdType};
 use auth::claims::Claims;
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, Set};
-use uuid::Uuid;
+use sea_orm::{ActiveModelTrait, ActiveValue, Set};
 
 /// 记录用户操作
 pub async fn recording_operation_middleware(
-    claim: Claims,
+    claim: Claims<IdType>,
     State(app_state): State<AppState>,
     request: Request,
     next: Next,
@@ -37,7 +36,7 @@ pub async fn recording_operation_middleware(
 
     // save into db.
     let new_recording = recording::ActiveModel {
-        id: Set(Uuid::new_v4().to_string().to_owned()),
+        id: ActiveValue::NotSet,
         name: Set(operation_name.to_owned()),
         authority_uri: Set(operation_uri.to_owned()),
         user_id: Set(claim.id.to_owned()),

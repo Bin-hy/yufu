@@ -12,10 +12,10 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(AuthorityRole::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(AuthorityRole::RoleId).string().not_null())
+                    .col(ColumnDef::new(AuthorityRole::RoleId).integer().not_null())
                     .col(
                         ColumnDef::new(AuthorityRole::AuthorityId)
-                            .string()
+                            .integer()
                             .not_null(),
                     )
                     .col(

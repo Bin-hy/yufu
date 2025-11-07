@@ -113,7 +113,7 @@ async fn test_patch_role() -> Result<(), AppError> {
     // 修改角色
     let new_name = "更新后的测试角色描述";
     let patch_req = RolePatchReq {
-        id: role.id.clone(),
+        id: role.id,
         name: new_name.to_string(),
     };
 

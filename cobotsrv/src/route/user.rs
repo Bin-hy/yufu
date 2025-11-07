@@ -1,5 +1,5 @@
-use crate::AppState;
 use crate::result::Result;
+use crate::{AppState, IdType};
 
 use crate::entity::user::{UserAddWithRoleReq, UserPatchReq, UserRolePatchReq, UserVO};
 use crate::service::user::UserService;
@@ -39,9 +39,12 @@ pub fn get_public_routes() -> Router<AppState> {
         (status = 200, description = "成功", body = UserVO),
     ),
 ))]
-pub async fn get_user_by_id(claim: Claims, State(state): State<AppState>) -> Result<Json<UserVO>> {
+pub async fn get_user_by_id(
+    claim: Claims<IdType>,
+    State(state): State<AppState>,
+) -> Result<Json<UserVO>> {
     let db = &state.database.connection;
-    let user_vo = UserService::get_user_by_id(db, claim.id.to_string()).await?;
+    let user_vo = UserService::get_user_by_id(db, claim.id).await?;
     Ok(Json(user_vo))
 }
 
@@ -115,7 +118,7 @@ pub async fn add_user_with_role(
         username.as_str(),
         payload.password.as_str(),
         nickname.as_str(),
-        payload.role_id.as_str(),
+        payload.role_id,
     )
     .await?;
 
@@ -141,15 +144,15 @@ pub async fn patch_user_role(
 ) -> Result<Json<UserVO>> {
     let db = &state.database.connection;
     // 校验 role_id != 超级管理员的id
-    if payload.new_role_id.clone() == RoleEnum::Superadmin.default_id() {
+    if payload.new_role_id == Superadmin.default_id() {
         return Err(AppError::Forbidden("禁止设置为SuperAdmin".to_string()));
     }
-    let user_db = user::Entity::find_by_id(payload.user_id.clone())
+    let user_db = user::Entity::find_by_id(payload.user_id)
         .one(db)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
-    let role_db = role::Entity::find_by_id(payload.new_role_id.clone())
+    let role_db = role::Entity::find_by_id(payload.new_role_id)
         .one(db)
         .await?
         .ok_or_else(|| AppError::NotFound("Role not found".to_string()))?;
@@ -180,7 +183,7 @@ pub async fn patch_user_basic_data(
     Json(payload): Json<UserPatchReq>,
 ) -> Result<Json<UserVO>> {
     let db = &state.database.connection;
-    let user_dbm = user::Entity::find_by_id(payload.user_id.clone())
+    let user_dbm = user::Entity::find_by_id(payload.user_id)
         .one(db)
         .await
         .unwrap()
@@ -212,10 +215,10 @@ pub async fn patch_user_basic_data(
 ))]
 pub async fn delete_user_by_id(
     State(state): State<AppState>,
-    Path(user_id): Path<String>,
+    Path(user_id): Path<IdType>,
 ) -> Result<String> {
     let db = &state.database.connection;
-    let delete_result = user::Entity::delete_by_id(user_id.clone()).exec(db).await?;
+    let delete_result = user::Entity::delete_by_id(user_id).exec(db).await?;
     if delete_result.rows_affected == 1 {
         Ok("删除成功".to_string())
     } else {
@@ -224,7 +227,7 @@ pub async fn delete_user_by_id(
 }
 
 use crate::entity::role::RoleEnum::Superadmin;
-use crate::entity::role::{RoleEnum, RoleVO};
+use crate::entity::role::RoleVO;
 use crate::entity::{PageSelectQuery, PageSelectQueryResult, role, user};
 use crate::error::AppError;
 #[cfg(feature = "openapi")]

@@ -13,7 +13,8 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(
                         ColumnDef::new(Authority::Id)
-                            .string()
+                            .integer()
+                            .auto_increment()
                             .not_null()
                             .primary_key(),
                     )

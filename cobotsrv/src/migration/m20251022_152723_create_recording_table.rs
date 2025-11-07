@@ -15,13 +15,14 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(
                         ColumnDef::new(Recording::Id)
-                            .string()
+                            .integer()
+                            .auto_increment()
                             .not_null()
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Recording::Name).string())
                     .col(ColumnDef::new(Recording::AuthorityUri).string())
-                    .col(ColumnDef::new(Recording::UserId).string())
+                    .col(ColumnDef::new(Recording::UserId).integer())
                     .col(ColumnDef::new(Recording::CreateTime).date_time())
                     .to_owned(),
             )

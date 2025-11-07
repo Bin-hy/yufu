@@ -1,8 +1,7 @@
 use crate::entity::authority;
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, ActiveValue, Set};
 use sea_orm_migration::prelude::*;
-use uuid::Uuid;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -14,7 +13,7 @@ impl MigrationTrait for Migration {
         let conn = manager.get_connection();
         // authority parts
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("添加权限".to_string()),
             authority_uri: Set("post?/authority".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -24,7 +23,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("更新权限".to_string()),
             authority_uri: Set("patch?/authority".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -34,7 +33,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("删除权限".to_string()),
             authority_uri: Set("delete?/authority".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -44,7 +43,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("获取所有权限".to_string()),
             authority_uri: Set("get?/authority".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -55,7 +54,7 @@ impl MigrationTrait for Migration {
 
         // role parts
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("添加新角色".to_string()),
             authority_uri: Set("post?/role".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -65,7 +64,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("获取所有角色".to_string()),
             authority_uri: Set("get?/role".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -75,7 +74,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("更新角色".to_string()),
             authority_uri: Set("patch?/role".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -85,7 +84,7 @@ impl MigrationTrait for Migration {
         .await?;
 
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("删除角色".to_string()),
             authority_uri: Set("delete?/role".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -96,7 +95,7 @@ impl MigrationTrait for Migration {
 
         // recordings parts
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("分页获取用户记录".to_string()),
             authority_uri: Set("get?/recordings/{user_id}".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -105,7 +104,7 @@ impl MigrationTrait for Migration {
         .insert(conn)
         .await?;
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("获取所有用户记录".to_string()),
             authority_uri: Set("get?/recordings".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -116,7 +115,7 @@ impl MigrationTrait for Migration {
 
         // user parts
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("分页获取所有用户信息".to_string()),
             authority_uri: Set("get?/users".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -125,7 +124,7 @@ impl MigrationTrait for Migration {
         .insert(conn)
         .await?;
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("获取当前用户信息".to_string()),
             authority_uri: Set("get?/user".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -134,7 +133,7 @@ impl MigrationTrait for Migration {
         .insert(conn)
         .await?;
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("更新用户信息角色".to_string()),
             authority_uri: Set("patch?/user/role".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
@@ -143,7 +142,7 @@ impl MigrationTrait for Migration {
         .insert(conn)
         .await?;
         authority::ActiveModel {
-            id: Set(Uuid::new_v4().to_string().to_owned()),
+            id: ActiveValue::NotSet,
             name: Set("更新用户基础信息".to_string()),
             authority_uri: Set("patch?/user".to_string()),
             create_time: Set(Utc::now().naive_utc().to_owned()),
