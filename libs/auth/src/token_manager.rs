@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_expired_token() {
-        let manager = TokenManager::new("mysecret", -100); // 过期处理
+        let manager = TokenManager::new("mysecret", 300); // 过期处理
         let token = manager.generate_token(1).unwrap();
 
         match manager.verify_token::<i32>(&token) {

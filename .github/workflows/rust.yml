@@ -23,10 +23,10 @@ jobs:
 
             - name: Cargo format
               run: cargo fmt --all -- --check
-            - name: Cargo build
-              run: cargo build --workspace --all-targets --all-features --release --verbose
             - name: Cargo clippy
               run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+            - name: Cargo build
+              run: cargo build --workspace --all-targets --all-features --release --verbose
 
             - name: Cargo Test (only on Ubuntu)
               if: matrix.os == 'ubuntu-latest'
