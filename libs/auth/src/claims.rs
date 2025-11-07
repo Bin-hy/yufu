@@ -19,7 +19,6 @@ use std::fmt::Display;
 ///
 /// let claims = Claims {
 ///     id: "user123".to_string(),
-///     iat: 1_700_000_000,
 ///     exp: 1_700_003_600,
 /// };
 ///
@@ -28,7 +27,6 @@ use std::fmt::Display;
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Claims {
     pub id: String,
-    pub iat: u64, // token created time
     pub exp: u64, // expiration
 }
 

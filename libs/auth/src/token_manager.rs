@@ -68,7 +68,6 @@ impl TokenManager {
         let exp = now + Duration::seconds(self.expire_seconds);
         let claims = Claims {
             id: user_id.to_string(),
-            iat: now.timestamp() as u64,
             exp: exp.timestamp() as u64,
         };
 
@@ -139,16 +138,16 @@ mod tests {
 
         match manager.verify_token(&token) {
             Ok(claims) => {
-                println!("✅ Token valid pass, id: {}", claims.id);
+                assert_eq!(claims.id, "user1".to_string());
             }
             Err(TokenError::Expired) => {
-                println!("⚠️ Token could be expired, please login again.");
+                panic!("Token could be expired, please login again.");
             }
             Err(TokenError::InvalidSignature) => {
-                println!("🚫 Token invalid，it could be changed, please login again.");
+                panic!("Token invalid，it could be changed, please login again.");
             }
             Err(e) => {
-                println!("❌ Token valid error: {:?}", e);
+                panic!("Token valid error: {:?}", e);
             }
         }
     }
