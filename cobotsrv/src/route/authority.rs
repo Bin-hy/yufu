@@ -1,15 +1,15 @@
-use crate::AppState;
 use crate::entity::authority::{
     AuthorityDeleteReq, AuthorityInsertReq, AuthorityPatchReq, AuthorityVO,
 };
-use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority};
-use crate::error::AppError;
+use crate::entity::{authority, PageSelectQuery, PageSelectQueryResult};
+use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
+use crate::AppState;
 use axum::extract::{Query, State};
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, EntityTrait, PaginatorTrait, Set, SqlErr};
+use sea_orm::{ActiveModelTrait, EntityTrait, PaginatorTrait, Set};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -55,30 +55,14 @@ pub async fn add_authority(
         update_time: Set(now),
     };
 
-    match new_authority.insert(db).await {
-        Ok(model) => Ok(Json(model.into())),
-        Err(e) => {
-            // 优先使用 sea_orm 提供的 sql_err() 来判断常见 SQL 错误
-            if let Some(sql_err) = e.sql_err() {
-                match sql_err {
-                    SqlErr::UniqueConstraintViolation(_) => {
-                        return Err(AppError::AlreadyExists(format!(
-                            "权限名称 '{}' 或 权限路径 '{}' 已存在！",
-                            insert_payload.name, insert_payload.authority_uri
-                        )));
-                    }
-                    SqlErr::ForeignKeyConstraintViolation(_) => {
-                        return Err(AppError::BadRequest("外键约束失败".to_string()));
-                    }
-                    // 可根据需要添加更多 SqlErr 分支
-                    _ => {}
-                }
-            }
-
-            // 其他未知错误，统一返回或转换为你的通用错误类型
-            Err(AppError::from(e))
-        }
-    }
+    let new_authority = new_authority
+        .insert(db)
+        .await
+        .into_app_with_conflict_msg(format!(
+            "权限名称: {} 或 authority_uri:{} 已经存在...",
+            insert_payload.name, insert_payload.authority_uri
+        ))?;
+    Ok(Json(new_authority.into()))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(

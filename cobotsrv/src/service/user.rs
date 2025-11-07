@@ -1,6 +1,6 @@
 use crate::entity::role::{self, Entity as Role, RoleEnum, RoleVO};
 use crate::entity::user::{self, Entity as User, UserVO};
-use crate::error::AppError;
+use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
 use anyhow::anyhow;
 use auth::token_manager::TokenManager;
@@ -9,7 +9,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter, Set};
 use sea_orm::{DatabaseConnection, EntityTrait};
 use uuid::Uuid;
 
-// use auth_old::
+
 #[derive(Clone)]
 pub struct UserService;
 
@@ -77,17 +77,7 @@ impl UserService {
         nickname: &str,
         role_id: &str,
     ) -> Result<(UserVO, String)> {
-        // 1. 检查用户是否存在
-        if User::find()
-            .filter(user::Column::Username.eq(username))
-            .one(db)
-            .await?
-            .is_some()
-        {
-            return Err(AppError::AlreadyExists("username already exists".into()));
-        }
-
-        // 2. 检查role是否存在
+        // 1. 检查role是否存在
         let role = role::Entity::find_by_id(role_id)
             .one(db)
             .await?
@@ -99,7 +89,7 @@ impl UserService {
         let new_user = user::ActiveModel {
             id: Set(new_id.clone()),
             username: Set(username.to_owned()),
-            password: Set(Some(password.to_owned())), // ⚠️ 可以换成加密密码
+            password: Set(Some(password.to_owned())), // TODO 可以换成加密密码
             create_time: Set(now),
             update_time: Set(now),
             nickname: Set(Some(nickname.to_owned())),
@@ -108,7 +98,11 @@ impl UserService {
         };
 
         // 3. 插入数据库
-        let inserted = new_user.insert(db).await?;
+        let inserted = new_user
+            .insert(db)
+            .await
+            .into_app_with_conflict_msg(format!("用户名 {}，已经存在", username))?;
+
         let mut user_vo = UserVO::from(inserted);
         user_vo.set_role(role::RoleVO::from(role));
         // 4. 注册后直接生成 token
