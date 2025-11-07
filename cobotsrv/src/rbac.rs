@@ -2,13 +2,14 @@ use crate::entity::role::RoleEnum;
 use crate::entity::{authority, authority_role, user};
 use crate::error::AppError;
 use crate::result::Result;
-// 处理权限查询
+
+use crate::service::recording;
 use crate::AppState;
 use auth::claims::Claims;
-use axum::Json;
 use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 
@@ -79,7 +80,7 @@ pub async fn authority_check_middleware(
         }
         Ok(e) => {
             // 无权限
-            AppError::Forbidden(format!("{} 无访问权限,{:?}", &uri, e)).into_response()
+            AppError::Forbidden(format!("{} No access permission, {:?}", &uri, e)).into_response()
         }
         Err(e) => AppError::from(e).into_response(),
     }
@@ -96,7 +97,7 @@ pub struct CheckRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CheckResponse {
-    allow: bool,
+    pub allow: bool,
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -123,7 +124,7 @@ pub async fn check_authority(
     let method = check_request.method.clone().to_string().to_lowercase();
     let path = check_request.req_path.clone();
     let prefix_api = state.config.http.api_prefix.clone();
-    let path_no_prefix = handler_prefix(prefix_api, path);
+    let path_no_prefix = handler_prefix(prefix_api, path.clone());
     let authority_uri = format!("{}?{}", method, path_no_prefix);
 
     // 查看authority表（存储了需要校验的权限路径），是否有这个权限，1.有该权限->需要校验 2. 无：无需权限校验，放行
@@ -170,7 +171,8 @@ pub async fn check_authority(
             .await;
         match exists {
             Ok(Some(_)) => {
-                // 有权限, 放行
+                // 有权限, 放行, 加入记录
+                recording::Service::add_recording(db, method, path, user.id).await?;
                 Ok(Json(CheckResponse { allow: true }))
             }
             Ok(_) => {

@@ -11,6 +11,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub name: String,
+    pub authority_uri: String,
     pub user_id: String,
     pub create_time: DateTime,
 
@@ -23,6 +24,7 @@ pub struct Model {
 pub struct RecordingVO {
     pub id: String,
     pub name: String,
+    pub authority_uri: String,
     pub user_id: String,
     pub create_time: String,
     pub user_vo: UserVO,
@@ -33,12 +35,13 @@ impl From<(Model, Option<user::Model>)> for RecordingVO {
         Self {
             id: recording_db.id.clone(),
             name: recording_db.name.clone(),
+            authority_uri: recording_db.authority_uri.clone(),
             user_id: recording_db.user_id.clone(),
             create_time: recording_db
                 .create_time
                 .format("%Y-%m-%d %H:%M:%S")
                 .to_string(),
-            user_vo: user_db.map(UserVO::from).unwrap(), // !!!!!!!!!!!! 我不知道怎么处理!!!!,这里是肯定有值的，但是直接unwrap()并不安全
+            user_vo: user_db.map(UserVO::from).unwrap(), // TODO :处理 unwrap 可能出现的问题
         }
     }
 }
