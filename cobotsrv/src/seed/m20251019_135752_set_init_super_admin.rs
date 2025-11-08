@@ -1,8 +1,6 @@
 use crate::entity::role::RoleEnum;
 use crate::entity::user::ActiveModel as User;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set, Statement,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue, Set};
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
