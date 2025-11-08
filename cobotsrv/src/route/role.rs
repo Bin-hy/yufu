@@ -5,7 +5,7 @@ use crate::entity::authority_role::{
 use crate::entity::role::RoleEnum::Superadmin;
 use crate::entity::role::{RoleAddReq, RoleDeleteReq, RolePatchReq, RoleVO};
 use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority, authority_role, role};
-use crate::error::AppError;
+use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
 use crate::{AppState, IdType};
 use axum::extract::{Path, Query, State};
@@ -66,33 +66,15 @@ pub async fn add_role(
     let now = Utc::now().naive_utc();
     let new_role = role::ActiveModel {
         id: ActiveValue::NotSet,
-        name: Set(insert_payload.name.to_string().to_owned()),
+        name: Set(insert_payload.name.to_owned()),
         create_time: Set(now.to_owned()),
         update_time: Set(now.to_owned()),
     };
-    match new_role.insert(db).await {
-        Ok(model) => Ok(Json(model.into())),
-        Err(e) => {
-            if let Some(sql_err) = e.sql_err() {
-                match sql_err {
-                    SqlErr::UniqueConstraintViolation(_) => {
-                        return Err(AppError::AlreadyExists(format!(
-                            "角色名称 '{}' 已存在！",
-                            insert_payload.name
-                        )));
-                    }
-                    SqlErr::ForeignKeyConstraintViolation(_) => {
-                        return Err(AppError::BadRequest("外键约束失败".to_string()));
-                    }
-                    // 可根据需要添加更多 SqlErr 分支
-                    _ => {}
-                }
-            }
-
-            // 其他未知错误，统一返回或转换为你的通用错误类型
-            Err(AppError::from(e))
-        }
-    }
+    let role_db = new_role
+        .insert(db)
+        .await
+        .into_app_with_conflict_msg(format!("角色名称 '{}' 已存在！", insert_payload.name))?;
+    Ok(Json(role_db.into()))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(

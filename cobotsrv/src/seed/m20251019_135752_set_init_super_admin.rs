@@ -1,6 +1,10 @@
+use crate::entity::role::RoleEnum;
 use crate::entity::user::ActiveModel as User;
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set, Statement,
+};
 use sea_orm_migration::prelude::*;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -11,25 +15,13 @@ impl MigrationTrait for Migration {
         let conn = manager.get_connection();
 
         // insert SuperAdmin
+        let sadmin_username = "sadmin";
         User {
-            id: Set(1),
-            username: Set("sadmin".to_string()),
+            id: ActiveValue::NotSet,
+            username: Set(sadmin_username.to_string()),
             password: Set(Some("sadmin".to_string())),
             nickname: Set(Some("sadmin".to_string())),
-            role_id: Set(1),
-            description: Set(Some("The System Admin.".to_string())),
-            create_time: Set(chrono::Utc::now().naive_utc()),
-            update_time: Set(chrono::Utc::now().naive_utc()),
-        }
-        .insert(conn)
-        .await?;
-        // insert Admin
-        User {
-            id: Set(2),
-            username: Set("admin".to_string()),
-            password: Set(Some("admin".to_string())),
-            nickname: Set(Some("admin".to_string())),
-            role_id: Set(2),
+            role_id: Set(RoleEnum::Superadmin.default_id()), // 绑定到 Superadmin 角色
             description: Set(Some("The System Admin.".to_string())),
             create_time: Set(chrono::Utc::now().naive_utc()),
             update_time: Set(chrono::Utc::now().naive_utc()),
