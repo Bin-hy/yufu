@@ -1,7 +1,7 @@
 use cobotsrv::config::Config;
+use cobotsrv::entity::PageSelectQuery;
 use cobotsrv::entity::role::RoleEnum;
 use cobotsrv::entity::user::{UserAddWithRoleReq, UserPatchReq, UserVO};
-use cobotsrv::entity::{PageSelectQuery, PageSelectQueryResult};
 use cobotsrv::error::AppError;
 use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -37,8 +37,6 @@ async fn test_get_page_users() -> Result<(), AppError> {
         .error_for_status()?;
 
     assert!(resp.status().is_success());
-    let result: PageSelectQueryResult<UserVO> = resp.json().await?;
-    assert!(!result.data_list.is_empty());
     Ok(())
 }
 

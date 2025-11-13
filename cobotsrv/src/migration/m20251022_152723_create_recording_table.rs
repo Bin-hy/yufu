@@ -22,6 +22,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Recording::Name).string())
                     .col(ColumnDef::new(Recording::AuthorityUri).string())
+                    .col(ColumnDef::new(Recording::Method).string())
                     .col(ColumnDef::new(Recording::UserId).integer())
                     .col(ColumnDef::new(Recording::CreateTime).date_time())
                     .to_owned(),
@@ -43,6 +44,7 @@ enum Recording {
     Table,
     Id,
     Name,
+    Method,
     AuthorityUri,
     UserId,
     CreateTime,

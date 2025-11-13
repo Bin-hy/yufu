@@ -3,7 +3,7 @@ use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::{StatusCode, Uri};
 use reqwest::Client;
-use sea_orm::EntityTrait;
+use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::sync::Arc;
 use std::{future::Future, time::Duration};
@@ -12,9 +12,11 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, info_span};
 
 use crate::config::Config;
+use crate::entity::role::RoleEnum;
 use crate::entity::user;
 use crate::rbac::authority_check_middleware;
 use crate::route::get_no_prefix_routes;
+use crate::service::authority::Service;
 use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
 use auth::claims::Claims;
@@ -29,7 +31,7 @@ pub mod config;
 pub mod entity;
 pub mod error;
 mod migration;
-mod rbac;
+pub mod rbac;
 mod recording_middleware;
 mod result;
 pub mod route;
@@ -173,7 +175,7 @@ where
         database: Arc::new(database_service),
         auth_state: Arc::new(auth_state.clone()),
     };
-
+    let _ = app_state.init().await;
     let app_state_for_middleware = app_state.clone();
     // routes need auth
     let sub_auth_router = route::get_auth_routes()
@@ -312,3 +314,52 @@ pub struct AppState {
     auth_state: Arc<AuthState>,
 }
 pub type IdType = i32;
+
+impl AppState {
+    pub async fn init(&self) -> result::Result<()> {
+        self.ensure_sadmin_authorities().await?;
+        self.init_sadmin_from_config().await?;
+        Ok(())
+    }
+    // 初始化超级管理员权限
+    async fn ensure_sadmin_authorities(&self) -> result::Result<()> {
+        Service::ensure_sadmin_authorities(&self.database.connection).await?;
+        Ok(())
+    }
+
+    // 初始化用户
+    async fn init_sadmin_from_config(&self) -> Result<(), DbErr> {
+        use crate::entity::user::ActiveModel as User;
+
+        let db = &self.database.connection;
+        let config = self.config.clone();
+        let super_admin_account = config.auth.super_admin.clone();
+        let sadmin_user = super_admin_account.username;
+        let sadmin_password = super_admin_account.password;
+
+        // 检查是否已存在
+        if user::Entity::find()
+            .filter(user::Column::Username.eq(&sadmin_user))
+            .one(db)
+            .await?
+            .is_none()
+        {
+            User {
+                id: ActiveValue::NotSet,
+                username: Set(sadmin_user),
+                password: Set(Some(sadmin_password)),
+                nickname: Set(Some("sadmin".to_string())),
+                role_id: Set(RoleEnum::Superadmin.default_id()),
+                description: Set(Some("The System Admin.".to_string())),
+                create_time: Set(chrono::Utc::now().naive_utc()),
+                update_time: Set(chrono::Utc::now().naive_utc()),
+            }
+            .insert(db)
+            .await?;
+            info!("Initial the super admin account has created successfully!");
+        } else {
+            info!("Initial the super admin account has created before.");
+        }
+        Ok(())
+    }
+}

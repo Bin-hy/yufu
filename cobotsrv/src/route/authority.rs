@@ -9,7 +9,7 @@ use axum::extract::{Query, State};
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, PaginatorTrait, Set};
+use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, NotSet, PaginatorTrait, Set};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 
@@ -50,6 +50,7 @@ pub async fn add_authority(
         id: ActiveValue::NotSet,
         name: Set(insert_payload.name.clone()),
         authority_uri: Set(insert_payload.authority_uri.clone()),
+        method: Set(insert_payload.method.clone()),
         create_time: Set(now),
         update_time: Set(now),
     };
@@ -61,6 +62,8 @@ pub async fn add_authority(
             "权限名称: {} 或 authority_uri:{} 已经存在...",
             insert_payload.name, insert_payload.authority_uri
         ))?;
+    //
+    crate::service::authority::Service::ensure_sadmin_authorities(db).await?;
     Ok(Json(new_authority.into()))
 }
 
@@ -114,8 +117,21 @@ pub async fn patch_authority(
         .ok_or_else(|| AppError::NotFound("找不到该权限".to_string()))?;
     // 更新
     let mut new_authority: authority::ActiveModel = authority_db.into();
-    new_authority.name = Set(patch_payload.name.to_owned());
-    new_authority.authority_uri = Set(patch_payload.authority_uri.to_owned());
+    new_authority.name = if let Some(name) = patch_payload.name.clone() {
+        Set(name.to_owned())
+    } else {
+        NotSet
+    };
+    new_authority.authority_uri = if let Some(authority_uri) = patch_payload.authority_uri.clone() {
+        Set(authority_uri.to_owned())
+    } else {
+        NotSet
+    };
+    new_authority.method = if let Some(method) = patch_payload.authority_uri.clone() {
+        Set(method.to_owned())
+    } else {
+        NotSet
+    };
     new_authority.update_time = Set(Utc::now().naive_utc());
 
     let db_authority = new_authority.update(db).await?;

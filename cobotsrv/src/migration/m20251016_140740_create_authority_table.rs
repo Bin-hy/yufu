@@ -19,13 +19,22 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Authority::Name).string().unique_key())
-                    .col(
-                        ColumnDef::new(Authority::_AuthorityUri)
-                            .string()
-                            .unique_key(),
-                    )
+                    .col(ColumnDef::new(Authority::Method).string().not_null())
+                    .col(ColumnDef::new(Authority::_AuthorityUri).string().not_null())
                     .col(ColumnDef::new(Authority::CreateTime).date_time().not_null())
                     .col(ColumnDef::new(Authority::UpdateTime).date_time().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_authority_method_uri_unique")
+                    .table(Authority::Table)
+                    .col(Authority::Method)
+                    .col(Authority::_AuthorityUri)
+                    .unique() // 联合唯一约束
                     .to_owned(),
             )
             .await
@@ -45,6 +54,7 @@ enum Authority {
     Table,
     Id,
     Name,
+    Method,
     #[sea_orm(column_name = "authority_uri")]
     _AuthorityUri,
     CreateTime,

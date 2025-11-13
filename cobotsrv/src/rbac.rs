@@ -200,3 +200,8 @@ fn handler_prefix(prefix: String, uri: String) -> String {
         uri
     }
 }
+
+// 清除 path中的 query
+pub fn handle_query_path(uri: String) -> String {
+    uri.split("?").next().unwrap_or(&uri).to_string()
+}

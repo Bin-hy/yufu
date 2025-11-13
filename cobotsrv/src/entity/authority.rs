@@ -12,8 +12,10 @@ pub struct Model {
     pub id: i32,
     #[sea_orm(unique_key = "unique_name")]
     pub name: String,
-    #[sea_orm(unique_key = "unique_authority")]
+    #[sea_orm(unique_key = "uk_authority_method_uri")]
     pub authority_uri: String, // uri
+    #[sea_orm(unique_key = "uk_authority_method_uri")]
+    pub method: String, // POST | GET | PATCH | DELETE
     pub create_time: DateTime,
     pub update_time: DateTime,
 
@@ -49,13 +51,15 @@ impl From<Model> for AuthorityVO {
 pub struct AuthorityInsertReq {
     pub name: String,
     pub authority_uri: String,
+    pub method: String,
 }
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AuthorityPatchReq {
     pub id: IdType,
-    pub name: String,
-    pub authority_uri: String,
+    pub name: Option<String>,
+    pub authority_uri: Option<String>,
+    pub method: Option<String>,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -96,9 +96,11 @@ pub struct Auth {
     pub accounts: Vec<Account>,
     #[serde(default = "default_auth_expire_seconds")]
     pub exp_seconds: i64, // set token exp time, unit :seconds, default 2h
+    #[serde(default = "default_super_admin")]
+    pub super_admin: Account,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Account {
     #[serde(default)]
     pub username: String,
@@ -193,4 +195,11 @@ fn default_auth_secret() -> String {
 
 fn default_auth_expire_seconds() -> i64 {
     7200
+}
+
+fn default_super_admin() -> Account {
+    Account {
+        username: "sadmin".to_string(),
+        password: "sadmin".to_string(),
+    }
 }

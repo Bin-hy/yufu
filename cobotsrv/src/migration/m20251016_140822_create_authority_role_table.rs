@@ -1,3 +1,4 @@
+use crate::entity::{authority, role};
 use sea_orm_migration::prelude::*;
 
 #[derive(DeriveMigrationName)]
@@ -35,7 +36,31 @@ impl MigrationTrait for Migration {
                     )
                     .to_owned(),
             )
-            .await
+            .await?;
+        //  外键：role_id -> role.id
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("fk_authority_role_role")
+                    .from(AuthorityRole::Table, AuthorityRole::RoleId)
+                    .to(role::Entity, role::Column::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+
+        // 外键：authority_id -> authority.id
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("fk_authority_role_authority")
+                    .from(AuthorityRole::Table, AuthorityRole::AuthorityId)
+                    .to(authority::Entity, authority::Column::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+        Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {

@@ -12,6 +12,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
     pub id: IdType,
     pub name: String,
+    pub method: String,
     pub authority_uri: String,
     pub user_id: IdType,
     pub create_time: DateTime,
@@ -25,6 +26,7 @@ pub struct Model {
 pub struct RecordingVO {
     pub id: IdType,
     pub name: String,
+    pub method: String,
     pub authority_uri: String,
     pub user_id: IdType,
     pub create_time: String,
@@ -36,6 +38,7 @@ impl From<(Model, Option<user::Model>)> for RecordingVO {
         Self {
             id: recording_db.id,
             name: recording_db.name.clone(),
+            method: recording_db.method.clone(),
             authority_uri: recording_db.authority_uri.clone(),
             user_id: recording_db.user_id,
             create_time: recording_db
