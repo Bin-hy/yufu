@@ -5,7 +5,7 @@ use crate::{AppState, IdType};
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 
@@ -33,6 +33,7 @@ pub async fn get_recording_by_page(
     let page_number = page.page_number;
     let paginator = recording::Entity::find()
         .find_also_related(user::Entity)
+        .order_by_desc(recording::Column::CreateTime)
         .paginate(db, page.page_size);
 
     let total_pages = paginator.num_pages().await?;
@@ -67,6 +68,7 @@ pub async fn get_recording_by_user_id(
     let paginator = recording::Entity::find()
         .find_also_related(user::Entity)
         .filter(recording::Column::UserId.eq(user_id))
+        .order_by_desc(recording::Column::CreateTime)
         .paginate(db, page.page_size);
     // 获取某个用户的所有记录
     let total_pages = paginator.num_pages().await?;

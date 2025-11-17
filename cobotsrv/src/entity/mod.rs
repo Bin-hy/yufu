@@ -7,6 +7,7 @@ pub mod authority_role;
 pub mod recording;
 pub mod role;
 pub mod user;
+pub mod user_authority;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
 #[derive(Deserialize, Serialize, Clone)]

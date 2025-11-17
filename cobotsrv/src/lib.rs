@@ -14,7 +14,7 @@ use tracing::{error, info, info_span};
 use crate::config::Config;
 use crate::entity::role::RoleEnum;
 use crate::entity::user;
-use crate::rbac::authority_check_middleware;
+use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
 use crate::service::database::DatabaseService;
@@ -185,7 +185,7 @@ where
         ))
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
-            authority_check_middleware,
+            authority_check_middleware_rbac_abac,
         ))
         .layer(middleware::from_fn_with_state(
             auth_state.clone(),

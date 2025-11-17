@@ -3,7 +3,6 @@
 use crate::IdType;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Serialize, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "authority")]
@@ -21,6 +20,8 @@ pub struct Model {
 
     #[sea_orm(has_many, via = "authority_role")]
     pub roles: HasMany<super::role::Entity>,
+    #[sea_orm(has_many, via = "user_authority")]
+    pub users: HasMany<super::user::Entity>,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

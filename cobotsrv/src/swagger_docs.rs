@@ -6,6 +6,7 @@ pub mod doc {
     use crate::route::recording::RecordingApi;
     use crate::route::role::RoleApi;
     use crate::route::user::UserApi;
+    use crate::route::user_authority::UserAuthorityApi;
     use utoipa::OpenApi;
 
     // 使用derive宏来创建OpenAPI文档
@@ -25,6 +26,7 @@ pub mod doc {
             (path ="/api/v1",api = AuthorityApi, tags= ["所有请求的权限信息CRUD"]),
             (path ="/api/v1",api = RecordingApi, tags= ["用户操作记录查询"]),
             (path ="/api/v1",api = RbacApi, tags= ["RBAC权限校验"]),
+            (path ="/api/v1",api = UserAuthorityApi, tags= ["用户权限覆写"])
         ),
     )]
     pub struct ApiDoc;

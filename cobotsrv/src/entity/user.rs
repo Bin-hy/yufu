@@ -29,6 +29,9 @@ pub struct Model {
 
     #[sea_orm(has_many)]
     pub recording: HasMany<super::recording::Entity>,
+
+    #[sea_orm(has_many, via = "user_authority")]
+    pub authorities: HasMany<super::authority::Entity>,
 }
 
 impl Entity {

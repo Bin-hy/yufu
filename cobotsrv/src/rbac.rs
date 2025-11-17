@@ -1,5 +1,4 @@
-use crate::entity::role::RoleEnum;
-use crate::entity::{authority, authority_role, user};
+use crate::entity::{authority, authority_role, user, user_authority};
 use crate::error::AppError;
 use crate::result::Result;
 
@@ -12,11 +11,10 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 // 目前精细化到query只处理到path例如：get?/user/{user_id}
 // 检查每个请求的每个角色是否符合他的角色权限
-pub async fn authority_check_middleware(
+pub async fn authority_check_middleware_rbac_abac(
     claim: Claims<IdType>,
     State(app_state): State<AppState>,
     request: Request,
@@ -37,41 +35,61 @@ pub async fn authority_check_middleware(
         }
     };
 
-    // 超级管理员一切放行
-    if user.role_id == RoleEnum::Superadmin.default_id() {
-        return next.run(request).await;
-    }
-
     let matched_path = request
         .extensions()
         .get::<MatchedPath>()
         .map(|m| m.as_str().to_string())
         .unwrap_or_else(|| request.uri().path().to_string());
 
+    let method = request.method().to_string().to_uppercase();
+
     let prefix_api = app_state.config.http.api_prefix.clone();
     let uri = matched_path; //request.uri().to_string();
-    let _query = request.uri().query().unwrap_or("");
-
-    let uri_no_prefix = handler_prefix(prefix_api, uri.clone());
-
-    info!(
-        "{}?{}",
-        request.method().clone().as_str().to_lowercase(),
-        uri_no_prefix.clone()
-    );
-
-    let authority_uri_no_prefix = format!(
-        "{}?{}",
-        request.method().as_str().to_lowercase(),
-        uri_no_prefix
-    );
+    let pure_uri = get_pure_uri(prefix_api, uri.clone());
 
     let role_id = user.role_id;
 
+    // ABAC 优先：如果 authority 未登记，则不做权限管控，直接放行
+    let authority_opt = match authority::Entity::find()
+        .filter(authority::Column::AuthorityUri.eq(&pure_uri))
+        .filter(authority::Column::Method.eq(&method))
+        .one(db)
+        .await
+    {
+        Ok(a) => a,
+        Err(e) => return AppError::from(e).into_response(),
+    };
+
+    if authority_opt.is_none() {
+        return next.run(request).await;
+    }
+
+    // 存在该权限路径：先检查用户覆写（user_authority），有显式 allow/deny 则遵循覆写
+    let authority_id = authority_opt.unwrap().id;
+    match user_authority::Entity::find()
+        .filter(user_authority::Column::UserId.eq(user_id))
+        .filter(user_authority::Column::AuthorityId.eq(authority_id))
+        .one(db)
+        .await
+    {
+        Ok(Some(ua)) => {
+            if ua.allow {
+                return next.run(request).await;
+            } else {
+                return AppError::Forbidden(format!("{} No access permission (ABAC deny)", &uri))
+                    .into_response();
+            }
+        }
+        Ok(None) => { /* 无覆写，进入 RBAC */ }
+        Err(e) => return AppError::from(e).into_response(),
+    }
+
+    // RBAC：检查角色是否拥有该权限
     let exists = authority_role::Entity::find()
         .filter(authority_role::Column::RoleId.eq(role_id))
         .find_also_related(authority::Entity)
-        .filter(authority::Column::AuthorityUri.eq(&authority_uri_no_prefix))
+        .filter(authority::Column::AuthorityUri.eq(&pure_uri))
+        .filter(authority::Column::Method.eq(&method))
         .one(db)
         .await;
     match exists {
@@ -90,9 +108,9 @@ pub async fn authority_check_middleware(
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CheckRequest {
-    token: Option<String>,
-    req_path: String,
-    method: String,
+    pub token: Option<String>,
+    pub req_path: String,
+    pub method: String,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -101,94 +119,101 @@ pub struct CheckResponse {
     pub allow: bool,
 }
 
+// 1. 查 user_authority 表查看权限是否有复写 allow == true 则 有权限， 否则无权限
+// 2. 无复写进行RBAC查询即可
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
-    path = "/rbac",
+    path = "/rbac/abac",
     request_body(
         content = CheckRequest,
-        description = "作为lib包进行rbac权限校验",
+        description = "作为lib包进行rbac&abac权限校验",
         content_type = "application/json"
     ),
-    description = "检查权限能力（RBAC）",
+    description = "检查权限能力（RBAC&ABAC）",
     responses(
-        (status = 200, description = "具有权限", body = CheckRequest),
-        (status = 403, description = "权限不足...")
+        (status = 200, description = "是否具有权限", body = CheckRequest),
     ),
 ))]
-pub async fn check_authority(
+pub async fn check_authority_abac(
     State(state): State<AppState>,
     Json(check_request): Json<CheckRequest>,
 ) -> Result<Json<CheckResponse>> {
     let db = &state.database.connection;
-    let token = check_request.token.unwrap_or("".to_string());
 
+    let token = check_request.token.clone().unwrap_or("".to_string());
     let method = check_request.method.clone().to_string().to_lowercase();
     let path = check_request.req_path.clone();
+
+    // 构造用于匹配 authority 的 uri（忽略前缀与 query）
     let prefix_api = state.config.http.api_prefix.clone();
-    let path_no_prefix = handler_prefix(prefix_api, path.clone());
-    let authority_uri = format!("{}?{}", method, path_no_prefix);
+    let pure_uri = handler_prefix(prefix_api, path.clone());
 
-    // 查看authority表（存储了需要校验的权限路径），是否有这个权限，1.有该权限->需要校验 2. 无：无需权限校验，放行
-    if authority::Entity::find()
-        .filter(authority::Column::AuthorityUri.eq(&authority_uri))
+    // 如果 authority 表不存在该记录，则不做权限管控，放行
+    let authority_opt = authority::Entity::find()
+        .filter(authority::Column::AuthorityUri.eq(&pure_uri))
+        .filter(authority::Column::Method.eq(&method))
         .one(db)
-        .await?
-        .is_some()
+        .await?;
+    if authority_opt.is_none() {
+        return Ok(Json(CheckResponse { allow: true }));
+    }
+
+    // 校验 token 并获取用户
+    let claim = match state
+        .auth_state
+        .token_manager
+        .verify_token::<IdType>(token.as_str())
     {
-        // 1. 校验
-        // 校验token有效性
-        let claim = match state
-            .auth_state
-            .token_manager
-            .verify_token::<IdType>(token.as_str())
-        {
-            Ok(claim) => claim,
+        Ok(claim) => claim,
+        Err(_) => return Err(AppError::Forbidden("permission not access...".to_string())),
+    };
+    let user_id = claim.id;
 
-            Err(_) => {
-                return Err(AppError::Forbidden("权限不足...".to_string()));
-            }
-        };
-        let user_id = claim.id;
-        // 检查用户的角色role是否有请求该路径的权限
-        // 检索role
-        // 查找用户，不存在则返回自定义错误
-        let user = match user::Entity::find_by_id(user_id).one(db).await {
-            Ok(Some(u)) => u,
-            Ok(None) => {
-                return Err(AppError::NotFound(format!("User {} not found", &user_id)));
-            }
-            Err(e) => {
-                return Err(AppError::from(e));
-            }
-        };
+    let user = match user::Entity::find_by_id(user_id).one(db).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return Err(AppError::NotFound(format!("User {} not found", &user_id))),
+        Err(e) => return Err(AppError::from(e)),
+    };
 
-        // 超级管理员一切放行
-        if user.role_id == RoleEnum::Superadmin.default_id() {
+    let authority_id = authority_opt.unwrap().id;
+
+    // 先检查 ABAC 覆写：用户对该权限是否有显式 allow/deny
+    let override_opt = user_authority::Entity::find()
+        .filter(user_authority::Column::UserId.eq(user_id))
+        .filter(user_authority::Column::AuthorityId.eq(authority_id))
+        .one(db)
+        .await?;
+
+    if let Some(ua) = override_opt {
+        if ua.allow {
+            // 显式允许：记录并放行
+            recording::Service::add_recording(db, method, path, user.id).await?;
             return Ok(Json(CheckResponse { allow: true }));
+        } else {
+            // 显式拒绝：直接拒绝
+            return Ok(Json(CheckResponse { allow: false }));
         }
-        let role_id = user.role_id;
+    }
 
-        let exists = authority_role::Entity::find()
-            .filter(authority_role::Column::RoleId.eq(role_id))
-            .find_also_related(authority::Entity)
-            .filter(authority::Column::AuthorityUri.eq(&authority_uri))
-            .one(db)
-            .await;
-        match exists {
-            Ok(Some(_)) => {
-                // 有权限, 放行, 加入记录
-                recording::Service::add_recording(db, method, path, user.id).await?;
-                Ok(Json(CheckResponse { allow: true }))
-            }
-            Ok(_) => {
-                // 无权限
-                Ok(Json(CheckResponse { allow: false }))
-            }
-            Err(e) => Err(AppError::from(e)),
+    // 无覆写则走 RBAC：检查角色是否拥有该权限
+    let exists = authority_role::Entity::find()
+        .filter(authority_role::Column::RoleId.eq(user.role_id))
+        .find_also_related(authority::Entity)
+        .filter(authority::Column::AuthorityUri.eq(&pure_uri))
+        .one(db)
+        .await;
+
+    match exists {
+        Ok(Some(_)) => {
+            // 有权限, 放行, 加入记录
+            recording::Service::add_recording(db, method, path, user.id).await?;
+            Ok(Json(CheckResponse { allow: true }))
         }
-    } else {
-        // 2. 没有该权限不做管辖，放行
-        Ok(Json(CheckResponse { allow: true }))
+        Ok(_) => {
+            // 无权限
+            Ok(Json(CheckResponse { allow: false }))
+        }
+        Err(e) => Err(AppError::from(e)),
     }
 }
 
@@ -204,4 +229,10 @@ fn handler_prefix(prefix: String, uri: String) -> String {
 // 清除 path中的 query
 pub fn handle_query_path(uri: String) -> String {
     uri.split("?").next().unwrap_or(&uri).to_string()
+}
+
+// 获取纯净的 uri无前缀和query参数
+pub fn get_pure_uri(prefix: String, uri: String) -> String {
+    let uri_no_prefix = handler_prefix(prefix, uri);
+    handle_query_path(uri_no_prefix)
 }

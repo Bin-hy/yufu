@@ -9,6 +9,8 @@ pub mod recording;
 pub mod remote;
 pub mod role;
 pub mod user;
+pub mod user_authority;
+
 pub fn get_auth_routes() -> Router<AppState> {
     // handle route merge
     Router::new()
@@ -17,6 +19,7 @@ pub fn get_auth_routes() -> Router<AppState> {
         .merge(role::get_auth_routes())
         .merge(authority::get_auth_routes())
         .merge(recording::get_auth_routes())
+        .merge(user_authority::get_auth_routes())
 }
 
 pub fn get_public_routes() -> Router<AppState> {
