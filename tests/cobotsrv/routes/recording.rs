@@ -2,12 +2,11 @@ use cobotsrv::config::Config;
 use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
-mod common;
 use cobotsrv::entity::recording::RecordingVO;
 use cobotsrv::entity::role::RoleEnum;
 use cobotsrv::entity::{PageSelectQuery, PageSelectQueryResult};
 use cobotsrv::error::AppError;
-use common::*;
+use super::super::common::*;
 
 #[tokio::test]
 async fn test_get_recording_by_page() -> Result<(), AppError> {

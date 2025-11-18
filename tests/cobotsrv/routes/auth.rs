@@ -4,8 +4,7 @@ use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::TcpListener;
 
-mod common;
-use common::*;
+use super::super::common::*;
 
 use cobotsrv::route::auth::{LoginData, RegistryData};
 
