@@ -1,5 +1,6 @@
 use crate::result::Result;
 use crate::{AppState, IdType};
+use anyhow::anyhow;
 
 use crate::entity::user::{UserAddWithRoleReq, UserPatchReq, UserRolePatchReq, UserVO};
 use crate::service::user::UserService;
@@ -42,10 +43,13 @@ pub fn get_public_routes() -> Router<AppState> {
 pub async fn get_user_by_id(
     claim: Claims<IdType>,
     State(state): State<AppState>,
-) -> Result<Json<UserVO>> {
+) -> Result<Json<user::Model>> {
     let db = &state.database.connection;
-    let user_vo = UserService::get_user_by_id(db, claim.id).await?;
-    Ok(Json(user_vo))
+    if let Some((user, _role_db_opt)) = user::Entity::find_with_role_by_id(db, claim.id).await? {
+        Ok(Json(user))
+    } else {
+        Err(AppError::InternalServerError(anyhow!("获取用户失败")))
+    }
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(

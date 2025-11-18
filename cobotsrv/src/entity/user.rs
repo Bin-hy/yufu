@@ -7,9 +7,10 @@ use http::StatusCode;
 use http::request::Parts;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use crate::entity::{role, user};
 
 #[sea_orm::model]
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, Serialize, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "user")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
@@ -28,6 +29,15 @@ pub struct Model {
 
     #[sea_orm(has_many)]
     pub recording: HasMany<super::recording::Entity>,
+}
+
+impl Entity {
+    pub async fn find_with_role_by_id(db: &DatabaseConnection, id: IdType) -> Result<Option<(Model, Option<role::Model>)>, DbErr> {
+        Self::find_by_id(id)
+            .find_also_related(role::Entity)
+            .one(db)
+            .await
+    }
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

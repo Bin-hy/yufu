@@ -110,11 +110,8 @@ impl UserService {
     }
 
     pub async fn get_user_by_id(db: &DatabaseConnection, user_id: IdType) -> Result<UserVO> {
-        if let Some((user_db, role_db_opt)) = user::Entity::find()
-            .find_also_related(role::Entity)
-            .filter(user::Column::Id.eq(user_id))
-            .one(db)
-            .await?
+        if let Some((user_db, role_db_opt)) =
+            user::Entity::find_with_role_by_id(db, user_id).await?
         {
             let mut user_vo = UserVO::from(user_db);
             if let Some(role) = role_db_opt {
