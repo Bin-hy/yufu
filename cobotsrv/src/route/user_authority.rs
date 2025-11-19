@@ -9,9 +9,7 @@ use axum::extract::{Query, State};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, PaginatorTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, DeleteResult, Set};
 
 pub fn get_auth_routes() -> Router<AppState> {
     Router::new()
@@ -45,15 +43,12 @@ pub async fn add_user_authority(
     let authority_vo =
         crate::service::authority::Service::get_authority_vo(db, payload.authority_id).await?;
 
-    let now = Utc::now().naive_utc();
-    let inserted = user_authority::ActiveModel {
-        user_id: Set(payload.user_id),
-        authority_id: Set(payload.authority_id),
-        allow: Set(payload.allow),
-        create_time: Set(now),
-        update_time: Set(now),
-    }
-    .insert(db)
+    let inserted = user_authority::Entity::insert_override(
+        db,
+        payload.user_id,
+        payload.authority_id,
+        payload.allow,
+    )
     .await
     .into_app_with_conflict_msg("覆写条目已存在！")?;
 
@@ -88,12 +83,10 @@ pub async fn delete_user_authority(
     let db = &state.database.connection;
 
     // 删除 user_id + authority_id 对应的记录
-    let res: DeleteResult = user_authority::Entity::delete_many()
-        .filter(user_authority::Column::UserId.eq(payload.user_id))
-        .filter(user_authority::Column::AuthorityId.eq(payload.authority_id))
-        .exec(db)
-        .await
-        .map_err(AppError::from)?;
+    let res: DeleteResult =
+        user_authority::Entity::delete_pair(db, payload.user_id, payload.authority_id)
+            .await
+            .map_err(AppError::from)?;
 
     if res.rows_affected == 0 {
         Err(AppError::NotFound(
@@ -125,10 +118,7 @@ pub async fn patch_user_authority(
     let db = &state.database.connection;
 
     // 查找现有记录
-    let existing = user_authority::Entity::find()
-        .filter(user_authority::Column::UserId.eq(payload.user_id))
-        .filter(user_authority::Column::AuthorityId.eq(payload.authority_id))
-        .one(db)
+    let existing = user_authority::Entity::find_pair(db, payload.user_id, payload.authority_id)
         .await?
         .ok_or_else(|| AppError::NotFound("找不到该 用户 | 权限".to_string()))?;
 
@@ -168,9 +158,8 @@ pub async fn get_user_authorities_page(
     let page_size = page.page_size;
     let page_number = page.page_number;
 
-    let paginator = user_authority::Entity::find().paginate(db, page_size);
-    let total_pages = paginator.num_pages().await?;
-    let records = paginator.fetch_page(page_number - 1).await?;
+    let (total_pages, records) =
+        user_authority::Entity::paginate(db, page_size, page_number).await?;
 
     let mut data_list = Vec::with_capacity(records.len());
     for ua in records {

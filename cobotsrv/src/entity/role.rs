@@ -2,6 +2,7 @@
 
 use crate::IdType;
 use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveModelTrait, EntityTrait, NotSet, PaginatorTrait, Set};
 use serde::{Deserialize, Serialize};
 
 #[sea_orm::model]
@@ -20,6 +21,46 @@ pub struct Model {
 
     #[sea_orm(has_many, via = "authority_role")]
     pub authorities: HasMany<super::authority::Entity>,
+}
+
+impl Entity {
+    pub async fn insert_one(db: &DatabaseConnection, insert: RoleAddReq) -> Result<Model, DbErr> {
+        let now = chrono::Utc::now().naive_utc();
+        let am = ActiveModel {
+            id: NotSet,
+            name: Set(insert.name),
+            create_time: Set(now),
+            update_time: Set(now),
+        };
+        am.insert(db).await
+    }
+
+    pub async fn paginate(
+        db: &DatabaseConnection,
+        page_size: u64,
+        page_number: u64,
+    ) -> Result<(u64, Vec<Model>), DbErr> {
+        let paginator = Self::find().paginate(db, page_size);
+        let total_pages = paginator.num_pages().await?;
+        let records = paginator.fetch_page(page_number - 1).await?;
+        Ok((total_pages, records))
+    }
+
+    pub async fn update_name(db: &DatabaseConnection, patch: RolePatchReq) -> Result<Model, DbErr> {
+        let dbm = Self::find_by_id(patch.id)
+            .one(db)
+            .await?
+            .ok_or(DbErr::RecordNotFound("role".to_string()))?;
+        let mut am: ActiveModel = dbm.into();
+        am.name = Set(patch.name);
+        am.update_time = Set(chrono::Utc::now().naive_utc());
+        am.update(db).await
+    }
+
+    pub async fn delete_checked(db: &DatabaseConnection, id: IdType) -> Result<bool, DbErr> {
+        let res = Self::delete_by_id(id).exec(db).await?;
+        Ok(res.rows_affected == 1)
+    }
 }
 
 /// 前端角色视图

@@ -3,6 +3,10 @@
 use crate::IdType;
 use crate::entity::{authority, role};
 use sea_orm::entity::prelude::*;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, PaginatorTrait, QueryFilter, Set,
+    TransactionTrait,
+};
 use serde::{Deserialize, Serialize};
 
 #[sea_orm::model]
@@ -23,6 +27,84 @@ pub struct Model {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Entity {
+    pub async fn add_one(
+        db: &DatabaseConnection,
+        role_id: IdType,
+        authority_id: IdType,
+    ) -> Result<Model, DbErr> {
+        let now = chrono::Utc::now().naive_utc();
+        let am = ActiveModel {
+            role_id: Set(role_id),
+            authority_id: Set(authority_id),
+            create_time: Set(now),
+            update_time: Set(now),
+        };
+        am.insert(db).await
+    }
+
+    pub async fn add_batch_tx(
+        db: &DatabaseConnection,
+        role_id: IdType,
+        authority_ids: Vec<IdType>,
+    ) -> Result<Vec<Model>, DbErr> {
+        let txn = db.begin().await?;
+        let mut out = Vec::with_capacity(authority_ids.len());
+        for aid in authority_ids {
+            let now = chrono::Utc::now().naive_utc();
+            let am = ActiveModel {
+                role_id: Set(role_id),
+                authority_id: Set(aid),
+                create_time: Set(now),
+                update_time: Set(now),
+            };
+            let inserted = am.insert(&txn).await?;
+            out.push(inserted);
+        }
+        txn.commit().await?;
+        Ok(out)
+    }
+
+    pub async fn delete_pair(
+        db: &DatabaseConnection,
+        role_id: IdType,
+        authority_id: IdType,
+    ) -> Result<DeleteResult, DbErr> {
+        Self::delete_many()
+            .filter(Column::RoleId.eq(role_id))
+            .filter(Column::AuthorityId.eq(authority_id))
+            .exec(db)
+            .await
+    }
+
+    pub async fn delete_batch(
+        db: &DatabaseConnection,
+        role_id: IdType,
+        authority_ids: Vec<IdType>,
+    ) -> Result<DeleteResult, DbErr> {
+        Self::delete_many()
+            .filter(Column::RoleId.eq(role_id))
+            .filter(Column::AuthorityId.is_in(authority_ids))
+            .exec(db)
+            .await
+    }
+
+    pub async fn paginate_authorities_by_role(
+        db: &DatabaseConnection,
+        role_id: IdType,
+        page_size: u64,
+        page_number: u64,
+    ) -> Result<(u64, Vec<(Model, Option<authority::Model>)>), DbErr> {
+        let paginator = Self::find()
+            .filter(Column::RoleId.eq(role_id))
+            .find_also_related(authority::Entity)
+            .paginate(db, page_size);
+        let total_pages = paginator.num_pages().await?;
+        let records = paginator.fetch_page(page_number - 1).await?;
+        Ok((total_pages, records))
+    }
+}
 
 // 角色权限视图
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

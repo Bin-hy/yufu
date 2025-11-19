@@ -1,12 +1,12 @@
+use super::super::common::*;
 use cobotsrv::config::Config;
-use reqwest::Client;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::net::TcpListener;
 use cobotsrv::entity::authority::{
     AuthorityDeleteReq, AuthorityInsertReq, AuthorityPatchReq, AuthorityVO,
 };
 use cobotsrv::error::AppError;
-use super::super::common::*;
+use reqwest::Client;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn test_add_authority() -> Result<(), AppError> {

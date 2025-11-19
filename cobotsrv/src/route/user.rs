@@ -12,7 +12,6 @@ use axum::{
     extract::{Json, State},
     routing::get,
 };
-use sea_orm::{ActiveModelTrait, EntityTrait, NotSet, PaginatorTrait, Set};
 
 // Build routes
 pub fn get_auth_routes() -> Router<AppState> {
@@ -68,13 +67,8 @@ pub async fn get_page_user(
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;
-    let paginator = user::Entity::find().paginate(db, page.page_size);
-    let total_pages = paginator.num_pages().await?;
-
-    let paginator = user::Entity::find()
-        .find_also_related(role::Entity)
-        .paginate(db, page.page_size);
-    let users_db = paginator.fetch_page(page.page_number - 1).await?;
+    let (total_pages, users_db) =
+        user::Entity::paginate_with_role(db, page.page_size, page.page_number).await?;
 
     let result = users_db
         .into_iter()
@@ -151,19 +145,7 @@ pub async fn patch_user_role(
     if payload.new_role_id == Superadmin.default_id() {
         return Err(AppError::Forbidden("禁止设置为SuperAdmin".to_string()));
     }
-    let user_db = user::Entity::find_by_id(payload.user_id)
-        .one(db)
-        .await?
-        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-
-    let role_db = role::Entity::find_by_id(payload.new_role_id)
-        .one(db)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Role not found".to_string()))?;
-    let mut user_db_am: user::ActiveModel = user_db.into();
-    user_db_am.role_id = Set(role_db.id.to_owned());
-
-    let updated_user = user_db_am.update(db).await?;
+    let updated_user = user::Entity::update_role(db, payload.user_id, payload.new_role_id).await?;
     let db_user = UserService::get_user_by_id(db, updated_user.id).await?;
 
     Ok(Json(db_user))
@@ -187,23 +169,7 @@ pub async fn patch_user_basic_data(
     Json(payload): Json<UserPatchReq>,
 ) -> Result<Json<UserVO>> {
     let db = &state.database.connection;
-    let user_dbm = user::Entity::find_by_id(payload.user_id)
-        .one(db)
-        .await
-        .unwrap()
-        .ok_or(AppError::NotFound("找不到用户".to_string()))?;
-    let mut user_dbam: user::ActiveModel = user_dbm.into();
-    user_dbam.nickname = payload
-        .nickname
-        .clone()
-        .map(|s| Set(Some(s)))
-        .unwrap_or(NotSet);
-    user_dbam.password = payload
-        .password
-        .clone()
-        .map(|s| Set(Some(s)))
-        .unwrap_or(NotSet);
-    let updated_user = user_dbam.update(db).await?;
+    let updated_user = user::Entity::update_basic(db, payload).await?;
 
     Ok(Json(updated_user.into()))
 }
@@ -222,8 +188,8 @@ pub async fn delete_user_by_id(
     Path(user_id): Path<IdType>,
 ) -> Result<String> {
     let db = &state.database.connection;
-    let delete_result = user::Entity::delete_by_id(user_id).exec(db).await?;
-    if delete_result.rows_affected == 1 {
+    let ok = user::Entity::delete_checked(db, user_id).await?;
+    if ok {
         Ok("删除成功".to_string())
     } else {
         Err(AppError::NotFound("用户不存在或删除失败".to_string()))
@@ -232,7 +198,7 @@ pub async fn delete_user_by_id(
 
 use crate::entity::role::RoleEnum::Superadmin;
 use crate::entity::role::RoleVO;
-use crate::entity::{PageSelectQuery, PageSelectQueryResult, role, user};
+use crate::entity::{PageSelectQuery, PageSelectQueryResult, user};
 use crate::error::AppError;
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;

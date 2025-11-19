@@ -1,11 +1,10 @@
 use crate::entity::recording::RecordingVO;
-use crate::entity::{PageSelectQuery, PageSelectQueryResult, recording, user};
+use crate::entity::{PageSelectQuery, PageSelectQueryResult, recording};
 use crate::result::Result;
 use crate::{AppState, IdType};
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 
@@ -31,14 +30,8 @@ pub async fn get_recording_by_page(
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;
-    let paginator = recording::Entity::find()
-        .find_also_related(user::Entity)
-        .order_by_desc(recording::Column::CreateTime)
-        .paginate(db, page.page_size);
-
-    let total_pages = paginator.num_pages().await?;
-    let page_records: Vec<(recording::Model, Option<user::Model>)> =
-        paginator.fetch_page(page.page_number - 1).await?;
+    let (total_pages, page_records) =
+        recording::Entity::paginate_with_user(db, page.page_size, page.page_number).await?;
     Ok(Json(PageSelectQueryResult::<RecordingVO> {
         page_size,
         page_number,
@@ -65,15 +58,13 @@ pub async fn get_recording_by_user_id(
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;
-    let paginator = recording::Entity::find()
-        .find_also_related(user::Entity)
-        .filter(recording::Column::UserId.eq(user_id))
-        .order_by_desc(recording::Column::CreateTime)
-        .paginate(db, page.page_size);
-    // 获取某个用户的所有记录
-    let total_pages = paginator.num_pages().await?;
-    let page_records: Vec<(recording::Model, Option<user::Model>)> =
-        paginator.fetch_page(page.page_number - 1).await?;
+    let (total_pages, page_records) = recording::Entity::paginate_with_user_by_user_id(
+        db,
+        user_id,
+        page.page_size,
+        page.page_number,
+    )
+    .await?;
     Ok(Json(PageSelectQueryResult::<RecordingVO> {
         page_size,
         page_number,

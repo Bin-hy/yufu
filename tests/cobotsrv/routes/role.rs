@@ -1,7 +1,7 @@
 use super::super::common::*;
 use cobotsrv::config::Config;
-use cobotsrv::entity::role::{RoleAddReq, RolePatchReq, RoleVO};
 use cobotsrv::entity::PageSelectQueryResult;
+use cobotsrv::entity::role::{RoleAddReq, RolePatchReq, RoleVO};
 use cobotsrv::error::AppError;
 use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

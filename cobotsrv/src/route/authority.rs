@@ -8,8 +8,6 @@ use crate::result::Result;
 use axum::extract::{Query, State};
 use axum::routing::post;
 use axum::{Json, Router};
-use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, NotSet, PaginatorTrait, Set};
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 
@@ -44,24 +42,9 @@ pub async fn add_authority(
     Json(insert_payload): Json<AuthorityInsertReq>,
 ) -> Result<Json<AuthorityVO>> {
     let db = &state.database.connection;
-    let now = Utc::now().naive_utc();
-
-    let new_authority = authority::ActiveModel {
-        id: ActiveValue::NotSet,
-        name: Set(insert_payload.name.clone()),
-        authority_uri: Set(insert_payload.authority_uri.clone()),
-        method: Set(insert_payload.method.clone()),
-        create_time: Set(now),
-        update_time: Set(now),
-    };
-
-    let new_authority = new_authority
-        .insert(db)
+    let new_authority = authority::Entity::insert_one(db, insert_payload)
         .await
-        .into_app_with_conflict_msg(format!(
-            "权限名称: {} 或 authority_uri:{} 已经存在...",
-            insert_payload.name, insert_payload.authority_uri
-        ))?;
+        .into_app_with_conflict_msg("权限名称或路径已存在")?;
     //
     crate::service::authority::Service::ensure_sadmin_authorities(db).await?;
     Ok(Json(new_authority.into()))
@@ -80,10 +63,8 @@ pub async fn get_page_authorities(
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<AuthorityVO>>> {
     let db = &state.database.connection;
-    let paginator = authority::Entity::find().paginate(db, page.page_size);
-
-    let total_pages = paginator.num_pages().await?;
-    let authorities_db = paginator.fetch_page(page.page_number - 1).await?;
+    let (total_pages, authorities_db) =
+        authority::Entity::paginate(db, page.page_size, page.page_number).await?;
     Ok(Json(PageSelectQueryResult::<AuthorityVO> {
         page_size: page.page_size,
         page_number: page.page_number,
@@ -111,30 +92,7 @@ pub async fn patch_authority(
 ) -> Result<Json<AuthorityVO>> {
     let db = &state.database.connection;
     // // 校验id 和 更新冲突
-    let authority_db = authority::Entity::find_by_id(patch_payload.id)
-        .one(db)
-        .await?
-        .ok_or_else(|| AppError::NotFound("找不到该权限".to_string()))?;
-    // 更新
-    let mut new_authority: authority::ActiveModel = authority_db.into();
-    new_authority.name = if let Some(name) = patch_payload.name.clone() {
-        Set(name.to_owned())
-    } else {
-        NotSet
-    };
-    new_authority.authority_uri = if let Some(authority_uri) = patch_payload.authority_uri.clone() {
-        Set(authority_uri.to_owned())
-    } else {
-        NotSet
-    };
-    new_authority.method = if let Some(method) = patch_payload.authority_uri.clone() {
-        Set(method.to_owned())
-    } else {
-        NotSet
-    };
-    new_authority.update_time = Set(Utc::now().naive_utc());
-
-    let db_authority = new_authority.update(db).await?;
+    let db_authority = authority::Entity::update_partial(db, patch_payload).await?;
 
     Ok(Json(db_authority.into()))
 }
@@ -158,10 +116,8 @@ pub async fn delete_authority(
     Json(delete_payload): Json<AuthorityDeleteReq>,
 ) -> Result<Json<String>> {
     let db = &state.database.connection;
-    let res = authority::Entity::delete_by_id(delete_payload.id)
-        .exec(db)
-        .await?;
-    if res.rows_affected == 1 {
+    let ok = authority::Entity::delete_checked(db, delete_payload.id).await?;
+    if ok {
         Ok(Json("删除成功".to_string()))
     } else {
         Err(AppError::NotFound(

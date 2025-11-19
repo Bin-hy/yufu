@@ -3,6 +3,7 @@ use crate::entity::user;
 use crate::entity::user::UserVO;
 /// 用户操作记录表
 use sea_orm::entity::prelude::*;
+use sea_orm::{EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
 
 #[sea_orm::model]
@@ -51,3 +52,35 @@ impl From<(Model, Option<user::Model>)> for RecordingVO {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Entity {
+    pub async fn paginate_with_user(
+        db: &DatabaseConnection,
+        page_size: u64,
+        page_number: u64,
+    ) -> Result<(u64, Vec<(Model, Option<user::Model>)>), DbErr> {
+        let paginator = Self::find()
+            .find_also_related(user::Entity)
+            .order_by_desc(Column::CreateTime)
+            .paginate(db, page_size);
+        let total_pages = paginator.num_pages().await?;
+        let records = paginator.fetch_page(page_number - 1).await?;
+        Ok((total_pages, records))
+    }
+
+    pub async fn paginate_with_user_by_user_id(
+        db: &DatabaseConnection,
+        user_id: IdType,
+        page_size: u64,
+        page_number: u64,
+    ) -> Result<(u64, Vec<(Model, Option<user::Model>)>), DbErr> {
+        let paginator = Self::find()
+            .find_also_related(user::Entity)
+            .filter(Column::UserId.eq(user_id))
+            .order_by_desc(Column::CreateTime)
+            .paginate(db, page_size);
+        let total_pages = paginator.num_pages().await?;
+        let records = paginator.fetch_page(page_number - 1).await?;
+        Ok((total_pages, records))
+    }
+}

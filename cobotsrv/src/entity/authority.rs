@@ -2,13 +2,14 @@
 
 use crate::IdType;
 use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveModelTrait, EntityTrait, NotSet, PaginatorTrait, Set};
 use serde::{Deserialize, Serialize};
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Serialize, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "authority")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
-    pub id: i32,
+    pub id: IdType,
     #[sea_orm(unique_key = "unique_name")]
     pub name: String,
     #[sea_orm(unique_key = "uk_authority_method_uri")]
@@ -22,6 +23,56 @@ pub struct Model {
     pub roles: HasMany<super::role::Entity>,
     #[sea_orm(has_many, via = "user_authority")]
     pub users: HasMany<super::user::Entity>,
+}
+
+impl Entity {
+    pub async fn insert_one(
+        db: &DatabaseConnection,
+        insert: AuthorityInsertReq,
+    ) -> Result<Model, DbErr> {
+        let now = chrono::Utc::now().naive_utc();
+        let am = ActiveModel {
+            id: NotSet,
+            name: Set(insert.name),
+            authority_uri: Set(insert.authority_uri),
+            method: Set(insert.method),
+            create_time: Set(now),
+            update_time: Set(now),
+        };
+        am.insert(db).await
+    }
+
+    pub async fn paginate(
+        db: &DatabaseConnection,
+        page_size: u64,
+        page_number: u64,
+    ) -> Result<(u64, Vec<Model>), DbErr> {
+        let paginator = Self::find().paginate(db, page_size);
+        let total_pages = paginator.num_pages().await?;
+        let records = paginator.fetch_page(page_number - 1).await?;
+        Ok((total_pages, records))
+    }
+
+    pub async fn update_partial(
+        db: &DatabaseConnection,
+        patch: AuthorityPatchReq,
+    ) -> Result<Model, DbErr> {
+        let dbm = Self::find_by_id(patch.id)
+            .one(db)
+            .await?
+            .ok_or(DbErr::RecordNotFound("authority".to_string()))?;
+        let mut am: ActiveModel = dbm.into();
+        am.name = patch.name.map(Set).unwrap_or(NotSet);
+        am.authority_uri = patch.authority_uri.map(Set).unwrap_or(NotSet);
+        am.method = patch.method.map(Set).unwrap_or(NotSet);
+        am.update_time = Set(chrono::Utc::now().naive_utc());
+        am.update(db).await
+    }
+
+    pub async fn delete_checked(db: &DatabaseConnection, id: IdType) -> Result<bool, DbErr> {
+        let res = Self::delete_by_id(id).exec(db).await?;
+        Ok(res.rows_affected == 1)
+    }
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
