@@ -3,7 +3,7 @@
 # listen = "[::]:4000"
 # Cross-Origin Resource Sharing (CORS)
 # reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
-# cors = false
+cors = false
 # api_prefix = "/api/v1"
 
 # Headers["Authorization"] = "Bearer {token}"
@@ -12,8 +12,16 @@
 # secret = "<jwt_secret>"
 # static JWT token, superadmin, debuggger can use this token
 # tokens = ["live777"]
-# expiration_seconds, default 2h.
-# exp_seconds = 7200
+# expiration_seconds, default 5min.
+# exp_seconds = 300
+# refresh_expiration_seconds, default 30d.
+# refresh_exp_seconds = 2592000 # 30*24*3600
+# CORS origins 列表
+origins = [
+    "http://localhost:5173",
+    "https://example.com"
+]
+
 # add a superadmin
 [auth.super_admin]
 # username = "sadmin"

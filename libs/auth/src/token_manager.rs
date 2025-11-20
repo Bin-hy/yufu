@@ -1,4 +1,4 @@
-use crate::claims::Claims;
+use crate::claims::{Claims, RefreshClaims};
 
 use chrono::{Duration, Utc};
 use jsonwebtoken::errors::ErrorKind;
@@ -84,6 +84,24 @@ impl TokenManager {
         )
     }
 
+    pub fn generate_refresh_token<IDTYPE>(&self, jti: String, user_id: IDTYPE) -> JwtResult<String>
+    where
+        IDTYPE: Clone + Send + Sync + 'static + Serialize,
+    {
+        let now = Utc::now();
+        let exp = now + Duration::seconds(self.expire_seconds);
+        let claims = RefreshClaims {
+            jti,
+            sub: user_id,
+            exp: exp.timestamp() as u64,
+        };
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.secret.as_bytes()),
+        )
+    }
+
     /// Validates a JWT token and returns the decoded [`Claims<IDTYPE>`] if valid.
     ///
     /// Supports generic ID types for flexibility.
@@ -125,6 +143,29 @@ impl TokenManager {
         let validation = Validation::default();
 
         match decode::<Claims<IDTYPE>>(
+            token,
+            &DecodingKey::from_secret(self.secret.as_bytes()),
+            &validation,
+        ) {
+            Ok(data) => Ok(data.claims),
+            Err(err) => match *err.kind() {
+                ErrorKind::ExpiredSignature => Err(TokenError::Expired),
+                ErrorKind::InvalidSignature => Err(TokenError::InvalidSignature),
+                ErrorKind::InvalidToken => Err(TokenError::InvalidToken),
+                _ => Err(TokenError::Other(err.to_string())),
+            },
+        }
+    }
+
+    pub fn verify_refresh_token<IDTYPE>(
+        &self,
+        token: &str,
+    ) -> Result<RefreshClaims<IDTYPE>, TokenError>
+    where
+        for<'de> IDTYPE: Clone + Send + Sync + 'static + Serialize + Deserialize<'de>,
+    {
+        let validation = Validation::default();
+        match decode::<RefreshClaims<IDTYPE>>(
             token,
             &DecodingKey::from_secret(self.secret.as_bytes()),
             &validation,

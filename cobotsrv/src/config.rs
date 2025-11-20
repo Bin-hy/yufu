@@ -96,6 +96,10 @@ pub struct Auth {
     pub accounts: Vec<Account>,
     #[serde(default = "default_auth_expire_seconds")]
     pub exp_seconds: i64, // set token exp time, unit :seconds, default 2h
+    #[serde(default = "default_refresh_expire_seconds")]
+    pub refresh_exp_seconds: i64,
+    #[serde(default = "default_origins")]
+    pub origins: Vec<String>,
     #[serde(default = "default_super_admin")]
     pub super_admin: Account,
 }
@@ -197,9 +201,17 @@ fn default_auth_expire_seconds() -> i64 {
     7200
 }
 
+fn default_refresh_expire_seconds() -> i64 {
+    7 * 24 * 3600
+}
+
 fn default_super_admin() -> Account {
     Account {
         username: "sadmin".to_string(),
         password: "sadmin".to_string(),
     }
+}
+
+fn default_origins() -> Vec<String> {
+    vec!["http://localhost:5173".to_string()]
 }

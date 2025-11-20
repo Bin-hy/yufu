@@ -1,13 +1,15 @@
 use axum::body::Body;
 use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
-use http::{StatusCode, Uri};
+use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use http::{HeaderValue, Method, StatusCode, Uri};
 use reqwest::Client;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::sync::Arc;
 use std::{future::Future, time::Duration};
 use tokio::net::TcpListener;
+
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, info_span};
 
@@ -166,6 +168,10 @@ where
             &cfg.auth.secret,
             cfg.auth.exp_seconds,
         ),
+        refresh_token_manager: auth::token_manager::TokenManager::new(
+            &cfg.auth.secret,
+            cfg.auth.refresh_exp_seconds,
+        ),
     };
 
     let app_state = AppState {
@@ -224,7 +230,20 @@ where
         .layer(if cfg.http.cors {
             CorsLayer::permissive()
         } else {
-            CorsLayer::new()
+            let origins: Vec<String> = app_state.clone().config.auth.origins;
+            origins.iter().fold(
+                CorsLayer::new()
+                    .allow_credentials(true)
+                    .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
+                    .allow_methods([
+                        Method::GET,
+                        Method::PATCH,
+                        Method::POST,
+                        Method::DELETE,
+                        Method::OPTIONS,
+                    ]),
+                |cors, origin| cors.allow_origin(origin.parse::<HeaderValue>().unwrap()),
+            )
         })
         .with_state(app_state.clone())
         .layer(axum::middleware::from_fn(http_log::print_request_response))

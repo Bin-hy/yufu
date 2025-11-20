@@ -1,14 +1,18 @@
-use crate::AppState;
 use crate::result::Result;
 use crate::service::user::UserService;
+use crate::{AppState, IdType};
 
 use axum::routing::post;
 use axum::{Json, Router, extract::State};
+use axum_extra::TypedHeader;
+use axum_extra::headers::Cookie;
+use http::{HeaderMap, header::SET_COOKIE};
 use serde::{Deserialize, Serialize};
 
+use crate::entity::refresh_token;
+use crate::error::AppError;
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
-
 // request body
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -31,7 +35,7 @@ pub struct RegistryData {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize, Serialize, Debug)]
 pub struct LoginRespData {
-    token: String,
+    access_token: String,
     username: String,
     nickname: String,
 }
@@ -39,9 +43,21 @@ pub struct LoginRespData {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize, Serialize, Debug)]
 pub struct RegistryRespData {
-    token: String,
+    access_token: String,
     username: String,
     nickname: String,
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize, Serialize, Debug)]
+pub struct RefreshRespData {
+    access_token: String,
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Deserialize, Serialize, Debug)]
+pub struct KickReqData {
+    sub: IdType,
 }
 
 // Build routes
@@ -53,6 +69,9 @@ pub fn get_public_routes() -> Router<AppState> {
     Router::new()
         .route("/login", post(login))
         .route("/register", post(auth_register))
+        .route("/refresh", post(refresh))
+        .route("/logout", post(logout))
+        .route("/kickout", post(kick_out))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -77,7 +96,7 @@ pub async fn auth_register(
     let nickname = payload.nickname;
 
     // check username and password
-    let token = UserService::register(
+    let access_token = UserService::register(
         &state.database.connection,
         &state.auth_state.token_manager,
         username.as_str(),
@@ -85,8 +104,9 @@ pub async fn auth_register(
         nickname.as_str(),
     )
     .await?;
+
     let resp = RegistryRespData {
-        token,
+        access_token,
         username,
         nickname,
     };
@@ -109,7 +129,7 @@ pub async fn auth_register(
 pub async fn login(
     State(state): State<AppState>,
     Json(login_data): Json<LoginData>,
-) -> Result<Json<LoginRespData>> {
+) -> Result<(HeaderMap, Json<LoginRespData>)> {
     let db = &state.database.connection;
 
     // 1. 校验请求数据
@@ -117,15 +137,134 @@ pub async fn login(
     let password = login_data.password.as_str();
 
     // 2. 校验数据库账号密码
-    let (token, user_vo) =
-        UserService::auth(db, &state.auth_state.token_manager, username, password).await?;
+    let (access_token, refresh_token, user_vo) = UserService::auth(
+        db,
+        &state.auth_state.token_manager,
+        &state.auth_state.refresh_token_manager,
+        username,
+        password,
+    )
+    .await?;
 
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        SET_COOKIE,
+        http::HeaderValue::from_str(&format!(
+            "refresh_token={}; HttpOnly; Path=/; SameSite=Lax; Max-Age={}",
+            refresh_token, state.config.auth.refresh_exp_seconds,
+        ))?,
+    );
     let resp = LoginRespData {
-        token: token.to_string(),
+        access_token,
         username: username.to_string(),
-        nickname: user_vo.nickname.unwrap_or(username.to_string()), //
+        nickname: user_vo.nickname.unwrap_or(username.to_string()),
     };
-    Ok(Json(resp))
+    Ok((headers, Json(resp)))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/refresh",
+    request_body(
+        description = "使用刷新令牌获取新的访问令牌与刷新令牌",
+        content_type = "application/json"
+    ),
+    responses(
+        (status = 200, description = "刷新成功，返回新的 access_token 与 refresh_token", body = RefreshRespData),
+        (status = 401, description = "刷新令牌无效或已失效"),
+    ),
+))]
+pub async fn refresh(
+    State(state): State<AppState>,
+    TypedHeader(cookie): TypedHeader<Cookie>,
+) -> Result<(HeaderMap, Json<RefreshRespData>)> {
+    // 从 Cookie 中读取 refresh_token
+    let refresh_token = cookie
+        .get("refresh_token")
+        .ok_or_else(|| AppError::BadRequest("missing refresh token".to_string()))?;
+
+    // 调用业务逻辑
+    let (access_token, new_refresh_token) = UserService::refresh_tokens(
+        &state.database.connection,
+        &state.auth_state.refresh_token_manager,
+        &state.auth_state.token_manager,
+        refresh_token,
+    )
+    .await?;
+
+    // 设置新的 refresh_token Cookie
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        SET_COOKIE,
+        format!(
+            "refresh_token={}; HttpOnly; Path=/; SameSite=Lax; Max-Age={}",
+            new_refresh_token, state.config.auth.refresh_exp_seconds
+        )
+        .parse()?,
+    );
+
+    Ok((headers, Json(RefreshRespData { access_token })))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/logout",
+    request_body(
+        description = "登出当前会话：提升刷新令牌版本，使现有刷新令牌失效",
+        content_type = "application/json"
+    ),
+    responses(
+        (status = 200, description = "登出成功，返回空的令牌占位", body = RefreshRespData),
+        (status = 401, description = "刷新令牌无效或已失效"),
+    ),
+))]
+pub async fn logout(
+    State(state): State<AppState>,
+    TypedHeader(cookie): TypedHeader<Cookie>,
+) -> Result<(HeaderMap, Json<RefreshRespData>)> {
+    let refresh_token = cookie
+        .get("refresh_token")
+        .ok_or_else(|| AppError::BadRequest("missing refresh token".to_string()))?;
+
+    let (_, _) = UserService::logout_by_refresh(
+        &state.database.connection,
+        &state.auth_state.refresh_token_manager,
+        refresh_token,
+    )
+    .await?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        SET_COOKIE,
+        http::HeaderValue::from_str("refresh_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0")?,
+    );
+    Ok((
+        headers,
+        Json(RefreshRespData {
+            access_token: String::new(),
+        }),
+    ))
+}
+
+#[cfg_attr(feature = "openapi", utoipa::path(
+    post,
+    path = "/kickout",
+    request_body(
+        content = KickReqData,
+        description = "管理员强制下线指定用户，会话刷新族失效",
+        content_type = "application/json"
+    ),
+    responses(
+        (status = 200, description = "强制下线成功"),
+        (status = 404, description = "用户不存在或会话不存在"),
+    ),
+))]
+pub async fn kick_out(
+    State(state): State<AppState>,
+    Json(payload): Json<KickReqData>,
+) -> Result<()> {
+    let db = &state.database.connection;
+    refresh_token::Entity::delete_by_sub(db, payload.sub).await?;
+    Ok(())
 }
 
 #[cfg(feature = "openapi")]
@@ -134,6 +273,9 @@ pub async fn login(
     paths(
         login,
         auth_register,
+        refresh,
+        logout,
+        kick_out,
     ),
     tags ((name = "Auth身份校验", description = "权限身份校验接口"),)
 )]

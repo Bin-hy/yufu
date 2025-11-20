@@ -33,6 +33,16 @@ where
     pub exp: u64, // expiration
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct RefreshClaims<IDTYPE>
+where
+    IDTYPE: Clone + Send + Sync + 'static + Serialize,
+{
+    pub jti: String, // refresh token id, for SSO
+    pub sub: IDTYPE, // user_id
+    pub exp: u64,    // expiration
+}
+
 impl<IDTYPE> Display for Claims<IDTYPE>
 where
     IDTYPE: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + Debug,
