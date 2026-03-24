@@ -5,17 +5,10 @@ use axum::{
     routing::get,
 };
 use http::{HeaderValue, Uri, header};
-use serde::{Deserialize, Serialize};
 use tracing::Span;
 
 use crate::store::Node;
 use crate::{AppState, error::AppError, result::Result};
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct QueryExtract {
-    #[serde(default)]
-    pub nodes: Vec<String>,
-}
 
 pub fn route() -> Router<AppState> {
     Router::new().route(

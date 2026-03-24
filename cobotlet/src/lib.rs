@@ -1,12 +1,10 @@
 use std::future::Future;
 
-use axum::{Router, extract::Request, middleware, response::IntoResponse};
+use axum::{Router, extract::Request, response::IntoResponse};
 use http::{StatusCode, Uri};
 use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{Level, error, info_span};
-
-use auth::{AuthState, access::access_middleware, validate_middleware};
 
 use crate::config::Config;
 use crate::route::{AppState, hello};
@@ -30,14 +28,7 @@ where
         config: cfg.clone(),
     };
     let app = Router::new()
-        .merge(
-            hello::route()
-                .layer(middleware::from_fn(access_middleware))
-                .layer(middleware::from_fn_with_state(
-                    AuthState::new(cfg.auth.secret, cfg.auth.tokens),
-                    validate_middleware,
-                )),
-        )
+        .merge(hello::route())
         .with_state(app_state.clone())
         .layer(if cfg.http.cors {
             CorsLayer::permissive()

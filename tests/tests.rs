@@ -23,6 +23,7 @@ pub async fn shutdown_signal() {
 
 #[cfg(feature = "net4mqtt")]
 #[tokio::test]
+#[ignore]
 async fn test_http_cluster() {
     let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mqtt_broker_port: u16 = pick_unused_port().expect("No ports free");

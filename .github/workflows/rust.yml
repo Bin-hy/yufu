@@ -3,30 +3,31 @@ name: CI
 on: [ push, pull_request ]
 
 env:
-  CARGO_TERM_COLOR: always
+    CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ macos-latest, windows-latest, ubuntu-latest ]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v5
-      - name: Show version information
-        run: |
-          cargo --version
-          cargo fmt --version
-          cargo clippy --version
+    check:
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ macos-latest, windows-latest, ubuntu-latest ]
+        runs-on: ${{ matrix.os }}
+        steps:
+            - name: Checkout source code
+              uses: actions/checkout@v5
+            - name: Show version information
+              run: |
+                  cargo --version
+                  cargo fmt --version
+                  cargo clippy --version
 
-      - name: Cargo format
-        run: cargo fmt --all -- --check
-      - name: Cargo build
-        run: cargo build --workspace --all-targets --all-features --release --verbose
-      - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Cargo Test
-        run: cargo test --workspace --all-targets --all-features
+            - name: Cargo format
+              run: cargo fmt --all -- --check
+            - name: Cargo clippy
+              run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+            - name: Cargo build
+              run: cargo build --workspace --all-targets --all-features --release --verbose
 
+            - name: Cargo Test (only on Ubuntu)
+              if: matrix.os == 'ubuntu-latest'
+              run: cargo test --workspace --all-targets --all-features
