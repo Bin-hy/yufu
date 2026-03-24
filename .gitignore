@@ -18,13 +18,41 @@ target
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-node_modules
-.idea/
 
-# web
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+# OS 文件
+ehthumbs.db
+Icon?
+desktop.ini
+
+# 临时备份文件
+*~
+*.swp
+*.swo
+
+# 编译临时文件
+*.rmeta
+*.rlib
+*.dSYM/
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+
+# local config
+*.local
+*.local.*
+
+# cobotweb
+assets/*
+node_modules
 **/node_modules
 **/dist
 **/dist-ssr
 **/*.local
-assets
+

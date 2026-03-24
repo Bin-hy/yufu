@@ -1,16 +1,26 @@
-use std::{future::Future, time::Duration};
-
+use axum::body::Body;
+use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::{StatusCode, Uri};
 use reqwest::Client;
+use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
+use sea_orm_migration::MigratorTrait;
+use std::sync::Arc;
+use std::{future::Future, time::Duration};
 use tokio::net::TcpListener;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, info_span};
 
-use auth::{AuthState, access::access_middleware, validate_middleware};
-
 use crate::config::Config;
+use crate::entity::role::RoleEnum;
+use crate::entity::user;
+use crate::rbac::authority_check_middleware_rbac_abac;
+use crate::route::get_no_prefix_routes;
+use crate::service::authority::Service;
+use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
+use auth::claims::Claims;
+use auth::{AuthState, access_middleware_with_callback};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
@@ -18,10 +28,17 @@ use crate::store::{Node, NodeKind, Storage};
 struct Assets;
 
 pub mod config;
-mod error;
+pub mod entity;
+pub mod error;
+mod migration;
+pub mod rbac;
+mod recording_middleware;
 mod result;
-mod route;
+pub mod route;
+mod seed;
+pub mod service;
 mod store;
+mod swagger_docs;
 
 pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
 where
@@ -66,6 +83,13 @@ where
             .insert(v.alias, Node::new(v.token, NodeKind::Static, v.url));
     }
 
+    // Initialize database connection
+    let database_service = DatabaseService::new(&cfg.database)
+        .await
+        .expect("Failed to create database service");
+    migration::Migrator::up(&database_service.connection, None)
+        .await
+        .unwrap();
     #[cfg(feature = "net4mqtt")]
     {
         if let Some(mut c) = cfg.net4mqtt.clone() {
@@ -136,22 +160,67 @@ where
         }
     }
 
+    // Middleware and AppState
+    let auth_state = AuthState {
+        token_manager: auth::token_manager::TokenManager::new(
+            &cfg.auth.secret,
+            cfg.auth.exp_seconds,
+        ),
+    };
+
     let app_state = AppState {
         config: cfg.clone(),
         client: client_req.build().unwrap(),
         storage: store,
+        database: Arc::new(database_service),
+        auth_state: Arc::new(auth_state.clone()),
     };
+    let _ = app_state.init().await;
+    let app_state_for_middleware = app_state.clone();
+    // routes need auth
+    let sub_auth_router = route::get_auth_routes()
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            recording_middleware::recording_operation_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            authority_check_middleware_rbac_abac,
+        ))
+        .layer(middleware::from_fn_with_state(
+            auth_state.clone(),
+            move |State(auth_state): State<AuthState>, req, next| {
+                let auth_state = auth_state.clone();
+                let app_state = app_state_for_middleware.clone(); // Arc clone
 
-    let app = Router::new()
-        .merge(
-            route::remote::route()
-                .merge(route::hello::route())
-                .layer(middleware::from_fn(access_middleware))
-                .layer(middleware::from_fn_with_state(
-                    AuthState::new(cfg.auth.secret, cfg.auth.tokens),
-                    validate_middleware,
-                )),
-        )
+                async move {
+                    access_middleware_with_callback(
+                        State(auth_state),
+                        req,
+                        next,
+                        move |claims, req| {
+                            let claims = claims.clone();
+                            let app_state = app_state.clone();
+                            async move {
+                                // 调用 access_callback 获取 Request 所有权
+                                let req = access_callback(claims, req, app_state).await?;
+                                Ok::<Request<Body>, (StatusCode, String)>(req)
+                            }
+                        },
+                    )
+                    .await
+                }
+            },
+        )); // 靠下的拦截器先执行
+
+    // routes don't need auth,public routes
+    let sub_public_router = route::get_public_routes();
+
+    let api_prefix = &cfg.http.api_prefix;
+    let mut app = Router::new()
+        .nest(api_prefix, sub_auth_router)
+        .nest(api_prefix, sub_public_router)
+        .merge(get_no_prefix_routes())
         .layer(if cfg.http.cors {
             CorsLayer::permissive()
         } else {
@@ -176,6 +245,13 @@ where
             }),
         )
         .fallback(static_handler);
+    #[cfg(feature = "openapi")]
+    {
+        use crate::swagger_docs::doc::ApiDoc;
+        use utoipa::OpenApi;
+        use utoipa_swagger_ui::SwaggerUi;
+        app = app.merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", ApiDoc::openapi()));
+    }
 
     axum::serve(listener, app)
         .with_graceful_shutdown(signal)
@@ -185,16 +261,25 @@ where
 
 #[cfg(feature = "webui")]
 async fn static_handler(uri: Uri) -> impl IntoResponse {
-    let mut path = uri.path().trim_start_matches('/');
-    if path.is_empty() {
-        path = "index.html";
-    }
-    match Assets::get(path) {
+    let path = uri.path().trim_start_matches('/');
+
+    let file_path = if path.is_empty() { "index.html" } else { path };
+
+    match Assets::get(file_path) {
         Some(content) => {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
             ([(http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        None => {
+            // fallback to index.html
+            match Assets::get("index.html") {
+                Some(index) => {
+                    let mime = mime_guess::from_path("index.html").first_or_octet_stream();
+                    ([(http::header::CONTENT_TYPE, mime.as_ref())], index.data).into_response()
+                }
+                None => (StatusCode::NOT_FOUND, "not found").into_response(),
+            }
+        }
     }
 }
 
@@ -203,9 +288,78 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
+/// 鉴权成功后回调：将用户信息注入
+async fn access_callback(
+    claim: Claims<IdType>,
+    mut req: Request<Body>, // 拥有 Request 所有权
+    app_state: AppState,
+) -> Result<Request<Body>, (StatusCode, String)> {
+    let db = &app_state.database.connection;
+
+    let user = user::Entity::find_by_id(claim.id)
+        .one(db)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "No user id".to_string()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
+    req.extensions_mut().insert(user);
+
+    Ok(req)
+}
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
     config: Config,
     client: Client,
     storage: Storage,
+    database: Arc<DatabaseService>,
+    auth_state: Arc<AuthState>,
+}
+pub type IdType = i32;
+
+impl AppState {
+    pub async fn init(&self) -> result::Result<()> {
+        self.ensure_sadmin_authorities().await?;
+        self.init_sadmin_from_config().await?;
+        Ok(())
+    }
+    // 初始化超级管理员权限
+    async fn ensure_sadmin_authorities(&self) -> result::Result<()> {
+        Service::ensure_sadmin_authorities(&self.database.connection).await?;
+        Ok(())
+    }
+
+    // 初始化用户
+    async fn init_sadmin_from_config(&self) -> Result<(), DbErr> {
+        use crate::entity::user::ActiveModel as User;
+
+        let db = &self.database.connection;
+        let config = self.config.clone();
+        let super_admin_account = config.auth.super_admin.clone();
+        let sadmin_user = super_admin_account.username;
+        let sadmin_password = super_admin_account.password;
+
+        // 检查是否已存在
+        if user::Entity::find()
+            .filter(user::Column::Username.eq(&sadmin_user))
+            .one(db)
+            .await?
+            .is_none()
+        {
+            User {
+                id: ActiveValue::NotSet,
+                username: Set(sadmin_user),
+                password: Set(Some(sadmin_password)),
+                nickname: Set(Some("sadmin".to_string())),
+                role_id: Set(RoleEnum::Superadmin.default_id()),
+                description: Set(Some("The System Admin.".to_string())),
+                create_time: Set(chrono::Utc::now().naive_utc()),
+                update_time: Set(chrono::Utc::now().naive_utc()),
+            }
+            .insert(db)
+            .await?;
+            info!("Initial the super admin account has created successfully!");
+        } else {
+            info!("Initial the super admin account has created before.");
+        }
+        Ok(())
+    }
 }

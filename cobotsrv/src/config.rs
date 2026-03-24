@@ -17,6 +17,9 @@ pub struct Config {
 
     #[serde(default)]
     pub nodes: Vec<Node>,
+    // database config
+    #[serde(default)]
+    pub database: Database,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -79,19 +82,25 @@ pub struct Http {
     pub cors: bool,
     #[serde(default)]
     pub public: String,
+    #[serde(default = "default_api_prefix")]
+    pub api_prefix: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Auth {
-    #[serde(default)]
+    #[serde(default = "default_auth_secret")]
     pub secret: String,
     #[serde(default)]
     pub tokens: Vec<String>,
     #[serde(default)]
     pub accounts: Vec<Account>,
+    #[serde(default = "default_auth_expire_seconds")]
+    pub exp_seconds: i64, // set token exp time, unit :seconds, default 2h
+    #[serde(default = "default_super_admin")]
+    pub super_admin: Account,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Account {
     #[serde(default)]
     pub username: String,
@@ -105,6 +114,39 @@ pub struct Log {
     pub level: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Database {
+    #[serde(default = "default_db_url")]
+    pub url: String,
+    #[serde(default = "default_db_max_connections")]
+    pub max_connections: u32,
+    #[serde(default = "default_db_connect_timeout")]
+    pub connect_timeout: u64,
+}
+
+impl Default for Database {
+    fn default() -> Self {
+        Self {
+            url: default_db_url(),
+            max_connections: default_db_max_connections(),
+            connect_timeout: default_db_connect_timeout(),
+        }
+    }
+}
+
+fn default_db_url() -> String {
+    env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/postgres".to_string())
+}
+
+fn default_db_max_connections() -> u32 {
+    10
+}
+
+fn default_db_connect_timeout() -> u64 {
+    30
+}
+
 fn default_http_listen() -> SocketAddr {
     SocketAddr::from_str(&format!(
         "0.0.0.0:{}",
@@ -113,12 +155,17 @@ fn default_http_listen() -> SocketAddr {
     .expect("invalid listen address")
 }
 
+fn default_api_prefix() -> String {
+    "/api/v1".to_string()
+}
+
 impl Default for Http {
     fn default() -> Self {
         Self {
             listen: default_http_listen(),
             public: Default::default(),
             cors: Default::default(),
+            api_prefix: default_api_prefix(),
         }
     }
 }
@@ -139,4 +186,20 @@ fn default_log_level() -> String {
             "info".to_string()
         }
     })
+}
+
+fn default_auth_secret() -> String {
+    env::var("AUTH_SECRET")
+        .unwrap_or_else(|_| "qwertyuiop.asdfghjkl.zxcvbnm.1234567890-=".to_string())
+}
+
+fn default_auth_expire_seconds() -> i64 {
+    7200
+}
+
+fn default_super_admin() -> Account {
+    Account {
+        username: "sadmin".to_string(),
+        password: "sadmin".to_string(),
+    }
 }
