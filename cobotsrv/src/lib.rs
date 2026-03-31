@@ -23,6 +23,7 @@ use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
 use auth::claims::Claims;
 use auth::{AuthState, access_middleware_with_callback};
+use auth::token_manager::IdTokenSigner;
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
@@ -174,12 +175,46 @@ where
         ),
     };
 
+    // Initialize IdTokenSigner: load RSA key from file or auto-generate
+    let id_token_signer = {
+        let default_path = "conf/oidc_rsa_private.pem".to_string();
+        let key_path = cfg.auth.rsa_private_key_path.clone().unwrap_or(default_path);
+        match tokio::fs::read(&key_path).await {
+            Ok(pem) => {
+                info!("Loaded RSA private key from {}", key_path);
+                IdTokenSigner::from_rsa_pem(&pem, cfg.auth.exp_seconds)
+                    .expect("Failed to parse RSA private key")
+            }
+            Err(_) => {
+                info!("RSA key not found at {}, generating new key pair...", key_path);
+                use rsa::pkcs8::EncodePrivateKey;
+                let mut rng = rand::thread_rng();
+                let private_key = rsa::RsaPrivateKey::new(&mut rng, 2048)
+                    .expect("Failed to generate RSA key");
+                let pem_str = private_key
+                    .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+                    .expect("Failed to encode RSA key to PEM");
+                // Save to file for persistence
+                if let Some(parent) = std::path::Path::new(&key_path).parent() {
+                    let _ = tokio::fs::create_dir_all(parent).await;
+                }
+                tokio::fs::write(&key_path, pem_str.as_bytes())
+                    .await
+                    .expect("Failed to write RSA key file");
+                info!("Generated and saved RSA key to {}", key_path);
+                IdTokenSigner::from_rsa_pem(pem_str.as_bytes(), cfg.auth.exp_seconds)
+                    .expect("Failed to parse generated RSA key")
+            }
+        }
+    };
+
     let app_state = AppState {
         config: cfg.clone(),
         client: client_req.build().unwrap(),
         storage: store,
         database: Arc::new(database_service),
         auth_state: Arc::new(auth_state.clone()),
+        id_token_signer: Arc::new(id_token_signer),
     };
     let _ = app_state.init().await;
     let app_state_for_middleware = app_state.clone();
@@ -338,6 +373,7 @@ pub struct AppState {
     storage: Storage,
     database: Arc<DatabaseService>,
     auth_state: Arc<AuthState>,
+    id_token_signer: Arc<IdTokenSigner>,
 }
 pub type IdType = i32;
 

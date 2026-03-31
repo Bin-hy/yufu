@@ -92,6 +92,7 @@ pub fn get_public_routes() -> Router<AppState> {
             "/.well-known/openid-configuration",
             get(openid_configuration),
         )
+        .route("/.well-known/jwks.json", get(jwks))
         .route("/oidc/token", post(token_endpoint))
 }
 
@@ -116,10 +117,12 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
         authorization_endpoint: format!("{}/api/v1/oidc/authorize", base),
         token_endpoint: format!("{}/oidc/token", base),
         userinfo_endpoint: format!("{}/api/v1/oidc/userinfo", base),
-        jwks_uri: None,
+        jwks_uri: Some(format!("{}/.well-known/jwks.json", base)),
         response_types_supported: vec!["code".to_string()],
         subject_types_supported: vec!["public".to_string()],
-        id_token_signing_alg_values_supported: vec!["HS256".to_string()],
+        id_token_signing_alg_values_supported: vec![
+            state.id_token_signer.algorithm().to_string(),
+        ],
         grant_types_supported: vec![
             "authorization_code".to_string(),
             "refresh_token".to_string(),
@@ -128,6 +131,22 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
         token_endpoint_auth_methods_supported: vec!["client_secret_post".to_string()],
     };
     Ok(Json(resp))
+}
+
+async fn jwks(State(state): State<AppState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.id_token_signer.jwks_json() {
+        Some(json) => (
+            [(http::header::CONTENT_TYPE, "application/json")],
+            json,
+        )
+            .into_response(),
+        None => (
+            http::StatusCode::NOT_FOUND,
+            "JWKS not available (HMAC mode)",
+        )
+            .into_response(),
+    }
 }
 
 // --- PLACEHOLDER_OIDC_HANDLERS ---
@@ -242,7 +261,7 @@ async fn handle_authorization_code(
         .token_manager
         .generate_token::<IdType>(entry.user_id)?;
 
-    let id_token = state.auth_state.token_manager.generate_id_token::<IdType>(
+    let id_token = state.id_token_signer.sign_id_token::<IdType>(
         entry.user_id,
         &base,
         Some(&client.client_id),
@@ -329,7 +348,7 @@ async fn handle_refresh_token(
         .token_manager
         .generate_token::<IdType>(rec.user_id)?;
 
-    let id_token = state.auth_state.token_manager.generate_id_token::<IdType>(
+    let id_token = state.id_token_signer.sign_id_token::<IdType>(
         rec.user_id,
         &base,
         Some(&rec.client_id),

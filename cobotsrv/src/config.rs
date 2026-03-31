@@ -100,6 +100,10 @@ pub struct Auth {
     pub origins: Vec<String>,
     #[serde(default = "default_super_admin")]
     pub super_admin: Account,
+    /// Path to RSA private key PEM file for OIDC ID Token signing.
+    /// If not set, auto-generates to `conf/oidc_rsa_private.pem`.
+    #[serde(default)]
+    pub rsa_private_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
