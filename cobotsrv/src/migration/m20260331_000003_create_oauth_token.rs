@@ -50,6 +50,12 @@ impl MigrationTrait for Migration {
                             .timestamp()
                             .not_null(),
                     )
+                    .col(
+                        ColumnDef::new(OAuthToken::Revoked)
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
                     .to_owned(),
             )
             .await
@@ -77,4 +83,5 @@ enum OAuthToken {
     AccessExpiresAt,
     RefreshExpiresAt,
     UpdateTime,
+    Revoked,
 }

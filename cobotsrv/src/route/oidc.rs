@@ -94,6 +94,8 @@ pub fn get_public_routes() -> Router<AppState> {
         )
         .route("/.well-known/jwks.json", get(jwks))
         .route("/oidc/token", post(token_endpoint))
+        .route("/oidc/revoke", post(revoke))
+        .route("/oidc/introspect", post(introspect))
 }
 
 pub fn get_auth_routes() -> Router<AppState> {
@@ -289,6 +291,7 @@ async fn handle_authorization_code(
         access_expires_at: Set(access_expires),
         refresh_expires_at: Set(refresh_expires),
         update_time: Set(now),
+        revoked: Set(false),
     };
     new_rec.insert(&state.database.connection).await?;
 
@@ -356,12 +359,37 @@ async fn handle_refresh_token(
         Some(&access_token),
     )?;
 
+    // Rotate: revoke old refresh_token, issue new one
+    crate::entity::oauth_token::Entity::revoke_by_refresh_token(db, rt).await?;
+    let mut buf = [0u8; 32];
+    OsRng.fill_bytes(&mut buf);
+    let new_refresh_token = hex::encode(buf);
+    let now = Utc::now().naive_utc();
+    let access_expires = now + Duration::seconds(state.config.auth.exp_seconds);
+    let refresh_expires = now + Duration::seconds(state.config.auth.refresh_exp_seconds);
+    let new_rec = crate::entity::oauth_token::ActiveModel {
+        id: sea_orm::ActiveValue::NotSet,
+        user_id: Set(rec.user_id),
+        client_id: Set(rec.client_id.clone()),
+        access_token: Set(access_token.clone()),
+        id_token: Set(id_token.clone()),
+        refresh_token: Set(new_refresh_token.clone()),
+        scope: Set(rec.scope.clone()),
+        token_type: Set("Bearer".to_string()),
+        create_time: Set(now),
+        access_expires_at: Set(access_expires),
+        refresh_expires_at: Set(refresh_expires),
+        update_time: Set(now),
+        revoked: Set(false),
+    };
+    new_rec.insert(&state.database.connection).await?;
+
     Ok(Json(TokenResponse {
         access_token,
         id_token: Some(id_token),
         token_type: "Bearer".to_string(),
         expires_in: state.config.auth.exp_seconds,
-        refresh_token: None,
+        refresh_token: Some(new_refresh_token),
     }))
 }
 
@@ -409,6 +437,135 @@ async fn handle_client_credentials(
         token_type: "Bearer".to_string(),
         expires_in: state.config.auth.exp_seconds,
         refresh_token: None, // no refresh_token for client_credentials
+    }))
+}
+
+// --- Token Revocation (RFC 7009) ---
+
+#[derive(Deserialize)]
+pub struct RevokeRequest {
+    pub token: String,
+    #[serde(default = "default_token_type_hint")]
+    pub token_type_hint: String,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+}
+
+fn default_token_type_hint() -> String {
+    "refresh_token".to_string()
+}
+
+async fn revoke(
+    State(state): State<AppState>,
+    Json(req): Json<RevokeRequest>,
+) -> Result<http::StatusCode> {
+    // Authenticate client
+    authenticate_client(&state, req.client_id.as_deref(), req.client_secret.as_deref()).await?;
+
+    let db = &state.database.connection;
+    match req.token_type_hint.as_str() {
+        "refresh_token" => {
+            crate::entity::oauth_token::Entity::revoke_by_refresh_token(db, &req.token).await?;
+        }
+        "access_token" => {
+            crate::entity::oauth_token::Entity::revoke_by_access_token(db, &req.token).await?;
+        }
+        _ => {
+            // Try both
+            crate::entity::oauth_token::Entity::revoke_by_refresh_token(db, &req.token).await?;
+            crate::entity::oauth_token::Entity::revoke_by_access_token(db, &req.token).await?;
+        }
+    }
+    Ok(http::StatusCode::OK)
+}
+
+// --- Token Introspection (RFC 7662) ---
+
+#[derive(Deserialize)]
+pub struct IntrospectRequest {
+    pub token: String,
+    #[serde(default)]
+    pub token_type_hint: Option<String>,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct IntrospectResponse {
+    pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exp: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub: Option<String>,
+}
+
+async fn introspect(
+    State(state): State<AppState>,
+    Json(req): Json<IntrospectRequest>,
+) -> Result<Json<IntrospectResponse>> {
+    // Authenticate client
+    authenticate_client(&state, req.client_id.as_deref(), req.client_secret.as_deref()).await?;
+
+    let db = &state.database.connection;
+    let inactive = IntrospectResponse {
+        active: false,
+        scope: None,
+        client_id: None,
+        username: None,
+        token_type: None,
+        exp: None,
+        sub: None,
+    };
+
+    // Try to find by access_token first, then refresh_token
+    let rec = match crate::entity::oauth_token::Entity::find_by_access_token(db, &req.token)
+        .await?
+    {
+        Some(r) => r,
+        None => {
+            match crate::entity::oauth_token::Entity::find_by_refresh_token(db, &req.token).await?
+            {
+                Some(r) => r,
+                None => return Ok(Json(inactive)),
+            }
+        }
+    };
+
+    if rec.revoked {
+        return Ok(Json(inactive));
+    }
+
+    let now = Utc::now().naive_utc();
+    let is_access = rec.access_token == req.token;
+    let expired = if is_access {
+        now > rec.access_expires_at
+    } else {
+        now > rec.refresh_expires_at
+    };
+    if expired {
+        return Ok(Json(inactive));
+    }
+
+    Ok(Json(IntrospectResponse {
+        active: true,
+        scope: rec.scope.clone(),
+        client_id: Some(rec.client_id.clone()),
+        username: None,
+        token_type: Some(rec.token_type.clone()),
+        exp: Some(if is_access {
+            rec.access_expires_at.and_utc().timestamp()
+        } else {
+            rec.refresh_expires_at.and_utc().timestamp()
+        }),
+        sub: Some(rec.user_id.to_string()),
     }))
 }
 
