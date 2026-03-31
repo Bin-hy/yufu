@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { setToken, removeToken } from "@/common/cache/cookies.ts";
+import { getToken, setToken, removeToken } from "@/common/cache/cookies.ts";
 
 // 用户信息接口
 export interface UserInfo {
@@ -21,16 +21,17 @@ export const useUserStore = defineStore('user', () => {
     userInfo.value = info
     isLoggedIn.value = true
 
-    // 将用户信息存储到本地存储
+    // token 仅存入 cookie，不放 localStorage（降低 XSS 风险）
     setToken(info.token)
-    localStorage.setItem('userInfo', JSON.stringify(info))
+    const { token: _token, ...safeInfo } = info
+    localStorage.setItem('userInfo', JSON.stringify(safeInfo))
   }
-  
+
   // 清除用户信息
   const clearUserInfo = () => {
     userInfo.value = null
     isLoggedIn.value = false
-    
+
     // 从本地存储清除用户信息
     removeToken()
     localStorage.removeItem('userInfo')
@@ -40,14 +41,15 @@ export const useUserStore = defineStore('user', () => {
   const logout = () => {
     clearUserInfo()
   }
-  
+
   // 初始化用户信息（从本地存储恢复）
   const initUserInfo = () => {
     const storedUserInfo = localStorage.getItem('userInfo')
-    if (storedUserInfo) {
+    const token = getToken()
+    if (storedUserInfo && token) {
       try {
         const info = JSON.parse(storedUserInfo)
-        userInfo.value = info
+        userInfo.value = { ...info, token }
         isLoggedIn.value = true
       } catch (error) {
         console.error('Failed to parse stored user info:', error)
@@ -55,7 +57,7 @@ export const useUserStore = defineStore('user', () => {
       }
     }
   }
-  
+
   return {
     userInfo,
     isLoggedIn,

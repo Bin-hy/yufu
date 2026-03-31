@@ -15,9 +15,9 @@ const creating = ref(false)
 const editing = ref(false)
 const currentRole = ref<RoleVO | null>(null)
 // 创建表单
-const createForm = ref<{ name: string; role_enum: string }>({ name: '', role_enum: 'Admin' })
+const createForm = ref<{ name: string;  }>({ name: '' })
 // 编辑表单
-const editForm = ref<{ id: string; name: string; role_enum: string }>({ id: '', name: '', role_enum: 'Admin' })
+const editForm = ref<{ id: number; name: string;  }>({ id: 0, name: '' })
 
 // 分页
 const pageNumber = ref(1)
@@ -44,35 +44,35 @@ async function loadRoles() {
 }
 
 function openCreateDialog() {
-  createForm.value = { name: '', role_enum: 'Admin' }
+  createForm.value = { name: '' }
   creating.value = true
 }
 
 async function submitCreate() {
-  if (!createForm.value.name || !createForm.value.role_enum) {
-    emitToast({ type: 'warning', message: '请填写角色名称与枚举' })
+  if (!createForm.value.name ) {
+    emitToast({ type: 'warning', message: '请填写角色名称' })
     return
   }
   try {
-    const vo = await addRole({ name: createForm.value.name, role_enum: createForm.value.role_enum })
+    const vo = await addRole({ name: createForm.value.name })
     emitToast({ type: 'success', message: `已创建角色：${vo.name}` })
     creating.value = false
     await loadRoles()
   } catch (e) {
     // 错误已由拦截器弹出，这里补充提示
-    emitToast({ type: 'error', message: '创建角色失败，可能是枚举或名称重复' })
+    emitToast({ type: 'error', message: '创建角色失败，可能是名称重复' })
   }
 }
 
 function openEditDialog(role: RoleVO) {
   currentRole.value = role
-  editForm.value = { id: role.id, name: role.name, role_enum: role.role_enum }
+  editForm.value = { id: role.id, name: role.name }
   editing.value = true
 }
 
 async function submitEdit() {
   try {
-    const vo = await patchRole({ id: editForm.value.id, name: editForm.value.name, role_enum: editForm.value.role_enum })
+    const vo = await patchRole({ id: editForm.value.id, name: editForm.value.name })
     emitToast({ type: 'success', message: `已更新角色名称：${vo.name}` })
     editing.value = false
     await loadRoles()
@@ -141,12 +141,11 @@ onMounted(async () => {
                   </div>
                 </div>
               </td>
-              <td class="px-6 py-4">{{ r.role_enum }}</td>
               <td class="px-6 py-4">{{ r.create_time }}</td>
               <td class="px-6 py-4">{{ r.update_time }}</td>
               <td class="px-6 py-4">
                 <div class="flex gap-2">
-                  <UiButton size="sm" variant="outline" :disabled="r.role_enum==='Superadmin'" @click="openEditDialog(r)">重命名</UiButton>
+                  <UiButton size="sm" variant="outline" @click="openEditDialog(r)">重命名</UiButton>
                 </div>
               </td>
             </tr>
@@ -180,11 +179,6 @@ onMounted(async () => {
           <label class="block text-sm mb-1">角色名称</label>
           <UiInput v-model="createForm.name" placeholder="例如：管理员" />
         </div>
-        <div>
-          <label class="block text-sm mb-1">角色枚举</label>
-          <UiInput v-model="createForm.role_enum" placeholder="请输入后端已存在的枚举值，例如：Admin" />
-          <p class="text-xs text-muted-foreground mt-1">自定义的唯一枚举，例如 Admin, DogAdmin,BirdAdmin</p>
-        </div>
       </div>
     </UiDialog>
 
@@ -195,7 +189,6 @@ onMounted(async () => {
           <label class="block text-sm mb-1">角色名称</label>
           <UiInput v-model="editForm.name" />
         </div>
-        <p class="text-xs text-muted-foreground">枚举：{{ editForm.role_enum }}（不建议修改）</p>
       </div>
     </UiDialog>
   </div>

@@ -1,9 +1,10 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios"
-import { getToken } from "@/common/cache/cookies"
+import { getToken, setToken } from "@/common/cache/cookies"
 import { get, merge } from "lodash-es"
 import { useUserStore } from "@/pinia/stores/user"
 import { emitToast } from "@/utils/toast"
 import { router } from "@/router"
+import { refreshTokenRequest } from "@/pages/login/api"
 
 /** 退出登录并强制刷新页面（会重定向到登录页） */
 function logout() {
@@ -17,6 +18,12 @@ function logout() {
 function createInstance() {
   // 创建一个 axios 实例命名为 instance
   const instance = axios.create()
+  // 刷新令牌并发控制
+  let isRefreshing = false
+  let refreshPromise: Promise<string> | null = null
+  const subscribers: Array<(token: string) => void> = []
+  const subscribeTokenRefresh = (cb: (token: string) => void) => { subscribers.push(cb) }
+  const onRefreshed = (token: string) => { subscribers.forEach(cb => cb(token)); subscribers.length = 0 }
   // 请求拦截器
   instance.interceptors.request.use(
     // 发送之前
@@ -30,20 +37,58 @@ function createInstance() {
       return response.data
     },
     (error) => {
-      // status 是 HTTP 状态码
-      const status = get(error, "response.status")
+      const status = get(error, "response.status") as number | undefined
       const message = get(error, "response.data") || get(error, "message") || "请求错误"
+      const originalConfig = (error?.config || {}) as AxiosRequestConfig & { _retry?: boolean }
+
+      if (status === 401) {
+        const reqUrl = String(get(error, "config.url") || "")
+        // 避免刷新接口自身循环
+        if (/refresh$/i.test(reqUrl)) {
+          emitToast({ type: 'error', message: "登录已过期，请重新登录" })
+          setTimeout(() => { logout() }, 300)
+          return Promise.reject(error)
+        }
+        // 已重试仍失败则退出
+        if (originalConfig._retry) {
+          setTimeout(() => { logout() }, 0)
+          return Promise.reject(error)
+        }
+
+        if (!isRefreshing) {
+          isRefreshing = true
+          refreshPromise = refreshTokenRequest()
+            .then((data) => {
+              const newToken = data?.access_token
+              if (!newToken) throw new Error("刷新失败：未返回 access_token")
+              setToken(newToken)
+              isRefreshing = false
+              onRefreshed(newToken)
+              return newToken
+            })
+            .catch((e) => {
+              isRefreshing = false
+              emitToast({ type: 'error', message: "登录已过期，请重新登录" })
+              setTimeout(() => { logout() }, 0)
+              throw e
+            })
+        }
+
+        return new Promise((resolve, reject) => {
+          subscribeTokenRefresh((newToken) => {
+            if (!originalConfig.headers) originalConfig.headers = {}
+            originalConfig.headers["Authorization"] = `Bearer ${newToken}`
+            originalConfig._retry = true
+            resolve(instance(originalConfig))
+          })
+          refreshPromise?.catch(reject)
+        })
+      }
+
+      // 其他状态码处理
       switch (status) {
         case 400:
           error.message = "请求错误"
-          break
-        case 401:
-          // Token 过期或未授权时
-          error.message = message || "登录已过期，请重新登录"
-          emitToast({ type: 'error', message: error.message || String(message) })
-          setTimeout(() => {
-            logout()
-          }, 3000)
           break
         case 403:
           error.message = message || "拒绝访问"
@@ -53,6 +98,9 @@ function createInstance() {
           break
         case 408:
           error.message = "请求超时"
+          break
+        case 409:
+          error.message = message || "已存在"
           break
         case 500:
           error.message = "服务器内部错误"
@@ -99,7 +147,7 @@ function createRequest(instance: AxiosInstance) {
       // 请求超时
       timeout: 8000,
       // 跨域请求时是否携带 Cookies
-      withCredentials: false
+      withCredentials: true
     }
     // 将默认配置 defaultConfig 和传入的自定义配置 config 进行合并成为 mergeConfig
     const mergeConfig = merge(defaultConfig, config)

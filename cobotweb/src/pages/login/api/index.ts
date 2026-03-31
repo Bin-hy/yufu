@@ -17,3 +17,30 @@ export function registerApi(data: Auth.RegisterRequestData){
         data
     })
 }
+
+// 刷新 access_token
+export function refreshTokenRequest() {
+  return request<Auth.RefreshRespData>({
+    url: "refresh",
+    method: "post",
+    // withCredentials: true,
+  })
+}
+
+export function logoutRequest(){
+    return request<Auth.LogoutRespData>({
+        url: "logout",
+        method: "post",
+        // withCredentials: true,
+    })
+}
+
+// 把用户踢下线
+export function kickoutUserRequest(data: Auth.KickReqData){
+    return request({
+        url: "kickout",
+        method: "post",
+        data,
+        // withCredentials: true,
+    })
+}

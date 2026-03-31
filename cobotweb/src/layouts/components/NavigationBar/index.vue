@@ -75,8 +75,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
 })
 
-const handleLogout = () => {
-  logoutAndRedirect(router)
+const handleLogout = async () => {
+  await logoutAndRedirect(router)
 }
 </script>
 

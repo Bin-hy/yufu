@@ -17,9 +17,9 @@ const loading = ref(false)
 // 当前选中的角色
 const selectedRole = ref<Role | null>(null)
 // 选中的权限ID列表（当前勾选）
-const selectedAuthorityIds = ref<string[]>([])
+const selectedAuthorityIds = ref<number[]>([])
 // 原始权限ID集合（用于 diff 计算）
-const originalAuthorityIdSet = ref<Set<string>>(new Set())
+const originalAuthorityIdSet = ref<Set<number>>(new Set())
 // 权限分配对话框
 const showAssignDialog = ref(false)
 
@@ -87,8 +87,8 @@ const saveAuthorityAssign = async () => {
   const currentSet = new Set(selectedAuthorityIds.value)
   const originSet = originalAuthorityIdSet.value
 
-  const toAdd: string[] = []
-  const toDel: string[] = []
+  const toAdd: number[] = []
+  const toDel: number[] = []
   for (const id of currentSet) if (!originSet.has(id)) toAdd.push(id)
   for (const id of originSet) if (!currentSet.has(id)) toDel.push(id)
 
@@ -152,7 +152,6 @@ onMounted(async () => {
         >
           <div class="flex justify-between items-center mb-2">
             <h3 class="font-medium">{{ role.name }}</h3>
-            <span class="px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground">{{ role.role_enum }}</span>
           </div>
           <p class="text-sm text-muted-foreground">点击为该角色分配权限</p>
         </div>

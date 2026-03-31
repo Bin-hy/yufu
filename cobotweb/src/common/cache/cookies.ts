@@ -5,13 +5,13 @@ import Cookies from "js-cookie"
 
 // 处理 token
 export function getToken() {
-  return Cookies.get(CacheKey.TOKEN)
+  return Cookies.get(CacheKey.ACCESS_TOKEN)
 }
 
 export function setToken(token: string) {
-  Cookies.set(CacheKey.TOKEN, token)
+  Cookies.set(CacheKey.ACCESS_TOKEN, token)
 }
 
 export function removeToken() {
-  Cookies.remove(CacheKey.TOKEN)
+  Cookies.remove(CacheKey.ACCESS_TOKEN)
 }
