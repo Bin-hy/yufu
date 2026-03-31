@@ -7,6 +7,9 @@ mod m20251016_140822_create_authority_role_table;
 mod m20251022_152723_create_recording_table;
 mod m20251114_154712_create_user_authority;
 mod m20251119_194133_create_refresh_token;
+mod m20260331_000001_create_oauth_client;
+mod m20260331_000002_create_oauth_scope;
+mod m20260331_000003_create_oauth_token;
 
 use crate::seed;
 pub struct Migrator;
@@ -21,6 +24,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20251022_152723_create_recording_table::Migration),
             Box::new(m20251114_154712_create_user_authority::Migration),
             Box::new(m20251119_194133_create_refresh_token::Migration),
+            Box::new(m20260331_000001_create_oauth_client::Migration),
+            Box::new(m20260331_000002_create_oauth_scope::Migration),
+            Box::new(m20260331_000003_create_oauth_token::Migration),
         ];
         // https://github.com/SeaQL/sea-orm/blob/aec4795211cfda43ceea951261e698afe8536557/examples/axum_example/seeder/src/lib.rs#L13
         migrations.extend(seed::Migrator::migrations());

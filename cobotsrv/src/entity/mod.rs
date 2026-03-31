@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 pub mod authority;
 pub mod authority_role;
+pub mod oauth_client;
+pub mod oauth_scope;
+pub mod oauth_token;
 pub mod recording;
 pub mod refresh_token;
 pub mod role;

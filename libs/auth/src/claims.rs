@@ -51,3 +51,18 @@ where
         write!(f, "id: {:?}, expire: {}", self.id, self.exp)
     }
 }
+
+/// OIDC ID Token claims (RFC 7519 + OpenID Connect Core 1.0)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct IdTokenClaims<IDTYPE>
+where
+    IDTYPE: Clone + Send + Sync + 'static + Serialize,
+{
+    pub iss: String,           // issuer
+    pub sub: IDTYPE,           // subject (user_id)
+    pub aud: Option<String>,   // audience (client_id)
+    pub iat: u64,              // issued at
+    pub exp: u64,              // expiration
+    pub nonce: Option<String>, // replay protection
+    pub at_hash: Option<String>, // access token hash
+}

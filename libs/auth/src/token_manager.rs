@@ -1,4 +1,4 @@
-use crate::claims::{Claims, RefreshClaims};
+use crate::claims::{Claims, IdTokenClaims, RefreshClaims};
 
 use chrono::{Duration, Utc};
 use jsonwebtoken::errors::ErrorKind;
@@ -178,6 +178,45 @@ impl TokenManager {
                 _ => Err(TokenError::Other(err.to_string())),
             },
         }
+    }
+
+    /// Generates an OIDC ID Token.
+    pub fn generate_id_token<IDTYPE>(
+        &self,
+        subject: IDTYPE,
+        issuer: &str,
+        audience: Option<&str>,
+        nonce: Option<&str>,
+        access_token: Option<&str>,
+    ) -> JwtResult<String>
+    where
+        IDTYPE: Clone + Send + Sync + 'static + Serialize,
+    {
+        let now = Utc::now();
+        let exp = now + Duration::seconds(self.expire_seconds);
+
+        // Compute at_hash: left half of SHA-256 of access_token, base64url-encoded
+        let at_hash = access_token.map(|at| {
+            use base64::Engine;
+            use sha2::{Digest, Sha256};
+            let hash = Sha256::digest(at.as_bytes());
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..16])
+        });
+
+        let claims = IdTokenClaims {
+            iss: issuer.to_string(),
+            sub: subject,
+            aud: audience.map(|s| s.to_string()),
+            iat: now.timestamp() as u64,
+            exp: exp.timestamp() as u64,
+            nonce: nonce.map(|s| s.to_string()),
+            at_hash,
+        };
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.secret.as_bytes()),
+        )
     }
 }
 #[cfg(test)]
