@@ -26,25 +26,34 @@ pub struct OidcDiscovery {
     pub response_types_supported: Vec<String>,
     pub subject_types_supported: Vec<String>,
     pub id_token_signing_alg_values_supported: Vec<String>,
+    pub grant_types_supported: Vec<String>,
+    pub token_endpoint_auth_methods_supported: Vec<String>,
 }
 
 // --- PLACEHOLDER_OIDC_TYPES ---
 
+/// Unified token request — fields are optional depending on grant_type
 #[derive(Deserialize)]
-pub struct TokenRequestAuthorizationCode {
+pub struct TokenRequest {
     pub grant_type: String,
-    pub code: String,
-    pub code_verifier: String,
-    #[serde(default)]
-    pub client_id: Option<String>,
-    #[serde(default)]
+    // authorization_code fields
+    pub code: Option<String>,
+    pub code_verifier: Option<String>,
     pub redirect_uri: Option<String>,
+    // refresh_token fields
+    pub refresh_token: Option<String>,
+    // client auth (also via Basic header)
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    // client_credentials scope
+    pub scope: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct TokenResponse {
     pub access_token: String,
-    pub id_token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_token: Option<String>,
     pub token_type: String,
     pub expires_in: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,14 +65,6 @@ pub struct UserInfoResp {
     pub sub: IdType,
     pub preferred_username: String,
     pub name: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct RefreshTokenRequest {
-    pub grant_type: String,
-    pub refresh_token: String,
-    #[serde(default)]
-    pub client_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -91,10 +92,7 @@ pub fn get_public_routes() -> Router<AppState> {
             "/.well-known/openid-configuration",
             get(openid_configuration),
         )
-        .route(
-            "/oidc/token",
-            post(token_authorization_code).patch(token_refresh),
-        )
+        .route("/oidc/token", post(token_endpoint))
 }
 
 pub fn get_auth_routes() -> Router<AppState> {
@@ -122,47 +120,111 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
         response_types_supported: vec!["code".to_string()],
         subject_types_supported: vec!["public".to_string()],
         id_token_signing_alg_values_supported: vec!["HS256".to_string()],
+        grant_types_supported: vec![
+            "authorization_code".to_string(),
+            "refresh_token".to_string(),
+            "client_credentials".to_string(),
+        ],
+        token_endpoint_auth_methods_supported: vec!["client_secret_post".to_string()],
     };
     Ok(Json(resp))
 }
 
 // --- PLACEHOLDER_OIDC_HANDLERS ---
 
-async fn token_authorization_code(
-    State(state): State<AppState>,
-    Json(req): Json<TokenRequestAuthorizationCode>,
-) -> Result<Json<TokenResponse>> {
-    if req.grant_type != "authorization_code" {
-        return Err(crate::error::AppError::BadRequest(
-            "unsupported grant_type, expected authorization_code".to_string(),
+/// Authenticate client from request body (client_id + client_secret)
+async fn authenticate_client(
+    state: &AppState,
+    client_id: Option<&str>,
+    client_secret: Option<&str>,
+) -> Result<crate::entity::oauth_client::Model> {
+    let cid = client_id.ok_or(crate::error::AppError::BadRequest(
+        "missing client_id".to_string(),
+    ))?;
+    let secret = client_secret.ok_or(crate::error::AppError::BadRequest(
+        "missing client_secret".to_string(),
+    ))?;
+    let db = &state.database.connection;
+    let client = crate::entity::oauth_client::Entity::get_by_client_id(db, cid)
+        .await?
+        .ok_or(crate::error::AppError::Unauthorized(
+            "invalid client_id".to_string(),
+        ))?;
+    if !client.verify_secret(secret) {
+        return Err(crate::error::AppError::Unauthorized(
+            "invalid client_secret".to_string(),
         ));
     }
+    Ok(client)
+}
 
-    let entry =
-        state
-            .storage
-            .take_auth_code(&req.code)
-            .ok_or(crate::error::AppError::BadRequest(
-                "authorization code invalid or already used".to_string(),
-            ))?;
+/// Unified token endpoint — dispatches by grant_type
+async fn token_endpoint(
+    State(state): State<AppState>,
+    Json(req): Json<TokenRequest>,
+) -> Result<Json<TokenResponse>> {
+    match req.grant_type.as_str() {
+        "authorization_code" => handle_authorization_code(&state, &req).await,
+        "refresh_token" => handle_refresh_token(&state, &req).await,
+        "client_credentials" => handle_client_credentials(&state, &req).await,
+        _ => Err(crate::error::AppError::BadRequest(format!(
+            "unsupported grant_type: {}",
+            req.grant_type
+        ))),
+    }
+}
+
+async fn handle_authorization_code(
+    state: &AppState,
+    req: &TokenRequest,
+) -> Result<Json<TokenResponse>> {
+    let code = req.code.as_deref().ok_or(crate::error::AppError::BadRequest(
+        "missing code".to_string(),
+    ))?;
+    let code_verifier = req.code_verifier.as_deref().ok_or(
+        crate::error::AppError::BadRequest("missing code_verifier".to_string()),
+    )?;
+
+    let entry = state
+        .storage
+        .take_auth_code(code)
+        .ok_or(crate::error::AppError::BadRequest(
+            "authorization code invalid or already used".to_string(),
+        ))?;
     if Utc::now().naive_utc() > entry.expires_at {
         return Err(crate::error::AppError::BadRequest(
             "authorization code expired".to_string(),
         ));
     }
 
-    // Validate client_id and redirect_uri consistency
-    if entry.client_id != req.client_id || entry.redirect_uri != req.redirect_uri {
+    // Authenticate client
+    let client = authenticate_client(
+        state,
+        req.client_id.as_deref(),
+        req.client_secret.as_deref(),
+    )
+    .await?;
+
+    // Validate consistency
+    if entry.client_id.as_deref() != Some(&client.client_id)
+        || entry.redirect_uri != req.redirect_uri
+    {
         return Err(crate::error::AppError::BadRequest(
             "client_id or redirect_uri mismatch".to_string(),
         ));
     }
+    if !client.allows_grant_type("authorization_code") {
+        return Err(crate::error::AppError::BadRequest(
+            "client not allowed authorization_code grant".to_string(),
+        ));
+    }
 
+    // PLACEHOLDER_PKCE_VERIFY ---
     // Verify PKCE
     let ok = match entry.code_challenge_method.as_str() {
-        "plain" => entry.code_challenge == req.code_verifier,
+        "plain" => entry.code_challenge == code_verifier,
         "S256" => {
-            let digest = Sha256::digest(req.code_verifier.as_bytes());
+            let digest = Sha256::digest(code_verifier.as_bytes());
             let challenge = URL_SAFE_NO_PAD.encode(digest);
             entry.code_challenge == challenge
         }
@@ -174,7 +236,7 @@ async fn token_authorization_code(
         ));
     }
 
-    let base = get_issuer_base(&state);
+    let base = get_issuer_base(state);
     let access_token = state
         .auth_state
         .token_manager
@@ -183,13 +245,12 @@ async fn token_authorization_code(
     let id_token = state.auth_state.token_manager.generate_id_token::<IdType>(
         entry.user_id,
         &base,
-        entry.client_id.as_deref(),
+        Some(&client.client_id),
         entry.nonce.as_deref(),
         Some(&access_token),
     )?;
 
-    // PLACEHOLDER_TOKEN_PERSIST_1 ---
-    // Create refresh_token and persist token record
+    // Persist token record
     let mut buf = [0u8; 32];
     OsRng.fill_bytes(&mut buf);
     let refresh_token = hex::encode(buf);
@@ -199,7 +260,7 @@ async fn token_authorization_code(
     let new_rec = crate::entity::oauth_token::ActiveModel {
         id: sea_orm::ActiveValue::NotSet,
         user_id: Set(entry.user_id),
-        client_id: Set(entry.client_id.clone().unwrap_or_default()),
+        client_id: Set(client.client_id),
         access_token: Set(access_token.clone()),
         id_token: Set(id_token.clone()),
         refresh_token: Set(refresh_token.clone()),
@@ -214,27 +275,38 @@ async fn token_authorization_code(
 
     Ok(Json(TokenResponse {
         access_token,
-        id_token,
+        id_token: Some(id_token),
         token_type: "Bearer".to_string(),
         expires_in: state.config.auth.exp_seconds,
         refresh_token: Some(refresh_token),
     }))
 }
 
-// --- PLACEHOLDER_OIDC_REFRESH ---
+// --- PLACEHOLDER_HANDLE_REFRESH ---
 
-async fn token_refresh(
-    State(state): State<AppState>,
-    Json(req): Json<RefreshTokenRequest>,
+async fn handle_refresh_token(
+    state: &AppState,
+    req: &TokenRequest,
 ) -> Result<Json<TokenResponse>> {
-    if req.grant_type != "refresh_token" {
+    let rt = req.refresh_token.as_deref().ok_or(
+        crate::error::AppError::BadRequest("missing refresh_token".to_string()),
+    )?;
+
+    // Authenticate client
+    let client = authenticate_client(
+        state,
+        req.client_id.as_deref(),
+        req.client_secret.as_deref(),
+    )
+    .await?;
+    if !client.allows_grant_type("refresh_token") {
         return Err(crate::error::AppError::BadRequest(
-            "unsupported grant_type, expected refresh_token".to_string(),
+            "client not allowed refresh_token grant".to_string(),
         ));
     }
 
     let db = &state.database.connection;
-    let rec = crate::entity::oauth_token::Entity::find_by_refresh_token(db, &req.refresh_token)
+    let rec = crate::entity::oauth_token::Entity::find_by_refresh_token(db, rt)
         .await?
         .ok_or(crate::error::AppError::Unauthorized(
             "invalid refresh_token".to_string(),
@@ -245,8 +317,13 @@ async fn token_refresh(
             "refresh_token expired".to_string(),
         ));
     }
+    if rec.client_id != client.client_id {
+        return Err(crate::error::AppError::Unauthorized(
+            "refresh_token does not belong to this client".to_string(),
+        ));
+    }
 
-    let base = get_issuer_base(&state);
+    let base = get_issuer_base(state);
     let access_token = state
         .auth_state
         .token_manager
@@ -262,10 +339,57 @@ async fn token_refresh(
 
     Ok(Json(TokenResponse {
         access_token,
-        id_token,
+        id_token: Some(id_token),
         token_type: "Bearer".to_string(),
         expires_in: state.config.auth.exp_seconds,
         refresh_token: None,
+    }))
+}
+
+async fn handle_client_credentials(
+    state: &AppState,
+    req: &TokenRequest,
+) -> Result<Json<TokenResponse>> {
+    // Authenticate client
+    let client = authenticate_client(
+        state,
+        req.client_id.as_deref(),
+        req.client_secret.as_deref(),
+    )
+    .await?;
+    if !client.allows_grant_type("client_credentials") {
+        return Err(crate::error::AppError::BadRequest(
+            "client not allowed client_credentials grant".to_string(),
+        ));
+    }
+
+    // Validate requested scopes
+    if let Some(scope) = &req.scope {
+        let req_scopes: Vec<String> = scope
+            .split(' ')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !client.allows_scopes(&req_scopes) {
+            return Err(crate::error::AppError::BadRequest(
+                "requested scope not allowed by client".to_string(),
+            ));
+        }
+    }
+
+    // For M2M: generate access_token with client_id as subject (no user context)
+    // Use a negative ID space or 0 to distinguish from user tokens
+    let access_token = state
+        .auth_state
+        .token_manager
+        .generate_token::<String>(client.client_id.clone())?;
+
+    Ok(Json(TokenResponse {
+        access_token,
+        id_token: None, // no id_token for client_credentials
+        token_type: "Bearer".to_string(),
+        expires_in: state.config.auth.exp_seconds,
+        refresh_token: None, // no refresh_token for client_credentials
     }))
 }
 

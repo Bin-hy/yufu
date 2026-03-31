@@ -36,6 +36,17 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
+                        ColumnDef::new(OAuthClient::ClientSecretHash)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthClient::GrantTypes)
+                            .string()
+                            .not_null()
+                            .default("authorization_code,refresh_token"),
+                    )
+                    .col(
                         ColumnDef::new(OAuthClient::CreateTime)
                             .timestamp()
                             .not_null(),
@@ -65,6 +76,8 @@ enum OAuthClient {
     Name,
     RedirectUris,
     AllowedScopes,
+    ClientSecretHash,
+    GrantTypes,
     CreateTime,
     UpdateTime,
 }
