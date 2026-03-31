@@ -223,6 +223,7 @@ where
     let sub_public_router = route::get_public_routes();
 
     let api_prefix = &cfg.http.api_prefix;
+    #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
     let mut app = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)

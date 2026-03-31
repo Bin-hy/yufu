@@ -81,8 +81,8 @@ impl UserService {
 
         // 签发 refresh_token
         let jti = uuid::Uuid::new_v4().to_string();
-        let refresh_token = refresh_manager
-            .generate_refresh_token::<IdType>(jti.clone(), user_db.id)?;
+        let refresh_token =
+            refresh_manager.generate_refresh_token::<IdType>(jti.clone(), user_db.id)?;
         refresh_token::Entity::upsert_refresh_token(db, jti, user_db.id).await?;
 
         Ok((access_token, refresh_token))

@@ -62,8 +62,7 @@ pub struct KickReqData {
 
 // Build routes
 pub fn get_auth_routes() -> Router<AppState> {
-    Router::new()
-        .route("/kickout", post(kick_out))
+    Router::new().route("/kickout", post(kick_out))
 }
 
 pub fn get_public_routes() -> Router<AppState> {
@@ -245,7 +244,9 @@ pub async fn logout(
     let mut headers = HeaderMap::new();
     headers.insert(
         SET_COOKIE,
-        http::HeaderValue::from_str("refresh_token=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0")?,
+        http::HeaderValue::from_str(
+            "refresh_token=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0",
+        )?,
     );
     Ok((
         headers,
