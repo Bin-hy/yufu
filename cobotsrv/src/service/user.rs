@@ -6,6 +6,7 @@ use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
 use anyhow::anyhow;
 use auth::token_manager::TokenManager;
+use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, Set};
 use sea_orm::{DatabaseConnection, EntityTrait};
@@ -30,7 +31,7 @@ impl UserService {
         {
             // 1. 查找成功，校验密码
             if let Some(password_db) = exsiting_user.clone().password {
-                let is_valid = password == password_db;
+                let is_valid = verify(password, &password_db).unwrap_or(false);
                 if is_valid {
                     // 2.1 校验成功，分发对应权限的token
                     let jti = uuid::Uuid::new_v4().to_string();
@@ -63,11 +64,12 @@ impl UserService {
     pub async fn register(
         db: &DatabaseConnection,
         token_manager: &TokenManager,
+        refresh_manager: &TokenManager,
         username: &str,
         password: &str,
         nickname: &str,
-    ) -> Result<String> {
-        let (_user_db, access_token): (UserVO, String) = UserService::add_user_with_role(
+    ) -> Result<(String, String)> {
+        let (user_db, access_token): (UserVO, String) = UserService::add_user_with_role(
             db,
             token_manager,
             username,
@@ -75,8 +77,15 @@ impl UserService {
             nickname,
             RoleEnum::User.default_id(),
         )
-        .await?; // 注册默认只能使用user用户
-        Ok(access_token)
+        .await?;
+
+        // 签发 refresh_token
+        let jti = uuid::Uuid::new_v4().to_string();
+        let refresh_token = refresh_manager
+            .generate_refresh_token::<IdType>(jti.clone(), user_db.id)?;
+        refresh_token::Entity::upsert_refresh_token(db, jti, user_db.id).await?;
+
+        Ok((access_token, refresh_token))
     }
 
     pub async fn add_user_with_role(
@@ -95,10 +104,12 @@ impl UserService {
 
         // 2. 构造 ActiveModel
         let now = Utc::now().naive_utc();
+        let hashed_password = hash(password, DEFAULT_COST)
+            .map_err(|e| AppError::InternalServerError(anyhow!("Password hash failed: {}", e)))?;
         let new_user = user::ActiveModel {
             id: ActiveValue::NotSet,
             username: Set(username.to_owned()),
-            password: Set(Some(password.to_owned())), // TODO 可以换成加密密码
+            password: Set(Some(hashed_password)),
             create_time: Set(now),
             update_time: Set(now),
             nickname: Set(Some(nickname.to_owned())),
@@ -170,7 +181,7 @@ impl UserService {
         db: &DatabaseConnection,
         refresh_manager: &TokenManager,
         refresh_token: &str,
-    ) -> Result<(String, String)> {
+    ) -> Result<()> {
         let claims = match refresh_manager.verify_refresh_token::<IdType>(refresh_token) {
             Ok(c) => c,
             Err(e) => {
@@ -182,7 +193,7 @@ impl UserService {
         };
 
         refresh_token::Entity::delete_by_sub(db, claims.sub).await?;
-        Ok((String::new(), String::new()))
+        Ok(())
     }
 
     /// 获取用户角色

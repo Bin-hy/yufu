@@ -354,7 +354,8 @@ impl AppState {
         let config = self.config.clone();
         let super_admin_account = config.auth.super_admin.clone();
         let sadmin_user = super_admin_account.username;
-        let sadmin_password = super_admin_account.password;
+        let sadmin_password = bcrypt::hash(super_admin_account.password, bcrypt::DEFAULT_COST)
+            .map_err(|e| DbErr::Custom(format!("Password hash failed: {}", e)))?;
 
         // 检查是否已存在
         if user::Entity::find()

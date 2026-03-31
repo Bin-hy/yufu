@@ -63,6 +63,7 @@ pub struct KickReqData {
 // Build routes
 pub fn get_auth_routes() -> Router<AppState> {
     Router::new()
+        .route("/kickout", post(kick_out))
 }
 
 pub fn get_public_routes() -> Router<AppState> {
@@ -71,7 +72,6 @@ pub fn get_public_routes() -> Router<AppState> {
         .route("/register", post(auth_register))
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
-        .route("/kickout", post(kick_out))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -90,27 +90,37 @@ pub fn get_public_routes() -> Router<AppState> {
 pub async fn auth_register(
     State(state): State<AppState>,
     Json(payload): Json<RegistryData>,
-) -> Result<Json<RegistryRespData>> {
+) -> Result<(HeaderMap, Json<RegistryRespData>)> {
     let username = payload.username;
     let password = payload.password;
     let nickname = payload.nickname;
 
     // check username and password
-    let access_token = UserService::register(
+    let (access_token, refresh_token) = UserService::register(
         &state.database.connection,
         &state.auth_state.token_manager,
+        &state.auth_state.refresh_token_manager,
         username.as_str(),
         password.as_str(),
         nickname.as_str(),
     )
     .await?;
 
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        SET_COOKIE,
+        http::HeaderValue::from_str(&format!(
+            "refresh_token={}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age={}",
+            refresh_token, state.config.auth.refresh_exp_seconds,
+        ))?,
+    );
+
     let resp = RegistryRespData {
         access_token,
         username,
         nickname,
     };
-    Ok(Json(resp))
+    Ok((headers, Json(resp)))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -150,7 +160,7 @@ pub async fn login(
     headers.insert(
         SET_COOKIE,
         http::HeaderValue::from_str(&format!(
-            "refresh_token={}; HttpOnly; Path=/; SameSite=Lax; Max-Age={}",
+            "refresh_token={}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age={}",
             refresh_token, state.config.auth.refresh_exp_seconds,
         ))?,
     );
@@ -197,7 +207,7 @@ pub async fn refresh(
     headers.insert(
         SET_COOKIE,
         format!(
-            "refresh_token={}; HttpOnly; Path=/; SameSite=Lax; Max-Age={}",
+            "refresh_token={}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age={}",
             new_refresh_token, state.config.auth.refresh_exp_seconds
         )
         .parse()?,
@@ -226,7 +236,7 @@ pub async fn logout(
         .get("refresh_token")
         .ok_or_else(|| AppError::BadRequest("missing refresh token".to_string()))?;
 
-    let (_, _) = UserService::logout_by_refresh(
+    UserService::logout_by_refresh(
         &state.database.connection,
         &state.auth_state.refresh_token_manager,
         refresh_token,
@@ -235,7 +245,7 @@ pub async fn logout(
     let mut headers = HeaderMap::new();
     headers.insert(
         SET_COOKIE,
-        http::HeaderValue::from_str("refresh_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0")?,
+        http::HeaderValue::from_str("refresh_token=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0")?,
     );
     Ok((
         headers,
