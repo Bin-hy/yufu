@@ -5,7 +5,6 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::result::Result;
-use crate::store::AuthCodeEntry;
 use crate::{AppState, IdType};
 use auth::claims::Claims;
 use base64::Engine;
@@ -243,9 +242,9 @@ async fn handle_authorization_code(
         crate::error::AppError::BadRequest("missing code_verifier".to_string()),
     )?;
 
-    let entry = state
-        .storage
-        .take_auth_code(code)
+    let db = &state.database.connection;
+    let entry = crate::entity::oauth_authorization_code::Entity::take_code(db, code)
+        .await?
         .ok_or(crate::error::AppError::BadRequest(
             "authorization code invalid or already used".to_string(),
         ))?;
@@ -264,8 +263,8 @@ async fn handle_authorization_code(
     .await?;
 
     // Validate consistency
-    if entry.client_id.as_deref() != Some(&client.client_id)
-        || entry.redirect_uri != req.redirect_uri
+    if entry.client_id != client.client_id
+        || entry.redirect_uri.as_deref() != req.redirect_uri.as_deref()
     {
         return Err(crate::error::AppError::BadRequest(
             "client_id or redirect_uri mismatch".to_string(),
@@ -682,21 +681,25 @@ async fn authorize(
     OsRng.fill_bytes(&mut buf);
     let code = hex::encode(buf);
 
-    // Store code (5 min TTL)
+    // Store code in DB (5 min TTL)
     let now = Utc::now().naive_utc();
-    let entry = AuthCodeEntry {
-        user_id: claims.id,
-        client_id: Some(client_id.clone()),
-        redirect_uri: Some(redirect_uri.clone()),
-        code_challenge: q.code_challenge.clone(),
-        code_challenge_method: method,
-        scope: q.scope.clone(),
-        state: q.state.clone(),
-        nonce: q.nonce.clone(),
-        created_at: now,
-        expires_at: now + Duration::minutes(5),
+    let db = &state.database.connection;
+    let am = crate::entity::oauth_authorization_code::ActiveModel {
+        id: sea_orm::ActiveValue::NotSet,
+        code: Set(code.clone()),
+        user_id: Set(claims.id),
+        client_id: Set(client_id.clone()),
+        redirect_uri: Set(Some(redirect_uri.clone())),
+        code_challenge: Set(q.code_challenge.clone()),
+        code_challenge_method: Set(method),
+        scope: Set(q.scope.clone()),
+        state: Set(q.state.clone()),
+        nonce: Set(q.nonce.clone()),
+        used: Set(false),
+        expires_at: Set(now + Duration::minutes(5)),
+        create_time: Set(now),
     };
-    state.storage.insert_auth_code(code.clone(), entry);
+    am.insert(db).await?;
 
     // Redirect back to client
     let mut url = redirect_uri;

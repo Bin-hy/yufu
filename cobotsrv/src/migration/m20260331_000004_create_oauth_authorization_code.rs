@@ -1,0 +1,115 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(OAuthAuthorizationCode::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::Id)
+                            .integer()
+                            .not_null()
+                            .primary_key()
+                            .auto_increment(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::Code)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::UserId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::ClientId)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::RedirectUri)
+                            .string()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::CodeChallenge)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::CodeChallengeMethod)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::Scope)
+                            .string()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::State)
+                            .string()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::Nonce)
+                            .string()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::Used)
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::ExpiresAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(OAuthAuthorizationCode::CreateTime)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(OAuthAuthorizationCode::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+enum OAuthAuthorizationCode {
+    Table,
+    Id,
+    Code,
+    UserId,
+    ClientId,
+    RedirectUri,
+    CodeChallenge,
+    CodeChallengeMethod,
+    Scope,
+    State,
+    Nonce,
+    Used,
+    ExpiresAt,
+    CreateTime,
+}
