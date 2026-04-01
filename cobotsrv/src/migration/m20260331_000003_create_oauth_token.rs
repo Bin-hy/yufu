@@ -9,49 +9,49 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(OAuthToken::Table)
+                    .table(OauthToken::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(OAuthToken::Id)
+                        ColumnDef::new(OauthToken::Id)
                             .integer()
                             .not_null()
                             .primary_key()
                             .auto_increment(),
                     )
-                    .col(ColumnDef::new(OAuthToken::UserId).integer().not_null())
-                    .col(ColumnDef::new(OAuthToken::ClientId).string().not_null())
-                    .col(ColumnDef::new(OAuthToken::AccessToken).string().not_null())
-                    .col(ColumnDef::new(OAuthToken::IdToken).string().not_null())
+                    .col(ColumnDef::new(OauthToken::UserId).integer().not_null())
+                    .col(ColumnDef::new(OauthToken::ClientId).string().not_null())
+                    .col(ColumnDef::new(OauthToken::AccessToken).string().not_null())
+                    .col(ColumnDef::new(OauthToken::IdToken).string().not_null())
                     .col(
-                        ColumnDef::new(OAuthToken::RefreshToken)
+                        ColumnDef::new(OauthToken::RefreshToken)
                             .string()
                             .not_null()
                             .unique_key(),
                     )
-                    .col(ColumnDef::new(OAuthToken::Scope).string().null())
-                    .col(ColumnDef::new(OAuthToken::TokenType).string().not_null())
+                    .col(ColumnDef::new(OauthToken::Scope).string().null())
+                    .col(ColumnDef::new(OauthToken::TokenType).string().not_null())
                     .col(
-                        ColumnDef::new(OAuthToken::CreateTime)
+                        ColumnDef::new(OauthToken::CreateTime)
                             .timestamp()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthToken::AccessExpiresAt)
+                        ColumnDef::new(OauthToken::AccessExpiresAt)
                             .timestamp()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthToken::RefreshExpiresAt)
+                        ColumnDef::new(OauthToken::RefreshExpiresAt)
                             .timestamp()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthToken::UpdateTime)
+                        ColumnDef::new(OauthToken::UpdateTime)
                             .timestamp()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthToken::Revoked)
+                        ColumnDef::new(OauthToken::Revoked)
                             .boolean()
                             .not_null()
                             .default(false),
@@ -63,13 +63,13 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(OAuthToken::Table).to_owned())
+            .drop_table(Table::drop().table(OauthToken::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum OAuthToken {
+enum OauthToken {
     Table,
     Id,
     UserId,

@@ -9,50 +9,50 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(OAuthClient::Table)
+                    .table(OauthClient::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(OAuthClient::Id)
+                        ColumnDef::new(OauthClient::Id)
                             .integer()
                             .not_null()
                             .primary_key()
                             .auto_increment(),
                     )
                     .col(
-                        ColumnDef::new(OAuthClient::ClientId)
+                        ColumnDef::new(OauthClient::ClientId)
                             .string()
                             .not_null()
                             .unique_key(),
                     )
-                    .col(ColumnDef::new(OAuthClient::Name).string().not_null())
+                    .col(ColumnDef::new(OauthClient::Name).string().not_null())
                     .col(
-                        ColumnDef::new(OAuthClient::RedirectUris)
+                        ColumnDef::new(OauthClient::RedirectUris)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthClient::AllowedScopes)
+                        ColumnDef::new(OauthClient::AllowedScopes)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthClient::ClientSecretHash)
+                        ColumnDef::new(OauthClient::ClientSecretHash)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthClient::GrantTypes)
+                        ColumnDef::new(OauthClient::GrantTypes)
                             .string()
                             .not_null()
                             .default("authorization_code,refresh_token"),
                     )
                     .col(
-                        ColumnDef::new(OAuthClient::CreateTime)
+                        ColumnDef::new(OauthClient::CreateTime)
                             .timestamp()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthClient::UpdateTime)
+                        ColumnDef::new(OauthClient::UpdateTime)
                             .timestamp()
                             .not_null(),
                     )
@@ -63,13 +63,13 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(OAuthClient::Table).to_owned())
+            .drop_table(Table::drop().table(OauthClient::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum OAuthClient {
+enum OauthClient {
     Table,
     Id,
     ClientId,

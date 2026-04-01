@@ -9,29 +9,29 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(OAuthScope::Table)
+                    .table(OauthScope::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(OAuthScope::Id)
+                        ColumnDef::new(OauthScope::Id)
                             .integer()
                             .not_null()
                             .primary_key()
                             .auto_increment(),
                     )
                     .col(
-                        ColumnDef::new(OAuthScope::Name)
+                        ColumnDef::new(OauthScope::Name)
                             .string()
                             .not_null()
                             .unique_key(),
                     )
-                    .col(ColumnDef::new(OAuthScope::Description).string().null())
+                    .col(ColumnDef::new(OauthScope::Description).string().null())
                     .col(
-                        ColumnDef::new(OAuthScope::CreateTime)
+                        ColumnDef::new(OauthScope::CreateTime)
                             .timestamp()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthScope::UpdateTime)
+                        ColumnDef::new(OauthScope::UpdateTime)
                             .timestamp()
                             .not_null(),
                     )
@@ -42,13 +42,13 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(OAuthScope::Table).to_owned())
+            .drop_table(Table::drop().table(OauthScope::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum OAuthScope {
+enum OauthScope {
     Table,
     Id,
     Name,

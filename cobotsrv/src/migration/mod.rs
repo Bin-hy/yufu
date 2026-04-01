@@ -30,7 +30,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260331_000003_create_oauth_token::Migration),
             Box::new(m20260331_000004_create_oauth_authorization_code::Migration),
         ];
-        // https://github.com/SeaQL/sea-orm/blob/aec4795211cfda43ceea951261e698afe8536557/examples/axum_example/seeder/src/lib.rs#L13
+        // Seeds run after all schema migrations
+        // Note: SeaORM sorts migrations by name, so seed timestamps
+        // must be later than the tables they depend on
         migrations.extend(seed::Migrator::migrations());
         migrations
     }

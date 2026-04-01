@@ -9,74 +9,74 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(OAuthAuthorizationCode::Table)
+                    .table(OauthAuthorizationCode::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::Id)
+                        ColumnDef::new(OauthAuthorizationCode::Id)
                             .integer()
                             .not_null()
                             .primary_key()
                             .auto_increment(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::Code)
+                        ColumnDef::new(OauthAuthorizationCode::Code)
                             .string()
                             .not_null()
                             .unique_key(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::UserId)
+                        ColumnDef::new(OauthAuthorizationCode::UserId)
                             .integer()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::ClientId)
+                        ColumnDef::new(OauthAuthorizationCode::ClientId)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::RedirectUri)
+                        ColumnDef::new(OauthAuthorizationCode::RedirectUri)
                             .string()
                             .null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::CodeChallenge)
+                        ColumnDef::new(OauthAuthorizationCode::CodeChallenge)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::CodeChallengeMethod)
+                        ColumnDef::new(OauthAuthorizationCode::CodeChallengeMethod)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::Scope)
+                        ColumnDef::new(OauthAuthorizationCode::Scope)
                             .string()
                             .null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::State)
+                        ColumnDef::new(OauthAuthorizationCode::State)
                             .string()
                             .null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::Nonce)
+                        ColumnDef::new(OauthAuthorizationCode::Nonce)
                             .string()
                             .null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::Used)
+                        ColumnDef::new(OauthAuthorizationCode::Used)
                             .boolean()
                             .not_null()
                             .default(false),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::ExpiresAt)
+                        ColumnDef::new(OauthAuthorizationCode::ExpiresAt)
                             .timestamp()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(OAuthAuthorizationCode::CreateTime)
+                        ColumnDef::new(OauthAuthorizationCode::CreateTime)
                             .timestamp()
                             .not_null(),
                     )
@@ -89,7 +89,7 @@ impl MigrationTrait for Migration {
         manager
             .drop_table(
                 Table::drop()
-                    .table(OAuthAuthorizationCode::Table)
+                    .table(OauthAuthorizationCode::Table)
                     .to_owned(),
             )
             .await
@@ -97,7 +97,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum OAuthAuthorizationCode {
+enum OauthAuthorizationCode {
     Table,
     Id,
     Code,
