@@ -228,23 +228,29 @@ where
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
         .merge(get_no_prefix_routes())
-        .layer(if cfg.http.cors {
-            CorsLayer::permissive()
-        } else {
+        .layer({
             let origins: Vec<String> = app_state.clone().config.auth.origins;
-            origins.iter().fold(
-                CorsLayer::new()
-                    .allow_credentials(true)
-                    .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
-                    .allow_methods([
-                        Method::GET,
-                        Method::PATCH,
-                        Method::POST,
-                        Method::DELETE,
-                        Method::OPTIONS,
-                    ]),
-                |cors, origin| cors.allow_origin(origin.parse::<HeaderValue>().unwrap()),
-            )
+            let has_wildcard = origins.iter().any(|o| o == "*");
+            let base = CorsLayer::new()
+                .allow_credentials(true)
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
+                .allow_methods([
+                    Method::GET,
+                    Method::PATCH,
+                    Method::POST,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                ]);
+            if has_wildcard {
+                // Mirror the request Origin header back (credentials-compatible wildcard).
+                // `Access-Control-Allow-Origin: *` is forbidden when credentials are used,
+                // so we echo the actual Origin instead.
+                base.allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+            } else {
+                origins.iter().fold(base, |cors, origin| {
+                    cors.allow_origin(origin.parse::<HeaderValue>().unwrap())
+                })
+            }
         })
         .with_state(app_state.clone())
         .layer(axum::middleware::from_fn(http_log::print_request_response))

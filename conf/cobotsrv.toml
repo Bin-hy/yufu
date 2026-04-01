@@ -1,9 +1,6 @@
 [http]
 # Http Server Listen Address
 # listen = "[::]:4000"
-# Cross-Origin Resource Sharing (CORS)
-# reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
-cors = false
 # api_prefix = "/api/v1"
 
 # Headers["Authorization"] = "Bearer {token}"

@@ -79,8 +79,6 @@ pub struct Http {
     #[serde(default = "default_http_listen")]
     pub listen: SocketAddr,
     #[serde(default)]
-    pub cors: bool,
-    #[serde(default)]
     pub public: String,
     #[serde(default = "default_api_prefix")]
     pub api_prefix: String,
@@ -168,7 +166,6 @@ impl Default for Http {
         Self {
             listen: default_http_listen(),
             public: Default::default(),
-            cors: Default::default(),
             api_prefix: default_api_prefix(),
         }
     }
