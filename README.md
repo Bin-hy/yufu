@@ -33,6 +33,8 @@ flowchart LR
 cobotlet ----- Device
 cobotsrv ----- Server
 cobotweb ----- Webui
+cobotimx ------- Webui
+cobotimx ------- Server
 cobotrtc ------- Webui
 cobotrtc ------- Server
 cobotrtc ------- Device
@@ -53,6 +55,7 @@ cobotdoc ------- Webui
   - `cobotsrv` 命令灵感来自 Linux 各发行版提供的 `/srv/` 路径，云端服务端后端
   - `cobotlet` 命令灵感来自 `kubelet`，运行在各 device 上的通信服务，主要负责和 `cobotsrv` 通信
 - 核心组件
+  - `cobotimx` Instant Messaging eXchange（即时消息交换平台）
   - `cobotrtc` 实时交互音视频（基于 `Live777`）
   - `cobotmap` 地图服务
   - `cobotnet` 基于 WireGuard 配合 ICE 通过云平台辅助启动一个 P2P VPN 来实现大量数据交互（类似 Tailscale）
