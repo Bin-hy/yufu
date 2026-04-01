@@ -13,7 +13,7 @@ pub async fn shutdown_signal() {
 pub async fn get_postgres_container()
 -> Result<(testcontainers::ContainerAsync<GenericImage>, String), AppError> {
     let db_name = format!("test_db_{}", uuid::Uuid::new_v4());
-    let image_postgres = GenericImage::new("postgres", "16-alpine")
+    let image_postgres = GenericImage::new("postgres", "18-alpine")
         .with_exposed_port(5432.tcp())
         .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
