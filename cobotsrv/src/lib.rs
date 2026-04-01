@@ -22,8 +22,8 @@ use crate::service::authority::Service;
 use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
 use auth::claims::Claims;
-use auth::{AuthState, access_middleware_with_callback};
 use auth::token_manager::IdTokenSigner;
+use auth::{AuthState, access_middleware_with_callback};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
@@ -177,8 +177,7 @@ where
 
     // Initialize IdTokenSigner: load RSA key from file or auto-generate
     let id_token_signer = {
-        let default_path = "conf/oidc_rsa_private.pem".to_string();
-        let key_path = cfg.auth.rsa_private_key_path.clone().unwrap_or(default_path);
+        let key_path = cfg.auth.rsa_private_key_path.clone();
         match tokio::fs::read(&key_path).await {
             Ok(pem) => {
                 info!("Loaded RSA private key from {}", key_path);
@@ -186,11 +185,14 @@ where
                     .expect("Failed to parse RSA private key")
             }
             Err(_) => {
-                info!("RSA key not found at {}, generating new key pair...", key_path);
+                info!(
+                    "RSA key not found at {}, generating new key pair...",
+                    key_path
+                );
                 use rsa::pkcs8::EncodePrivateKey;
-                let mut rng = rand::thread_rng();
-                let private_key = rsa::RsaPrivateKey::new(&mut rng, 2048)
-                    .expect("Failed to generate RSA key");
+                let mut rng = rand::rngs::OsRng;
+                let private_key =
+                    rsa::RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate RSA key");
                 let pem_str = private_key
                     .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
                     .expect("Failed to encode RSA key to PEM");

@@ -1,6 +1,5 @@
 use crate::IdType;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter, Set};
 use serde::Serialize;
 
 #[sea_orm::model]
@@ -28,6 +27,7 @@ impl Entity {
         db: &DatabaseConnection,
         rt: &str,
     ) -> Result<Option<Model>, DbErr> {
+        use sea_orm::{ColumnTrait, QueryFilter};
         Self::find()
             .filter(Column::RefreshToken.eq(rt))
             .filter(Column::Revoked.eq(false))
@@ -39,44 +39,11 @@ impl Entity {
         db: &DatabaseConnection,
         at: &str,
     ) -> Result<Option<Model>, DbErr> {
+        use sea_orm::{ColumnTrait, QueryFilter};
         Self::find()
             .filter(Column::AccessToken.eq(at))
             .one(db)
             .await
-    }
-
-    /// Revoke a token record by its refresh_token value.
-    pub async fn revoke_by_refresh_token(
-        db: &DatabaseConnection,
-        rt: &str,
-    ) -> Result<(), DbErr> {
-        if let Some(rec) = Self::find()
-            .filter(Column::RefreshToken.eq(rt))
-            .one(db)
-            .await?
-        {
-            let mut am: ActiveModel = rec.into();
-            am.revoked = Set(true);
-            am.update(db).await?;
-        }
-        Ok(())
-    }
-
-    /// Revoke a token record by its access_token value.
-    pub async fn revoke_by_access_token(
-        db: &DatabaseConnection,
-        at: &str,
-    ) -> Result<(), DbErr> {
-        if let Some(rec) = Self::find()
-            .filter(Column::AccessToken.eq(at))
-            .one(db)
-            .await?
-        {
-            let mut am: ActiveModel = rec.into();
-            am.revoked = Set(true);
-            am.update(db).await?;
-        }
-        Ok(())
     }
 }
 
