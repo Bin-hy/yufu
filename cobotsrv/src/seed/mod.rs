@@ -1,6 +1,7 @@
 pub use sea_orm_migration::prelude::*;
 mod m20251019_134930_set_init_role;
 mod m20251022_123046_set_init_all_authority;
+mod m20260331_000001_seed_oidc_scopes;
 
 pub struct Migrator;
 
@@ -10,6 +11,7 @@ impl MigratorTrait for Migrator {
         let seeds: Vec<Box<dyn MigrationTrait>> = vec![
             Box::new(m20251019_134930_set_init_role::Migration),
             Box::new(m20251022_123046_set_init_all_authority::Migration),
+            Box::new(m20260331_000001_seed_oidc_scopes::Migration),
         ];
         seeds
     }

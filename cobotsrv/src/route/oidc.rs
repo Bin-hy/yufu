@@ -23,11 +23,16 @@ pub struct OidcDiscovery {
     pub token_endpoint: String,
     pub userinfo_endpoint: String,
     pub jwks_uri: Option<String>,
+    pub revocation_endpoint: String,
+    pub introspection_endpoint: String,
     pub response_types_supported: Vec<String>,
     pub subject_types_supported: Vec<String>,
     pub id_token_signing_alg_values_supported: Vec<String>,
     pub grant_types_supported: Vec<String>,
     pub token_endpoint_auth_methods_supported: Vec<String>,
+    pub scopes_supported: Vec<String>,
+    pub claims_supported: Vec<String>,
+    pub code_challenge_methods_supported: Vec<String>,
 }
 
 // --- PLACEHOLDER_OIDC_TYPES ---
@@ -63,8 +68,16 @@ pub struct TokenResponse {
 #[derive(Serialize)]
 pub struct UserInfoResp {
     pub sub: IdType,
-    pub preferred_username: String,
+    // profile scope
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+    // email scope
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -120,6 +133,8 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
         token_endpoint: format!("{}/oidc/token", base),
         userinfo_endpoint: format!("{}/api/v1/oidc/userinfo", base),
         jwks_uri: Some(format!("{}/.well-known/jwks.json", base)),
+        revocation_endpoint: format!("{}/oidc/revoke", base),
+        introspection_endpoint: format!("{}/oidc/introspect", base),
         response_types_supported: vec!["code".to_string()],
         subject_types_supported: vec!["public".to_string()],
         id_token_signing_alg_values_supported: vec![
@@ -131,6 +146,28 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
             "client_credentials".to_string(),
         ],
         token_endpoint_auth_methods_supported: vec!["client_secret_post".to_string()],
+        scopes_supported: vec![
+            "openid".to_string(),
+            "profile".to_string(),
+            "email".to_string(),
+            "phone".to_string(),
+            "address".to_string(),
+            "offline_access".to_string(),
+        ],
+        claims_supported: vec![
+            "sub".to_string(),
+            "iss".to_string(),
+            "aud".to_string(),
+            "exp".to_string(),
+            "iat".to_string(),
+            "nonce".to_string(),
+            "at_hash".to_string(),
+            "preferred_username".to_string(),
+            "name".to_string(),
+            "nickname".to_string(),
+            "email".to_string(),
+        ],
+        code_challenge_methods_supported: vec!["S256".to_string(), "plain".to_string()],
     };
     Ok(Json(resp))
 }
@@ -575,10 +612,16 @@ async fn userinfo(
 ) -> Result<Json<UserInfoResp>> {
     let db = &state.database.connection;
     let user_vo = crate::service::user::UserService::get_user_by_id(db, claims.id).await?;
+
+    // TODO: in a full implementation, look up the token's granted scopes
+    // and only return fields matching those scopes.
+    // For now, return profile-level fields for all authenticated requests.
     Ok(Json(UserInfoResp {
         sub: user_vo.id,
-        preferred_username: user_vo.username,
-        name: user_vo.nickname,
+        preferred_username: Some(user_vo.username),
+        name: user_vo.nickname.clone(),
+        nickname: user_vo.nickname,
+        email: None, // user entity doesn't have email yet
     }))
 }
 
