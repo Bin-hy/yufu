@@ -7,7 +7,7 @@ use serde::Serialize;
 
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Serialize, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "o_refresh_token")]
+#[sea_orm(table_name = "refresh_token")]
 pub struct Model {
     pub jti: String,
     #[sea_orm(primary_key, auto_increment = false)]

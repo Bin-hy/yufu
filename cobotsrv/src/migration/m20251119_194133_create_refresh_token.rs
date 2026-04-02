@@ -11,22 +11,22 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(ORefreshToken::Table)
+                    .table(RefreshToken::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(ORefreshToken::Jti).string().not_null())
+                    .col(ColumnDef::new(RefreshToken::Jti).string().not_null())
                     .col(
-                        ColumnDef::new(ORefreshToken::UserId)
+                        ColumnDef::new(RefreshToken::UserId)
                             .integer()
                             .not_null()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(ORefreshToken::CreateTime)
+                        ColumnDef::new(RefreshToken::CreateTime)
                             .date_time()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(ORefreshToken::UpdateTime)
+                        ColumnDef::new(RefreshToken::UpdateTime)
                             .date_time()
                             .not_null(),
                     )
@@ -39,13 +39,13 @@ impl MigrationTrait for Migration {
         // Replace the sample below with your own migration scripts
 
         manager
-            .drop_table(Table::drop().table(ORefreshToken::Table).to_owned())
+            .drop_table(Table::drop().table(RefreshToken::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum ORefreshToken {
+enum RefreshToken {
     Table,
     Jti,
     UserId,

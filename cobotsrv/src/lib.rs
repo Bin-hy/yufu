@@ -22,6 +22,7 @@ use crate::service::authority::Service;
 use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
 use auth::claims::Claims;
+use auth::token_manager::IdTokenSigner;
 use auth::{AuthState, access_middleware_with_callback};
 
 #[cfg(feature = "webui")]
@@ -174,12 +175,57 @@ where
         ),
     };
 
+    // Initialize IdTokenSigner: load RSA key from file or auto-generate
+    let id_token_signer = {
+        // Prefer oidc.rsa_private_key_path, fall back to auth.rsa_private_key_path
+        let key_path = if !cfg.oidc.rsa_private_key_path.is_empty() {
+            cfg.oidc.rsa_private_key_path.clone()
+        } else {
+            cfg.auth.rsa_private_key_path.clone()
+        };
+        let token_exp = cfg
+            .oidc
+            .access_token_expire_seconds
+            .unwrap_or(cfg.auth.exp_seconds);
+        match tokio::fs::read(&key_path).await {
+            Ok(pem) => {
+                info!("Loaded RSA private key from {}", key_path);
+                IdTokenSigner::from_rsa_pem(&pem, token_exp)
+                    .expect("Failed to parse RSA private key")
+            }
+            Err(_) => {
+                info!(
+                    "RSA key not found at {}, generating new key pair...",
+                    key_path
+                );
+                use rsa::pkcs8::EncodePrivateKey;
+                let mut rng = rand::rngs::OsRng;
+                let private_key =
+                    rsa::RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate RSA key");
+                let pem_str = private_key
+                    .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+                    .expect("Failed to encode RSA key to PEM");
+                // Save to file for persistence
+                if let Some(parent) = std::path::Path::new(&key_path).parent() {
+                    let _ = tokio::fs::create_dir_all(parent).await;
+                }
+                tokio::fs::write(&key_path, pem_str.as_bytes())
+                    .await
+                    .expect("Failed to write RSA key file");
+                info!("Generated and saved RSA key to {}", key_path);
+                IdTokenSigner::from_rsa_pem(pem_str.as_bytes(), token_exp)
+                    .expect("Failed to parse generated RSA key")
+            }
+        }
+    };
+
     let app_state = AppState {
         config: cfg.clone(),
         client: client_req.build().unwrap(),
         storage: store,
         database: Arc::new(database_service),
         auth_state: Arc::new(auth_state.clone()),
+        id_token_signer: Arc::new(id_token_signer),
     };
     let _ = app_state.init().await;
     let app_state_for_middleware = app_state.clone();
@@ -338,6 +384,7 @@ pub struct AppState {
     storage: Storage,
     database: Arc<DatabaseService>,
     auth_state: Arc<AuthState>,
+    id_token_signer: Arc<IdTokenSigner>,
 }
 pub type IdType = i32;
 
@@ -347,6 +394,23 @@ impl AppState {
         self.init_sadmin_from_config().await?;
         Ok(())
     }
+
+    /// OIDC access token expiry: oidc.access_token_expire_seconds > auth.exp_seconds
+    pub fn oidc_access_token_exp(&self) -> i64 {
+        self.config
+            .oidc
+            .access_token_expire_seconds
+            .unwrap_or(self.config.auth.exp_seconds)
+    }
+
+    /// OIDC refresh token expiry: oidc.refresh_token_expire_seconds > auth.refresh_exp_seconds
+    pub fn oidc_refresh_token_exp(&self) -> i64 {
+        self.config
+            .oidc
+            .refresh_token_expire_seconds
+            .unwrap_or(self.config.auth.refresh_exp_seconds)
+    }
+
     // 初始化超级管理员权限
     async fn ensure_sadmin_authorities(&self) -> result::Result<()> {
         Service::ensure_sadmin_authorities(&self.database.connection).await?;

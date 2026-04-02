@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '')
 
     // 目标地址，优先使用环境变量，否则使用默认值
-    const API_TARGET = env.VITE_API_TARGET || 'http://localhost:4000'
+    const API_TARGET = env.VITE_BASE_URL || 'http://localhost:4000'
 
     return {
         plugins: [
@@ -23,6 +23,31 @@ export default defineConfig(({ mode }) => {
                     changeOrigin: true,
                     secure: false,
                     rewrite: (path) => path.replace(/^\/api\/v1/, ''),
+                },
+                '/oidc/token': {
+                    target: API_TARGET,
+                    changeOrigin: true,
+                    secure: false,
+                },
+                '/oidc/revoke': {
+                    target: API_TARGET,
+                    changeOrigin: true,
+                    secure: false,
+                },
+                '/oidc/introspect': {
+                    target: API_TARGET,
+                    changeOrigin: true,
+                    secure: false,
+                },
+                '/oidc/authorize': {
+                    target: API_TARGET,
+                    changeOrigin: true,
+                    secure: false,
+                },
+                '/.well-known': {
+                    target: API_TARGET,
+                    changeOrigin: true,
+                    secure: false,
                 },
             }
         },

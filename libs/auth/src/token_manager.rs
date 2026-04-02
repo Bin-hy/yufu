@@ -1,9 +1,10 @@
-use crate::claims::{Claims, RefreshClaims};
+use crate::claims::{Claims, IdTokenClaims, RefreshClaims};
 
 use chrono::{Duration, Utc};
 use jsonwebtoken::errors::ErrorKind;
 use jsonwebtoken::{
-    DecodingKey, EncodingKey, Header, Validation, decode, encode, errors::Result as JwtResult,
+    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode,
+    errors::Result as JwtResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -178,6 +179,171 @@ impl TokenManager {
                 _ => Err(TokenError::Other(err.to_string())),
             },
         }
+    }
+
+    /// Generates an OIDC ID Token (HMAC fallback, prefer IdTokenSigner for RSA).
+    pub fn generate_id_token<IDTYPE>(
+        &self,
+        subject: IDTYPE,
+        issuer: &str,
+        audience: Option<&str>,
+        nonce: Option<&str>,
+        access_token: Option<&str>,
+    ) -> JwtResult<String>
+    where
+        IDTYPE: Clone + Send + Sync + 'static + Serialize,
+    {
+        let now = Utc::now();
+        let exp = now + Duration::seconds(self.expire_seconds);
+        let at_hash = compute_at_hash(access_token);
+        let claims = IdTokenClaims {
+            iss: issuer.to_string(),
+            sub: subject,
+            aud: audience.map(|s| s.to_string()),
+            iat: now.timestamp() as u64,
+            exp: exp.timestamp() as u64,
+            nonce: nonce.map(|s| s.to_string()),
+            at_hash,
+        };
+        encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(self.secret.as_bytes()),
+        )
+    }
+}
+
+fn compute_at_hash(access_token: Option<&str>) -> Option<String> {
+    access_token.map(|at| {
+        use base64::Engine;
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(at.as_bytes());
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..16])
+    })
+}
+
+/// RSA-based ID Token signer for OIDC.
+/// Falls back to HMAC if no RSA key is provided.
+#[derive(Clone)]
+pub struct IdTokenSigner {
+    rsa_encoding_key: Option<EncodingKey>,
+    rsa_public_key_der: Option<Vec<u8>>, // for JWKS
+    hmac_secret: String,
+    pub expire_seconds: i64,
+    pub kid: String,
+}
+
+impl IdTokenSigner {
+    /// Create from RSA PEM private key.
+    pub fn from_rsa_pem(pem: &[u8], expire_seconds: i64) -> Result<Self, String> {
+        let encoding_key = EncodingKey::from_rsa_pem(pem)
+            .map_err(|e| format!("Failed to parse RSA private key: {}", e))?;
+
+        // Extract public key DER for JWKS
+        use rsa::pkcs8::DecodePrivateKey;
+        let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(
+            std::str::from_utf8(pem).map_err(|e| format!("Invalid UTF-8 in PEM: {}", e))?,
+        )
+        .map_err(|e| format!("Failed to parse RSA key: {}", e))?;
+        let public_key = rsa::RsaPublicKey::from(&private_key);
+        use rsa::pkcs1::EncodeRsaPublicKey;
+        let pub_der = public_key
+            .to_pkcs1_der()
+            .map_err(|e| format!("Failed to encode public key: {}", e))?;
+
+        Ok(Self {
+            rsa_encoding_key: Some(encoding_key),
+            rsa_public_key_der: Some(pub_der.as_bytes().to_vec()),
+            hmac_secret: String::new(),
+            expire_seconds,
+            kid: "cobotrix-rsa-1".to_string(),
+        })
+    }
+
+    /// Create HMAC-only fallback.
+    pub fn from_hmac(secret: &str, expire_seconds: i64) -> Self {
+        Self {
+            rsa_encoding_key: None,
+            rsa_public_key_der: None,
+            hmac_secret: secret.to_string(),
+            expire_seconds,
+            kid: "cobotrix-hmac-1".to_string(),
+        }
+    }
+
+    pub fn is_rsa(&self) -> bool {
+        self.rsa_encoding_key.is_some()
+    }
+
+    pub fn algorithm(&self) -> &str {
+        if self.is_rsa() { "RS256" } else { "HS256" }
+    }
+
+    /// Generate a signed ID Token.
+    pub fn sign_id_token<IDTYPE>(
+        &self,
+        subject: IDTYPE,
+        issuer: &str,
+        audience: Option<&str>,
+        nonce: Option<&str>,
+        access_token: Option<&str>,
+    ) -> JwtResult<String>
+    where
+        IDTYPE: Clone + Send + Sync + 'static + Serialize,
+    {
+        let now = Utc::now();
+        let exp = now + Duration::seconds(self.expire_seconds);
+        let at_hash = compute_at_hash(access_token);
+        let claims = IdTokenClaims {
+            iss: issuer.to_string(),
+            sub: subject,
+            aud: audience.map(|s| s.to_string()),
+            iat: now.timestamp() as u64,
+            exp: exp.timestamp() as u64,
+            nonce: nonce.map(|s| s.to_string()),
+            at_hash,
+        };
+
+        if let Some(ref rsa_key) = self.rsa_encoding_key {
+            let mut header = Header::new(Algorithm::RS256);
+            header.kid = Some(self.kid.clone());
+            encode(&header, &claims, rsa_key)
+        } else {
+            encode(
+                &Header::default(),
+                &claims,
+                &EncodingKey::from_secret(self.hmac_secret.as_bytes()),
+            )
+        }
+    }
+
+    /// Export JWKS JSON for the public key endpoint.
+    /// Returns None if using HMAC (no public key to expose).
+    pub fn jwks_json(&self) -> Option<String> {
+        use base64::Engine;
+        use rsa::pkcs1::DecodeRsaPublicKey;
+        let pub_der = self.rsa_public_key_der.as_ref()?;
+
+        // Parse the DER to extract n and e
+        let public_key = rsa::RsaPublicKey::from_pkcs1_der(pub_der).ok()?;
+        use rsa::traits::PublicKeyParts;
+        let n = public_key.n();
+        let e = public_key.e();
+
+        let n_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(n.to_bytes_be());
+        let e_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(e.to_bytes_be());
+
+        let jwks = serde_json::json!({
+            "keys": [{
+                "kty": "RSA",
+                "use": "sig",
+                "alg": "RS256",
+                "kid": self.kid,
+                "n": n_b64,
+                "e": e_b64,
+            }]
+        });
+        Some(jwks.to_string())
     }
 }
 #[cfg(test)]
