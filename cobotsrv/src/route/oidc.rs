@@ -272,11 +272,9 @@ fn extract_basic_auth(headers: &http::HeaderMap) -> (Option<String>, Option<Stri
         let auth = headers.get(http::header::AUTHORIZATION)?;
         let auth_str = auth.to_str().ok()?;
         let encoded = auth_str.strip_prefix("Basic ")?;
-        let decoded = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            encoded.trim(),
-        )
-        .ok()?;
+        let decoded =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded.trim())
+                .ok()?;
         let credentials = String::from_utf8(decoded).ok()?;
         let (id, secret) = credentials.split_once(':')?;
         Some((id.to_string(), secret.to_string()))
