@@ -7,16 +7,14 @@ export type RolesPage = PageResult<RoleVO>
 // 创建角色请求体
 export interface RoleAddReq {
   name: string
-  role_enum: string
 }
 
 // 重命名/更新角色请求体
 export interface RolePatchReq {
-  id: string
+  id: number
   name: string
-  role_enum: string
 }
 
 // 角色-权限 关联请求体
-export interface AuthRoleAddReq { role_id: string; authority_id: string }
-export interface AuthRoleDeleteReq { role_id: string; authority_id: string }
+export interface AuthRoleAddReq { role_id: number; authority_id: number }
+export interface AuthRoleDeleteReq { role_id: number; authority_id: number }

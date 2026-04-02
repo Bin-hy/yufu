@@ -1,7 +1,8 @@
 import { request } from "@/http/axios"
 import type { PageResult } from "@/types/pagination"
 import type { AuthorityVO } from "@/types/models"
-import type { AuthRoleAddBatchReq, AuthRoleDeleteReq } from './type'
+import type { AuthRoleAddBatchReq, AuthRoleDeleteReq, AuthorityInsertReq } from './type'
+
 
 export const getAuthoritiesByPage = async (
   page_number: number,
@@ -15,7 +16,7 @@ export const getAuthoritiesByPage = async (
 }
 
 // 查询指定 roleId 的所有权限
-export async function getAuthorityByRoleId(roleId: string): Promise<PageResult<AuthorityVO>> {
+export async function getAuthorityByRoleId(roleId: number): Promise<PageResult<AuthorityVO>> {
   const MAX_INT = 8000
   return request<PageResult<AuthorityVO>>({
     url: `/role_authority/${roleId}`,
@@ -41,5 +42,14 @@ export async function deleteRoleAuthBatch(batchDeleteReq: AuthRoleDeleteReq) {
     url: `/role_authority/batch`,
     method: 'delete',
     data: batchDeleteReq
+  })
+}
+
+// 新增权限
+export async function createAuthority(payload: AuthorityInsertReq): Promise<AuthorityVO> {
+  return request<AuthorityVO>({
+    url: '/authority',
+    method: 'POST',
+    data: payload
   })
 }

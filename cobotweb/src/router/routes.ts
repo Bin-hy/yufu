@@ -116,6 +116,21 @@ export const constantRoutes: RouteRecordRaw[] = [
           }
         ]
       },
+      // 操作记录
+      {
+        path: '/recordings',
+        name: 'recordings',
+        component: () => import('@/pages/recordings/index.vue'),
+        meta: { title: '操作记录', icon: 'history' },
+        children: [
+          {
+            path: '',
+            name: 'recordings-list',
+            component: () => import('@/pages/recordings/views/recordings-list.vue'),
+            meta: { title: '记录列表' }
+          }
+        ]
+      },
       // 个人中心
       {
         path: '/profile',

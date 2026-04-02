@@ -89,6 +89,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone)]
 pub struct AuthState {
     pub token_manager: TokenManager,
+    pub refresh_token_manager: TokenManager,
 }
 
 /// Middleware function for JWT authentication.

@@ -44,8 +44,8 @@ function validateForm (): boolean{
     if (!form.password) {
     errors.password = '请输入密码'
     isValid = false
-    } else if (form.password.length < 6) {
-    errors.password = '密码长度不能少于6位'
+    } else if (form.password.length < 1) {
+    errors.password = '密码长度不能少于1位'
     isValid = false
     }
 
@@ -70,7 +70,7 @@ async function handleLogin () {
         // 假设登录成功，存储用户信息
         userStore.setUserInfo({
             username: data.username,
-            token: data.token,
+            token: data.access_token,
             nickname: data.nickname
         })
 

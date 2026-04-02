@@ -22,16 +22,13 @@ pub async fn authority_check_middleware_rbac_abac(
 ) -> Response {
     let db = &app_state.database.connection;
     let user_id = claim.id;
-    // 检查用户的角色role是否有请求该路径的权限
-    // 检索role
-    // 查找用户，不存在则返回自定义错误
-    let user = match user::Entity::find_by_id(user_id).one(db).await {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            return AppError::NotFound(format!("User {} not found", &user_id)).into_response();
-        }
-        Err(e) => {
-            return AppError::from(e).into_response();
+
+    // 从 extensions 中提取用户（已由 access_callback 加载）
+    let user = match request.extensions().get::<user::Model>() {
+        Some(u) => u.clone(),
+        None => {
+            return AppError::Unauthorized("User not found in request context".to_string())
+                .into_response();
         }
     };
 
@@ -141,7 +138,7 @@ pub async fn check_authority_abac(
     let db = &state.database.connection;
 
     let token = check_request.token.clone().unwrap_or("".to_string());
-    let method = check_request.method.clone().to_string().to_lowercase();
+    let method = check_request.method.clone().to_string().to_uppercase();
     let path = check_request.req_path.clone();
 
     // 构造用于匹配 authority 的 uri（忽略前缀与 query）

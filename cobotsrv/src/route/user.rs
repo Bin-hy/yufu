@@ -110,7 +110,7 @@ pub async fn add_user_with_role(
     let username = payload.username;
     let nickname = payload.nickname.unwrap_or(username.clone().to_string());
 
-    let (user_vo, _token) = UserService::add_user_with_role(
+    let (user_vo, _access_token) = UserService::add_user_with_role(
         db,
         &state.auth_state.token_manager,
         username.as_str(),

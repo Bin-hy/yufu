@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import * as authorityApi from '../api';
 import Pagination from '@/components/ui/pagination/pagination.vue'
 import type { PageResult } from '@/types/pagination'
 import { useRoute, useRouter } from 'vue-router'
 import type { AuthorityVO } from '@/types/models';
+import UiInput from '@/components/ui/input/input.vue'
+import UiButton from '@/components/ui/button/button.vue'
+import UiDialog from '@/components/ui/dialog/dialog.vue'
 
 const page = ref<PageResult<AuthorityVO>>({ page_number: 1, page_size: 10, total_pages: 1, data_list: [] })
 // 加载状态
@@ -38,6 +41,66 @@ onMounted(async () => {
   await fetchAuthorities();
 });
 
+// 添加权限表单
+const addForm = reactive({
+  name: '',
+  authority_uri: '',
+  method: 'GET',
+})
+const addErrors = reactive({ name: '', authority_uri: '', method: '' })
+const adding = ref(false)
+const dialogOpen = ref(false)
+
+function resetAddForm() {
+  addForm.name = ''
+  addForm.authority_uri = ''
+  addForm.method = 'GET'
+  addErrors.name = ''
+  addErrors.authority_uri = ''
+  addErrors.method = ''
+}
+
+function validateAddForm(): boolean {
+  addErrors.name = ''
+  addErrors.authority_uri = ''
+  addErrors.method = ''
+  let ok = true
+  if (!addForm.name.trim()) { addErrors.name = '请输入权限名称'; ok = false }
+  if (!addForm.authority_uri.trim()) { addErrors.authority_uri = '请输入权限标识'; ok = false }
+  if (!addForm.method.trim()) { addErrors.method = '请选择请求方法'; ok = false }
+  return ok
+}
+
+// 由弹窗确认触发提交
+
+function onCancelAdd() {
+  resetAddForm()
+}
+
+async function onConfirmAdd() {
+  // UiDialog 在 confirm 后会自动关闭，这里如果校验失败则立刻重新打开以避免误关闭
+  if (!validateAddForm()) {
+    dialogOpen.value = true
+    return
+  }
+  try {
+    adding.value = true
+    await authorityApi.createAuthority({
+      name: addForm.name.trim(),
+      authority_uri: addForm.authority_uri.trim(),
+      method: addForm.method.trim(),
+    })
+    resetAddForm()
+    await fetchAuthorities()
+  } catch (e) {
+    console.error('添加权限失败', e)
+    // 失败时重新打开便于用户修正
+    dialogOpen.value = true
+  } finally {
+    adding.value = false
+  }
+}
+
 </script>
 
 <template>
@@ -45,7 +108,7 @@ onMounted(async () => {
     <!-- 工具栏 -->
     <div class="p-4 border-b border-border flex justify-between items-center">
       <h2 class="font-semibold">系统权限</h2>
-
+      <UiButton @click="dialogOpen = true">新增权限</UiButton>
     </div>
 
     <!-- 权限表格 -->
@@ -89,4 +152,32 @@ onMounted(async () => {
       <p class="mt-2 text-muted-foreground">加载中...</p>
     </div>
   </div>
+
+  <!-- 新增权限弹窗 -->
+  <UiDialog v-model:open="dialogOpen" title="新增权限" @confirm="onConfirmAdd" @cancel="onCancelAdd">
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs font-medium mb-1">权限名称</label>
+        <UiInput v-model="addForm.name" placeholder="例如：查看用户" class="w-full" />
+        <p v-if="addErrors.name" class="text-xs text-destructive mt-1">{{ addErrors.name }}</p>
+      </div>
+      <div>
+        <label class="block text-xs font-medium mb-1">权限标识（URI）</label>
+        <UiInput v-model="addForm.authority_uri" placeholder="例如：/user/view" class="w-full" />
+        <p v-if="addErrors.authority_uri" class="text-xs text-destructive mt-1">{{ addErrors.authority_uri }}</p>
+      </div>
+      <div>
+        <label class="block text-xs font-medium mb-1">方法</label>
+        <select v-model="addForm.method" class="border border-input rounded-md h-9 px-3 text-sm w-full">
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+          <option value="PUT">PUT</option>
+          <option value="PATCH">PATCH</option>
+          <option value="DELETE">DELETE</option>
+        </select>
+        <p v-if="addErrors.method" class="text-xs text-destructive mt-1">{{ addErrors.method }}</p>
+      </div>
+      <p v-if="adding" class="text-xs text-muted-foreground">提交中，请稍候...</p>
+    </div>
+  </UiDialog>
 </template>

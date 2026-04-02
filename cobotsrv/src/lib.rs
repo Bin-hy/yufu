@@ -1,13 +1,15 @@
 use axum::body::Body;
 use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
-use http::{StatusCode, Uri};
+use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use http::{HeaderValue, Method, StatusCode, Uri};
 use reqwest::Client;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::sync::Arc;
 use std::{future::Future, time::Duration};
 use tokio::net::TcpListener;
+
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, info_span};
 
@@ -166,6 +168,10 @@ where
             &cfg.auth.secret,
             cfg.auth.exp_seconds,
         ),
+        refresh_token_manager: auth::token_manager::TokenManager::new(
+            &cfg.auth.secret,
+            cfg.auth.refresh_exp_seconds,
+        ),
     };
 
     let app_state = AppState {
@@ -217,14 +223,34 @@ where
     let sub_public_router = route::get_public_routes();
 
     let api_prefix = &cfg.http.api_prefix;
+    #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
     let mut app = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
         .merge(get_no_prefix_routes())
-        .layer(if cfg.http.cors {
-            CorsLayer::permissive()
-        } else {
-            CorsLayer::new()
+        .layer({
+            let origins: Vec<String> = app_state.clone().config.auth.origins;
+            let has_wildcard = origins.iter().any(|o| o == "*");
+            let base = CorsLayer::new()
+                .allow_credentials(true)
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
+                .allow_methods([
+                    Method::GET,
+                    Method::PATCH,
+                    Method::POST,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                ]);
+            if has_wildcard {
+                // Mirror the request Origin header back (credentials-compatible wildcard).
+                // `Access-Control-Allow-Origin: *` is forbidden when credentials are used,
+                // so we echo the actual Origin instead.
+                base.allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+            } else {
+                origins.iter().fold(base, |cors, origin| {
+                    cors.allow_origin(origin.parse::<HeaderValue>().unwrap())
+                })
+            }
         })
         .with_state(app_state.clone())
         .layer(axum::middleware::from_fn(http_log::print_request_response))
@@ -335,7 +361,8 @@ impl AppState {
         let config = self.config.clone();
         let super_admin_account = config.auth.super_admin.clone();
         let sadmin_user = super_admin_account.username;
-        let sadmin_password = super_admin_account.password;
+        let sadmin_password = bcrypt::hash(super_admin_account.password, bcrypt::DEFAULT_COST)
+            .map_err(|e| DbErr::Custom(format!("Password hash failed: {}", e)))?;
 
         // 检查是否已存在
         if user::Entity::find()

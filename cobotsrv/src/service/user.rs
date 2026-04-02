@@ -1,10 +1,12 @@
 use crate::IdType;
+use crate::entity::refresh_token;
 use crate::entity::role::{self, Entity as Role, RoleEnum, RoleVO};
 use crate::entity::user::{self, Entity as User, UserVO};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
 use anyhow::anyhow;
 use auth::token_manager::TokenManager;
+use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, Set};
 use sea_orm::{DatabaseConnection, EntityTrait};
@@ -17,9 +19,10 @@ impl UserService {
     pub async fn auth(
         db: &DatabaseConnection,
         token_manager: &TokenManager,
+        refresh_manager: &TokenManager,
         username: &str,
         password: &str,
-    ) -> Result<(String, UserVO)> {
+    ) -> Result<(String, String, UserVO)> {
         // 查找用户
         if let Some(exsiting_user) = User::find()
             .filter(user::Column::Username.eq(username))
@@ -28,11 +31,20 @@ impl UserService {
         {
             // 1. 查找成功，校验密码
             if let Some(password_db) = exsiting_user.clone().password {
-                let is_valid = password == password_db;
+                let is_valid = verify(password, &password_db).unwrap_or(false);
                 if is_valid {
                     // 2.1 校验成功，分发对应权限的token
-                    let token = token_manager.generate_token::<IdType>(exsiting_user.clone().id)?;
-                    Ok((token, exsiting_user.into()))
+                    let jti = uuid::Uuid::new_v4().to_string();
+
+                    let access_token =
+                        token_manager.generate_token::<IdType>(exsiting_user.clone().id)?;
+                    let refresh_token = refresh_manager
+                        .generate_refresh_token::<IdType>(jti.clone(), exsiting_user.clone().id)?;
+
+                    // 2.1.2 插入到 refresh_token 中 用户SSO 单点登陆
+                    refresh_token::Entity::upsert_refresh_token(db, jti, exsiting_user.id).await?;
+
+                    Ok((access_token, refresh_token, exsiting_user.into()))
                 } else {
                     // 2.2 失败，密码错误
                     Err(AppError::Unauthorized("password is error".into()))
@@ -52,11 +64,12 @@ impl UserService {
     pub async fn register(
         db: &DatabaseConnection,
         token_manager: &TokenManager,
+        refresh_manager: &TokenManager,
         username: &str,
         password: &str,
         nickname: &str,
-    ) -> Result<String> {
-        let (_user_db, token): (UserVO, String) = UserService::add_user_with_role(
+    ) -> Result<(String, String)> {
+        let (user_db, access_token): (UserVO, String) = UserService::add_user_with_role(
             db,
             token_manager,
             username,
@@ -64,8 +77,15 @@ impl UserService {
             nickname,
             RoleEnum::User.default_id(),
         )
-        .await?; // 注册默认只能使用user用户
-        Ok(token)
+        .await?;
+
+        // 签发 refresh_token
+        let jti = uuid::Uuid::new_v4().to_string();
+        let refresh_token =
+            refresh_manager.generate_refresh_token::<IdType>(jti.clone(), user_db.id)?;
+        refresh_token::Entity::upsert_refresh_token(db, jti, user_db.id).await?;
+
+        Ok((access_token, refresh_token))
     }
 
     pub async fn add_user_with_role(
@@ -84,10 +104,12 @@ impl UserService {
 
         // 2. 构造 ActiveModel
         let now = Utc::now().naive_utc();
+        let hashed_password = hash(password, DEFAULT_COST)
+            .map_err(|e| AppError::InternalServerError(anyhow!("Password hash failed: {}", e)))?;
         let new_user = user::ActiveModel {
             id: ActiveValue::NotSet,
             username: Set(username.to_owned()),
-            password: Set(Some(password.to_owned())), // TODO 可以换成加密密码
+            password: Set(Some(hashed_password)),
             create_time: Set(now),
             update_time: Set(now),
             nickname: Set(Some(nickname.to_owned())),
@@ -103,10 +125,9 @@ impl UserService {
 
         let mut user_vo = UserVO::from(inserted);
         user_vo.set_role(role::RoleVO::from(role));
-        // 4. 注册后直接生成 token
-        let token = token_manager.generate_token::<IdType>(user_vo.clone().id)?;
+        let access_token = token_manager.generate_token::<IdType>(user_vo.clone().id)?;
 
-        Ok((user_vo, token))
+        Ok((user_vo, access_token))
     }
 
     pub async fn get_user_by_id(db: &DatabaseConnection, user_id: IdType) -> Result<UserVO> {
@@ -121,6 +142,58 @@ impl UserService {
         } else {
             Err(AppError::InternalServerError(anyhow!("获取用户失败")))
         }
+    }
+
+    // 获取刷新token
+    pub async fn refresh_tokens(
+        db: &DatabaseConnection,
+        refresh_manager: &TokenManager,
+        access_manager: &TokenManager,
+        refresh_token: &str,
+    ) -> Result<(String, String)> {
+        let claims = match refresh_manager.verify_refresh_token::<IdType>(refresh_token) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(AppError::Unauthorized(format!(
+                    "refresh token invalid: {:?}",
+                    e
+                )));
+            }
+        };
+        // 1. 查找 refresh_token 中是否存储
+        if !refresh_token::Entity::find_exist(db, claims.jti).await? {
+            // 无权限 被下线了
+            return Err(AppError::Unauthorized("请重新登陆".to_string()));
+        }
+
+        // 2. 存储了 refresh token -> 返回 access_token
+        let jti = uuid::Uuid::new_v4().to_string();
+
+        let access_token = access_manager.generate_token::<IdType>(claims.sub)?;
+        let refresh_token_new =
+            refresh_manager.generate_refresh_token::<IdType>(jti.clone(), claims.sub)?;
+        refresh_token::Entity::upsert_refresh_token(db, jti, claims.sub).await?;
+        Ok((access_token, refresh_token_new))
+    }
+
+    // 登出 & 清除 刷新token
+    pub async fn logout_by_refresh(
+        db: &DatabaseConnection,
+        refresh_manager: &TokenManager,
+        refresh_token: &str,
+    ) -> Result<()> {
+        let claims = match refresh_manager.verify_refresh_token::<IdType>(refresh_token) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(AppError::Unauthorized(format!(
+                    "refresh token invalid: {:?}",
+                    e
+                )));
+            }
+        };
+
+        refresh_token::Entity::delete_by_sub(db, claims.sub).await?;
+        Ok(())
     }
 
     /// 获取用户角色

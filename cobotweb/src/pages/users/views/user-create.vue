@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { ref, reactive, onMounted, computed } from 'vue'
+import type { CreateUserForm, RoleOption, FormErrors } from '../api/types'
 import { useRouter } from 'vue-router'
 import { showModal } from '@/utils/modal'
 import UiInput from '@/components/ui/input/input.vue'
@@ -8,23 +9,24 @@ import UiButton from '@/components/ui/button/button.vue'
 import * as userApi from '../api'
 import type { RoleVO } from '@/types/models'
 
-// 表单数据
-const form = reactive({
+// 表单类型约束
+// 表单数据（严格类型）
+const form = reactive<CreateUserForm>({
   username: '',
   nickname: '',
   password: '',
   confirmPassword: '',
-  role: 'user',
+  role_id: 0,
 })
 
 const modifiableRoles = ref<RoleVO[]>([])
 
-const roleOptions = computed(() => modifiableRoles.value.map(role => ({
+const roleOptions = computed<RoleOption[]>(() => modifiableRoles.value.map(role => ({
   label: role.name || '',
-  value: role.id || '',
+  value: role.id,
 })))
 // 表单验证错误
-const errors = reactive({
+const errors = reactive<FormErrors>({
   username: '',
   nickname: '',
   password: '',
@@ -93,11 +95,12 @@ async function handleCreate() {
   try {
     loading.value = true
 
+    console.log("form.role_id type:", typeof(form.role_id))
     let res = await userApi.createUserWithRole({
       username: form.username,
       password: form.password,
       nickname: form.nickname,
-      role_id: form.role,
+      role_id: form.role_id,
     })
 
     // 显示成功提示并在确认后返回列表
@@ -132,15 +135,14 @@ function handleCancel() {
 }
 //加载可修改的角色列表
 async function loadModifiableRoles(){
-    let data = await userApi.getModifiableRoles();
-    modifiableRoles.value = data?.data_list
-    // 角色下拉默认选中第一项（当当前值为空或不在可选项中时）
-    const firstId = modifiableRoles.value?.[0]?.id || ''
-    const exists = modifiableRoles.value?.some(r => r.id === (form.role as any))
-    if (!exists) {
-      // 确保为字符串，避免类型不一致
-      form.role = (firstId || '') as any
-    }
+  const data = await userApi.getModifiableRoles();
+  modifiableRoles.value = data?.data_list
+  // 角色下拉默认选中第一项（当当前值为空或不在可选项中时）
+  const firstId = modifiableRoles.value?.[0]?.id ?? 0
+  const exists = modifiableRoles.value?.some(r => r.id === form.role_id)
+  if (!exists) {
+    form.role_id = firstId
+  }
 }
 
 onMounted(
@@ -206,7 +208,7 @@ onMounted(
               </label>
               <UiSelect
                 id="role"
-                v-model="form.role"
+                v-model.number="form.role_id"
                 class="w-full"
               >
                 <option v-for="role in roleOptions" :key="role.value" :value="role.value">{{ role.label }}</option>

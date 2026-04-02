@@ -1,22 +1,20 @@
-
 services:
-  emqx:
-    image: emqx/emqx:latest
-    ports:
-      - 1883:1883
-      - 18083:18083
+    emqx:
+        image: emqx/emqx:latest
+        ports:
+            - 1883:1883
+            - 18083:18083
 
-
-  postgis:
-      image: postgis/postgis:16-3.4
-      container_name: postgis
-      restart: always
-      ports:
-          - "${POSTGRES_PORT:-5432}:5432"
-      env_file:
-          - .env.local
-      volumes:
-          - cobotrix_postgis:/var/lib/postgresql/data
+    postgres:
+        image: postgres:18-alpine
+        container_name: postgres18
+        restart: always
+        ports:
+            - "${POSTGRES_PORT:-5432}:5432"
+        env_file:
+            - .env.local
+        volumes:
+            - cobotrix_postgres:/var/lib/postgresql
 
 volumes:
-  cobotrix_postgis:
+    cobotrix_postgres:

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub mod authority;
 pub mod authority_role;
 pub mod recording;
+pub mod refresh_token;
 pub mod role;
 pub mod user;
 pub mod user_authority;

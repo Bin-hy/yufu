@@ -27,11 +27,17 @@ impl Service {
     pub async fn ensure_sadmin_authorities(db: &DatabaseConnection) -> Result<()> {
         // 1. 获取 超级管理员 角色 role
         let super_admin_name = RoleEnum::Superadmin.get_name();
-        let role_db = role::Entity::find()
+        let role_db = match role::Entity::find()
             .filter(role::Column::Name.eq(super_admin_name))
             .one(db)
             .await?
-            .unwrap();
+        {
+            Some(r) => r,
+            None => {
+                tracing::warn!("Superadmin role not found, skipping authority sync");
+                return Ok(());
+            }
+        };
         // 2. 获取所有权限
         let authorities_db = authority::Entity::find().all(db).await?;
         let existing = authority_role::Entity::find()
