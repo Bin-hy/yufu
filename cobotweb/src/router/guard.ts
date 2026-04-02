@@ -6,6 +6,11 @@ export function RegistryRouterGuard(router: Router) {
     router.beforeEach((to, _from, next) => {
         const requiresAuth = to.meta.requiresAuth !== false
         if (requiresAuth && !getToken()) {
+            // OIDC flow: redirect to OIDC login page instead of regular login
+            if (to.path.startsWith('/oidc/')) {
+                next({ name: 'oidc-login', query: to.query, replace: true })
+                return
+            }
             next({ name: 'login', replace: true })
             return
         }

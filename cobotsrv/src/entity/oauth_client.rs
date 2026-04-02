@@ -26,6 +26,15 @@ impl Entity {
     ) -> Result<Option<Model>, DbErr> {
         Self::find().filter(Column::ClientId.eq(cid)).one(db).await
     }
+
+    pub async fn get_by_id(db: &DatabaseConnection, id: i32) -> Result<Option<Model>, DbErr> {
+        Self::find_by_id(id).one(db).await
+    }
+
+    pub async fn list_all(db: &DatabaseConnection) -> Result<Vec<Model>, DbErr> {
+        use sea_orm::QueryOrder;
+        Self::find().order_by_desc(Column::CreateTime).all(db).await
+    }
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -34,6 +34,19 @@ export const constantRoutes: RouteRecordRaw[] = [
     component: () => import('@/pages/login/register.vue'),
     meta: { requiresAuth: false, hidden: true, title: '用户注册' }
   },
+  // OIDC flow pages (standalone, no layout)
+  {
+    path: '/oidc/login',
+    name: 'oidc-login',
+    component: () => import('@/pages/oidc-login/index.vue'),
+    meta: { requiresAuth: false, hidden: true, title: 'Sign in to authorize' }
+  },
+  {
+    path: '/oidc/consent',
+    name: 'oidc-consent',
+    component: () => import('@/pages/oidc-consent/index.vue'),
+    meta: { requiresAuth: true, hidden: true, title: 'Authorize Application' }
+  },
   {
     path: '/',
     component: Layout,
@@ -128,6 +141,48 @@ export const constantRoutes: RouteRecordRaw[] = [
             name: 'recordings-list',
             component: () => import('@/pages/recordings/views/recordings-list.vue'),
             meta: { title: '记录列表' }
+          }
+        ]
+      },
+      // 应用管理 (OAuth/OIDC)
+      {
+        path: '/oauth',
+        name: 'oauth',
+        component: () => import('@/pages/oauth/index.vue'),
+        meta: { title: '应用管理', icon: 'apps' },
+        children: [
+          {
+            path: '',
+            name: 'oauth-list',
+            component: () => import('@/pages/oauth/views/oauth-list.vue'),
+            meta: { title: 'OAuth Apps' }
+          },
+          {
+            path: 'new',
+            name: 'oauth-create',
+            component: () => import('@/pages/oauth/views/oauth-create.vue'),
+            meta: { title: '注册应用' }
+          },
+          {
+            path: ':id',
+            name: 'oauth-detail',
+            component: () => import('@/pages/oauth/views/oauth-detail.vue'),
+            meta: { title: '应用详情' }
+          }
+        ]
+      },
+      // 已授权应用
+      {
+        path: '/authorized-apps',
+        name: 'authorized-apps',
+        component: () => import('@/pages/authorized-apps/index.vue'),
+        meta: { title: '已授权应用', icon: 'key' },
+        children: [
+          {
+            path: '',
+            name: 'authorized-apps-list',
+            component: () => import('@/pages/authorized-apps/views/authorized-apps-list.vue'),
+            meta: { title: '已授权应用' }
           }
         ]
       },

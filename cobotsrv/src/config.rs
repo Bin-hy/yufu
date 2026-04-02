@@ -9,6 +9,8 @@ pub struct Config {
     #[serde(default)]
     pub auth: Auth,
     #[serde(default)]
+    pub oidc: Oidc,
+    #[serde(default)]
     pub log: Log,
 
     #[cfg(feature = "net4mqtt")]
@@ -219,4 +221,52 @@ fn default_origins() -> Vec<String> {
 
 fn default_rsa_private_key_path() -> String {
     "conf/oidc_rsa_private.local.pem".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// OIDC Configuration
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Oidc {
+    /// Public-facing issuer URL for OIDC discovery document.
+    /// If empty, derived from `http.listen` with wildcard addresses replaced by localhost.
+    /// Example: "https://auth.example.com"
+    #[serde(default)]
+    pub issuer: String,
+
+    /// Path to RSA private key PEM file for ID Token signing (RS256).
+    /// If the file does not exist, a 2048-bit key pair will be auto-generated.
+    #[serde(default = "default_rsa_private_key_path")]
+    pub rsa_private_key_path: String,
+
+    /// Access token lifetime in seconds (default: uses auth.exp_seconds for backward compat).
+    /// If set, overrides auth.exp_seconds for OIDC tokens specifically.
+    #[serde(default)]
+    pub access_token_expire_seconds: Option<i64>,
+
+    /// Refresh token lifetime in seconds (default: uses auth.refresh_exp_seconds for backward compat).
+    #[serde(default)]
+    pub refresh_token_expire_seconds: Option<i64>,
+
+    /// Default email domain used when a user has no email set.
+    /// UserInfo will return "{username}@{email_domain}".
+    #[serde(default = "default_oidc_email_domain")]
+    pub email_domain: String,
+}
+
+impl Default for Oidc {
+    fn default() -> Self {
+        Self {
+            issuer: String::new(),
+            rsa_private_key_path: default_rsa_private_key_path(),
+            access_token_expire_seconds: None,
+            refresh_token_expire_seconds: None,
+            email_domain: default_oidc_email_domain(),
+        }
+    }
+}
+
+fn default_oidc_email_domain() -> String {
+    "cobotrix.local".to_string()
 }

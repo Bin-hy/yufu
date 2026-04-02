@@ -177,11 +177,20 @@ where
 
     // Initialize IdTokenSigner: load RSA key from file or auto-generate
     let id_token_signer = {
-        let key_path = cfg.auth.rsa_private_key_path.clone();
+        // Prefer oidc.rsa_private_key_path, fall back to auth.rsa_private_key_path
+        let key_path = if !cfg.oidc.rsa_private_key_path.is_empty() {
+            cfg.oidc.rsa_private_key_path.clone()
+        } else {
+            cfg.auth.rsa_private_key_path.clone()
+        };
+        let token_exp = cfg
+            .oidc
+            .access_token_expire_seconds
+            .unwrap_or(cfg.auth.exp_seconds);
         match tokio::fs::read(&key_path).await {
             Ok(pem) => {
                 info!("Loaded RSA private key from {}", key_path);
-                IdTokenSigner::from_rsa_pem(&pem, cfg.auth.exp_seconds)
+                IdTokenSigner::from_rsa_pem(&pem, token_exp)
                     .expect("Failed to parse RSA private key")
             }
             Err(_) => {
@@ -204,7 +213,7 @@ where
                     .await
                     .expect("Failed to write RSA key file");
                 info!("Generated and saved RSA key to {}", key_path);
-                IdTokenSigner::from_rsa_pem(pem_str.as_bytes(), cfg.auth.exp_seconds)
+                IdTokenSigner::from_rsa_pem(pem_str.as_bytes(), token_exp)
                     .expect("Failed to parse generated RSA key")
             }
         }
@@ -385,6 +394,23 @@ impl AppState {
         self.init_sadmin_from_config().await?;
         Ok(())
     }
+
+    /// OIDC access token expiry: oidc.access_token_expire_seconds > auth.exp_seconds
+    pub fn oidc_access_token_exp(&self) -> i64 {
+        self.config
+            .oidc
+            .access_token_expire_seconds
+            .unwrap_or(self.config.auth.exp_seconds)
+    }
+
+    /// OIDC refresh token expiry: oidc.refresh_token_expire_seconds > auth.refresh_exp_seconds
+    pub fn oidc_refresh_token_exp(&self) -> i64 {
+        self.config
+            .oidc
+            .refresh_token_expire_seconds
+            .unwrap_or(self.config.auth.refresh_exp_seconds)
+    }
+
     // 初始化超级管理员权限
     async fn ensure_sadmin_authorities(&self) -> result::Result<()> {
         Service::ensure_sadmin_authorities(&self.database.connection).await?;

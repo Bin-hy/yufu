@@ -1,4 +1,6 @@
-use crate::entity::{oauth_authorization_code, oauth_client, oauth_scope, oauth_token};
+use crate::entity::{
+    oauth_authorization_code, oauth_client, oauth_consent, oauth_scope, oauth_token,
+};
 use crate::error::AppError;
 use crate::result::Result;
 use crate::{AppState, IdType};
@@ -105,6 +107,77 @@ impl OidcService {
 }
 
 // ---------------------------------------------------------------------------
+// Client queries & secret regeneration
+// ---------------------------------------------------------------------------
+impl OidcService {
+    pub async fn list_clients(db: &DatabaseConnection) -> Result<Vec<oauth_client::Model>> {
+        Ok(oauth_client::Entity::list_all(db).await?)
+    }
+
+    pub async fn get_client_by_id(db: &DatabaseConnection, id: i32) -> Result<oauth_client::Model> {
+        oauth_client::Entity::get_by_id(db, id)
+            .await?
+            .ok_or(AppError::NotFound("client not found".to_string()))
+    }
+
+    /// Regenerate client_secret. Returns (updated Model, plaintext_secret).
+    pub async fn regenerate_client_secret(
+        db: &DatabaseConnection,
+        id: i32,
+    ) -> Result<(oauth_client::Model, String)> {
+        let client = Self::get_client_by_id(db, id).await?;
+
+        let mut buf = [0u8; 32];
+        OsRng.fill_bytes(&mut buf);
+        let new_secret = hex::encode(buf);
+        let secret_hash = bcrypt::hash(&new_secret, bcrypt::DEFAULT_COST)
+            .map_err(|e| AppError::InternalServerError(anyhow::anyhow!("hash error: {}", e)))?;
+
+        let mut am: oauth_client::ActiveModel = client.into();
+        am.client_secret_hash = Set(secret_hash);
+        am.update_time = Set(Utc::now().naive_utc());
+        let updated = am.update(db).await?;
+        Ok((updated, new_secret))
+    }
+
+    /// Update an existing OAuth client's mutable fields.
+    pub async fn update_client(
+        db: &DatabaseConnection,
+        id: i32,
+        name: Option<String>,
+        redirect_uris: Option<Vec<String>>,
+        allowed_scopes: Option<Vec<String>>,
+        grant_types: Option<Vec<String>>,
+    ) -> Result<oauth_client::Model> {
+        let client = Self::get_client_by_id(db, id).await?;
+        let mut am: oauth_client::ActiveModel = client.into();
+        if let Some(v) = name {
+            am.name = Set(v);
+        }
+        if let Some(v) = redirect_uris {
+            am.redirect_uris = Set(v.join(","));
+        }
+        if let Some(v) = allowed_scopes {
+            am.allowed_scopes = Set(v.join(","));
+        }
+        if let Some(v) = grant_types {
+            am.grant_types = Set(v.join(","));
+        }
+        am.update_time = Set(Utc::now().naive_utc());
+        let updated = am.update(db).await?;
+        Ok(updated)
+    }
+
+    /// Delete an OAuth client by id.
+    pub async fn delete_client(db: &DatabaseConnection, id: i32) -> Result<()> {
+        let client = Self::get_client_by_id(db, id).await?;
+        let am: oauth_client::ActiveModel = client.into();
+        am.delete(db).await?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Scope management
 // ---------------------------------------------------------------------------
 impl OidcService {
@@ -169,7 +242,7 @@ pub struct CreateAuthCodeParams {
     pub user_id: IdType,
     pub client_id: String,
     pub redirect_uri: Option<String>,
-    pub code_challenge: String,
+    pub code_challenge: Option<String>,
     pub code_challenge_method: String,
     pub scope: Option<String>,
     pub state: Option<String>,
@@ -193,7 +266,7 @@ impl OidcService {
             user_id: Set(params.user_id),
             client_id: Set(params.client_id),
             redirect_uri: Set(params.redirect_uri),
-            code_challenge: Set(params.code_challenge),
+            code_challenge: Set(params.code_challenge.unwrap_or_default()),
             code_challenge_method: Set(params.code_challenge_method),
             scope: Set(params.scope),
             state: Set(params.state),
@@ -286,8 +359,8 @@ impl OidcService {
 
         let refresh_token = Self::generate_refresh_token_value();
         let now = Utc::now().naive_utc();
-        let access_expires = now + Duration::seconds(state.config.auth.exp_seconds);
-        let refresh_expires = now + Duration::seconds(state.config.auth.refresh_exp_seconds);
+        let access_expires = now + Duration::seconds(state.oidc_access_token_exp());
+        let refresh_expires = now + Duration::seconds(state.oidc_refresh_token_exp());
 
         let new_rec = oauth_token::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
@@ -335,8 +408,8 @@ impl OidcService {
         Self::revoke_by_refresh_token(db, old_rt).await?;
         let new_refresh_token = Self::generate_refresh_token_value();
         let now = Utc::now().naive_utc();
-        let access_expires = now + Duration::seconds(state.config.auth.exp_seconds);
-        let refresh_expires = now + Duration::seconds(state.config.auth.refresh_exp_seconds);
+        let access_expires = now + Duration::seconds(state.oidc_access_token_exp());
+        let refresh_expires = now + Duration::seconds(state.oidc_refresh_token_exp());
 
         let new_rec = oauth_token::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
@@ -388,12 +461,150 @@ impl OidcService {
 }
 
 // ---------------------------------------------------------------------------
+// Consent operations
+// ---------------------------------------------------------------------------
+impl OidcService {
+    /// Check if a user has already consented to the given client.
+    pub async fn find_consent(
+        db: &DatabaseConnection,
+        user_id: IdType,
+        client_id: &str,
+    ) -> Result<Option<oauth_consent::Model>> {
+        Ok(oauth_consent::Entity::find_by_user_and_client(db, user_id, client_id).await?)
+    }
+
+    /// Check whether an existing consent covers all requested scopes.
+    pub fn consent_covers_scopes(consent: &oauth_consent::Model, requested: &[String]) -> bool {
+        let consented: Vec<&str> = consent.scope.split(' ').map(|s| s.trim()).collect();
+        requested.iter().all(|s| consented.contains(&s.as_str()))
+    }
+
+    /// Save or update user consent for a client + scopes.
+    pub async fn save_consent(
+        db: &DatabaseConnection,
+        user_id: IdType,
+        client_id: &str,
+        scope: &str,
+    ) -> Result<oauth_consent::Model> {
+        let now = Utc::now().naive_utc();
+        if let Some(existing) =
+            oauth_consent::Entity::find_by_user_and_client(db, user_id, client_id).await?
+        {
+            // Update: merge scopes (union of old + new)
+            let mut all_scopes: Vec<String> = existing
+                .scope
+                .split(' ')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            for s in scope.split(' ').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                if !all_scopes.contains(&s.to_string()) {
+                    all_scopes.push(s.to_string());
+                }
+            }
+            let mut am: oauth_consent::ActiveModel = existing.into();
+            am.scope = Set(all_scopes.join(" "));
+            am.update_time = Set(now);
+            let updated = am.update(db).await?;
+            Ok(updated)
+        } else {
+            let am = oauth_consent::ActiveModel {
+                id: sea_orm::ActiveValue::NotSet,
+                user_id: Set(user_id),
+                client_id: Set(client_id.to_string()),
+                scope: Set(scope.to_string()),
+                create_time: Set(now),
+                update_time: Set(now),
+            };
+            let inserted = am.insert(db).await?;
+            Ok(inserted)
+        }
+    }
+
+    /// List all consents for a user, along with the client info.
+    pub async fn list_user_consents(
+        db: &DatabaseConnection,
+        user_id: IdType,
+    ) -> Result<Vec<(oauth_consent::Model, Option<oauth_client::Model>)>> {
+        let consents = oauth_consent::Entity::find_all_by_user(db, user_id).await?;
+        let mut results = Vec::with_capacity(consents.len());
+        for consent in consents {
+            let client = oauth_client::Entity::get_by_client_id(db, &consent.client_id).await?;
+            results.push((consent, client));
+        }
+        Ok(results)
+    }
+
+    /// Revoke a consent and all associated tokens for that user+client.
+    pub async fn revoke_consent(
+        db: &DatabaseConnection,
+        consent_id: i32,
+        user_id: IdType,
+    ) -> Result<()> {
+        // Find the consent to get client_id
+        let consent = oauth_consent::Entity::find_by_id(consent_id)
+            .one(db)
+            .await?
+            .ok_or(AppError::NotFound("consent not found".to_string()))?;
+        if consent.user_id != user_id {
+            return Err(AppError::Unauthorized("not your consent".to_string()));
+        }
+        let client_id = consent.client_id.clone();
+
+        // Delete the consent record
+        oauth_consent::Entity::delete_by_id_and_user(db, consent_id, user_id).await?;
+
+        // Revoke all tokens for this user+client
+        let tokens = oauth_token::Entity::find()
+            .filter(oauth_token::Column::UserId.eq(user_id))
+            .filter(oauth_token::Column::ClientId.eq(&client_id))
+            .filter(oauth_token::Column::Revoked.eq(false))
+            .all(db)
+            .await?;
+        for token in tokens {
+            let mut am: oauth_token::ActiveModel = token.into();
+            am.revoked = Set(true);
+            am.update(db).await?;
+        }
+        Ok(())
+    }
+
+    /// Get scopes with their descriptions for display on the consent page.
+    pub async fn get_scopes_with_descriptions(
+        db: &DatabaseConnection,
+        scope_names: &[String],
+    ) -> Result<Vec<(String, Option<String>)>> {
+        let all_scopes = Self::list_scopes(db).await?;
+        let result: Vec<(String, Option<String>)> = scope_names
+            .iter()
+            .map(|name| {
+                let desc = all_scopes
+                    .iter()
+                    .find(|s| s.name == *name)
+                    .and_then(|s| s.description.clone());
+                (name.clone(), desc)
+            })
+            .collect();
+        Ok(result)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 pub fn get_issuer_base(state: &AppState) -> String {
-    if state.config.http.public.is_empty() {
-        format!("http://{}", state.config.http.listen)
-    } else {
-        state.config.http.public.clone()
+    // Priority: oidc.issuer > http.public > derived from http.listen
+    if !state.config.oidc.issuer.is_empty() {
+        return state.config.oidc.issuer.clone();
     }
+    if !state.config.http.public.is_empty() {
+        return state.config.http.public.clone();
+    }
+    // Derive a usable URL from the listen address.
+    // Replace wildcard bind addresses ([::], 0.0.0.0) with localhost.
+    let listen = state.config.http.listen.to_string();
+    let usable = listen
+        .replace("[::]", "localhost")
+        .replace("0.0.0.0", "localhost");
+    format!("http://{}", usable)
 }
