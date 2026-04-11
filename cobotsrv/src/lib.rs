@@ -287,7 +287,7 @@ where
                     Method::DELETE,
                     Method::OPTIONS,
                 ]);
-            
+
             if has_wildcard {
                 // Mirror the request Origin header back (credentials-compatible wildcard).
                 // `Access-Control-Allow-Origin: *` is forbidden when credentials are used,
