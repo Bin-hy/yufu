@@ -27,7 +27,7 @@ use auth::{AuthState, access_middleware_with_callback};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
-#[folder = "../cobotweb/"]
+#[folder = "../assets/cobotsrv/"]
 struct Assets;
 
 pub mod config;
@@ -277,7 +277,7 @@ where
         .layer({
             let origins: Vec<String> = app_state.clone().config.auth.origins;
             let has_wildcard = origins.iter().any(|o| o == "*");
-            let base = CorsLayer::new()
+            let cors_layer = CorsLayer::new()
                 .allow_credentials(true)
                 .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
                 .allow_methods([
@@ -287,15 +287,23 @@ where
                     Method::DELETE,
                     Method::OPTIONS,
                 ]);
+
             if has_wildcard {
                 // Mirror the request Origin header back (credentials-compatible wildcard).
                 // `Access-Control-Allow-Origin: *` is forbidden when credentials are used,
                 // so we echo the actual Origin instead.
-                base.allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+                cors_layer.allow_origin(tower_http::cors::AllowOrigin::mirror_request())
             } else {
-                origins.iter().fold(base, |cors, origin| {
-                    cors.allow_origin(origin.parse::<HeaderValue>().unwrap())
-                })
+                // Use predicate to match request Origin against allowed origins list
+                cors_layer.allow_origin(tower_http::cors::AllowOrigin::predicate(
+                    move |origin: &HeaderValue, _request_head: &http::request::Parts| {
+                        if let Ok(origin_str) = origin.to_str() {
+                            origins.contains(&origin_str.to_string())
+                        } else {
+                            false
+                        }
+                    },
+                ))
             }
         })
         .with_state(app_state.clone())

@@ -12,7 +12,7 @@ services:
         ports:
             - "${POSTGRES_PORT:-5432}:5432"
         env_file:
-            - .env.local
+            - .env
         volumes:
             - cobotrix_postgres:/var/lib/postgresql
 
