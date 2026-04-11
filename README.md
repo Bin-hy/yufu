@@ -8,17 +8,169 @@ CoBotrix (Co-Robotics Matrix) 协熵云枢
 
 ## 运行
 
-运行依赖 **cobotnil 不需要 mqtt broker 依赖，目前内置了一个 mqtt broker**
+本项目支持三种部署形态，按"开发 → 嵌入式单二进制 → 前后端分离"三条路径分别说明。三种形态共用一套配置模板派生流程。
+
+### 1. 首次 clone 后的准备（所有部署形态都需要）
+
+仓库里所有 `*.example` 和 `*.local.*` 文件都是**模板**，真实运行时用到的配置文件需要在本地从模板复制派生，复制后的副本不会被 Git 跟踪（见 `.gitignore`）。
 
 ```bash
-# docker compose up -d
+# 根目录 env（compose.yml 会读取 .env）
+cp .env.example .env
+
+# 本地 docker-compose 覆盖（开发只起 Postgres）
+cp compose.local.yml.example compose.local.yml
+
+# cobotsrv 后端配置（二选一）
+cp conf/cobotsrv.toml.example conf/cobotsrv.local.toml   # 个人覆盖，启动时 -c 显式指定
+# 或
+cp conf/cobotsrv.toml.example conf/cobotsrv.toml         # 覆盖默认文件（已被 .gitignore 忽略）
+
+# 前端 env
+cp cobotweb/.env.example cobotweb/.env.local
 ```
 
-运行集群 (启动一个 `Server` 和 三个 `Device`)
+安全提示：
+
+- `conf/oidc_rsa_private.pem` 无需手动创建：`cobotsrv` 首次启动时若不存在会自动生成 2048-bit RSA 密钥并落盘，后续启动复用；该文件已被 `.gitignore` 忽略，**切勿提交**。
+- `conf/cobotsrv.local.toml` 里若写了 `[auth.super_admin]` 明文密码，请只留在本机，不要提交也不要分享。
+- `cobotweb/.env.example` 默认把 `VITE_BASE_URL` 设为相对路径 `/api/v1`，适用于模式 A / C 和同域反代的模式 B；跨域 split 部署需要改为绝对 URL（见下文"模式 B"）。
+
+### 2. 启动基础设施
+
+开发/测试环境（只起 Postgres，`cobotnil` 自带 MQTT broker 不需要额外跑 EMQX）：
 
 ```bash
+docker compose -f compose.local.yml up -d
+```
+
+生产环境（Postgres + EMQX，依赖根目录 `.env`）：
+
+```bash
+docker compose up -d
+```
+
+---
+
+### 模式 A：嵌入式单二进制（推荐生产默认）
+
+前端产物由 `rust-embed` 编译期内联到 `cobotsrv` 二进制里，**一个进程同时提供 SPA 静态资源和 API**，适合单机、边缘网关、离线发行。
+
+**构建顺序：必须先构建前端，再构建后端**。这是因为 `cobotsrv/src/lib.rs` 在 `webui` feature 下把 `../assets/cobotsrv/` 目录通过 `rust-embed` 静态嵌入，缺失即编译失败。
+
+```bash
+# Step 1 前端构建 → 产物落到 assets/cobotsrv/
+cd cobotweb
+npm install          # 首次或依赖变化时
+npm run build        # 读取 cobotweb/.env.local 或 .env.production.local
+cd ..
+
+# Step 2 后端构建（开启 webui feature 触发 embed）
+cargo build --release --features webui --bin cobotsrv
+
+# Step 3 运行
+./target/release/cobotsrv -c conf/cobotsrv.local.toml
+```
+
+前端 env 建议：`cobotweb/.env.local`（或 `.env.production.local`）保持 `VITE_BASE_URL=/api/v1`。请求走同源相对路径，无需 CORS。
+
+浏览器访问 `http://<cobotsrv-host>:4000/`（默认端口，可在 `conf/cobotsrv.local.toml` `[http] listen` 修改）。
+
+---
+
+### 模式 B：前后端分离部署
+
+前端以纯静态资源独立托管（Nginx / CDN / S3 / Vite preview），后端以纯 API 进程形式运行（**不启用 `webui` feature**）。
+
+```bash
+# 后端（不开 webui，体积更小）
+cargo build --release --bin cobotsrv
+./target/release/cobotsrv -c conf/cobotsrv.local.toml
+
+# 前端
+cd cobotweb
+npm install
+npm run build        # 产物在 assets/cobotsrv/（路径由 vite.config.ts 的 build.outDir 决定）
+```
+
+然后把 `assets/cobotsrv/` 目录里的静态文件部署到你的静态托管方案。两种子场景：
+
+#### B.1 同域反代（推荐）
+
+Nginx 同一个域名下，`/` 走前端静态文件，`/api/v1`、`/oidc/*`、`/.well-known/*` 反代到 `cobotsrv`。前端 `VITE_BASE_URL=/api/v1` 就够用，无 CORS 问题。
+
+```nginx
+server {
+    listen 80;
+    server_name cobotrix.example.com;
+
+    root /var/www/cobotrix;           # 拷贝 assets/cobotsrv/ 的内容到这里
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;   # SPA 回退
+    }
+
+    location ~ ^/(api/v1|oidc|\.well-known)/ {
+        proxy_pass http://cobotsrv-backend:4000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+#### B.2 跨域部署（前端与后端分别在不同域名）
+
+比如前端发布到 `app.example.com`，后端 API 在 `api.example.com`。此时前端 `VITE_BASE_URL` 必须是**绝对 URL**：
+
+```bash
+# cobotweb/.env.production.local
+VITE_BASE_URL=https://api.example.com/api/v1
+```
+
+注意 `VITE_BASE_URL` 在 `vite build` 时被固化，切换目标 API 需重新构建。
+
+后端 `conf/cobotsrv.local.toml` 必须把前端域名加入 CORS 白名单：
+
+```toml
+[auth]
+origins = [
+    "https://app.example.com",
+]
+```
+
+---
+
+### 模式 C：本地开发（热重载）
+
+后端用 `cobotnil` 启动的虚拟集群，前端用 Vite dev server，Vite 自带的 proxy 会把 `/api/v1`、`/oidc/*`、`/.well-known` 都转发到后端（`cobotweb/vite.config.ts` 已配置）。
+
+```bash
+# 终端 1：后端开发集群（1 个 cobotsrv + 3 个虚拟 cobotlet + 内置 MQTT broker）
 cargo run -- -c conf/cobotnil
+
+# 或只跑后端单服务
+cargo run --bin cobotsrv -- -c conf/cobotsrv.local.toml
+
+# 终端 2：前端 dev server
+cd cobotweb && npm run dev
 ```
+
+前端 env：`cobotweb/.env.local` 保持 `VITE_BASE_URL=/api/v1`（走 Vite proxy），或者设成绝对 URL（跳过 proxy 直连后端，比如 `http://localhost:4000/api/v1`）。两种都能跑，前者更接近生产形态。
+
+---
+
+### 部署形态选型速查
+
+| 维度 | A. 嵌入式 | B.1 同域反代 | B.2 跨域 split | C. 开发 |
+|---|---|---|---|---|
+| cargo feature | `webui` | 默认（无） | 默认（无） | 默认（无） |
+| 前端构建必须 | ✅（编译期嵌入） | ✅ | ✅ | ❌（Vite dev） |
+| 需要 Nginx/CDN | ❌ | ✅ | ✅ | ❌ |
+| `VITE_BASE_URL` | `/api/v1` | `/api/v1` | `https://api.xxx/api/v1` | `/api/v1` |
+| CORS 配置 | 不需要 | 不需要 | 需要 | 不需要 |
+| 运维复杂度 | 最低 | 中 | 高 | — |
 
 ## 项目结构
 

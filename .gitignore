@@ -47,9 +47,21 @@ desktop.ini
 # local config
 *.local
 *.local.*
+# but always keep committable templates
+!*.example
+!*.example.*
 
-# cobotweb
+# local runtime files (copied from *.example)
+.env
+
+# OIDC RSA private keys (any environment)
+conf/oidc_rsa_private*.pem
+
+# cobotweb build output (baked into cobotsrv binary via rust-embed when --features webui)
 assets/*
+!assets/cobotsrv/
+assets/cobotsrv/*
+!assets/cobotsrv/.gitkeep
 node_modules
 **/node_modules
 **/dist
