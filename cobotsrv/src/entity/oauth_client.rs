@@ -1,3 +1,4 @@
+use crate::IdType;
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 
@@ -9,6 +10,8 @@ pub struct Model {
     pub id: i32,
     #[sea_orm(unique)]
     pub client_id: String,
+    #[serde(skip_serializing)]
+    pub user_id: IdType,
     pub name: String,
     pub redirect_uris: String,  // comma-separated
     pub allowed_scopes: String, // comma-separated
@@ -27,13 +30,27 @@ impl Entity {
         Self::find().filter(Column::ClientId.eq(cid)).one(db).await
     }
 
-    pub async fn get_by_id(db: &DatabaseConnection, id: i32) -> Result<Option<Model>, DbErr> {
-        Self::find_by_id(id).one(db).await
+    pub async fn list_by_user(
+        db: &DatabaseConnection,
+        user_id: IdType,
+    ) -> Result<Vec<Model>, DbErr> {
+        use sea_orm::QueryOrder;
+        Self::find()
+            .filter(Column::UserId.eq(user_id))
+            .order_by_desc(Column::CreateTime)
+            .all(db)
+            .await
     }
 
-    pub async fn list_all(db: &DatabaseConnection) -> Result<Vec<Model>, DbErr> {
-        use sea_orm::QueryOrder;
-        Self::find().order_by_desc(Column::CreateTime).all(db).await
+    pub async fn get_by_id_and_owner(
+        db: &DatabaseConnection,
+        id: i32,
+        user_id: IdType,
+    ) -> Result<Option<Model>, DbErr> {
+        Self::find_by_id(id)
+            .filter(Column::UserId.eq(user_id))
+            .one(db)
+            .await
     }
 }
 

@@ -18,11 +18,11 @@ const form = ref({
 
 async function handleSubmit() {
   if (!form.value.name.trim()) {
-    emitToast({ type: 'error', message: 'Application name is required' })
+    emitToast({ type: 'error', message: '应用名称不能为空' })
     return
   }
   if (!form.value.redirect_uri.trim()) {
-    emitToast({ type: 'error', message: 'Authorization callback URL is required' })
+    emitToast({ type: 'error', message: '回调地址不能为空' })
     return
   }
   submitting.value = true
@@ -51,45 +51,45 @@ async function handleSubmit() {
 <template>
   <div class="max-w-2xl space-y-6">
     <div>
-      <h2 class="text-2xl font-bold text-foreground">Register a new OAuth application</h2>
+      <h2 class="text-2xl font-bold text-foreground">注册新 OAuth 应用</h2>
     </div>
 
     <form class="space-y-5" @submit.prevent="handleSubmit">
       <!-- Application name -->
       <div>
         <label class="block text-sm font-semibold text-foreground mb-1">
-          Application name <span class="text-red-500">*</span>
+          应用名称 <span class="text-red-500">*</span>
         </label>
         <UiInput v-model="form.name" placeholder="" class="w-full" />
-        <p class="text-xs text-muted-foreground mt-1">Something users will recognize and trust.</p>
+        <p class="text-xs text-muted-foreground mt-1">用户能识别并信任的名称。</p>
       </div>
 
       <!-- Homepage URL -->
       <div>
         <label class="block text-sm font-semibold text-foreground mb-1">
-          Homepage URL
+          主页地址
         </label>
         <UiInput v-model="form.homepage_url" placeholder="https://example.com" class="w-full" />
-        <p class="text-xs text-muted-foreground mt-1">The full URL to your application's homepage.</p>
+        <p class="text-xs text-muted-foreground mt-1">应用主页的完整 URL。</p>
       </div>
 
       <!-- Application description -->
       <div>
         <label class="block text-sm font-semibold text-foreground mb-1">
-          Application description
+          应用描述
         </label>
         <UiInput v-model="form.description" placeholder="" class="w-full" />
-        <p class="text-xs text-muted-foreground mt-1">This is displayed to all users of your application.</p>
+        <p class="text-xs text-muted-foreground mt-1">向所有用户展示的应用描述。</p>
       </div>
 
       <!-- Authorization callback URL -->
       <div>
         <label class="block text-sm font-semibold text-foreground mb-1">
-          Authorization callback URL <span class="text-red-500">*</span>
+          授权回调地址 <span class="text-red-500">*</span>
         </label>
         <UiInput v-model="form.redirect_uri" placeholder="https://example.com/callback" class="w-full" />
         <p class="text-xs text-muted-foreground mt-1">
-          Your application's callback URL. After authorization, users will be redirected here.
+          授权完成后用户将被重定向到此地址。
         </p>
       </div>
 
@@ -97,9 +97,9 @@ async function handleSubmit() {
       <div class="flex items-center gap-3 pt-2">
         <UiButton type="submit" :disabled="submitting">
           <span v-if="submitting" class="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"></span>
-          Register application
+          注册应用
         </UiButton>
-        <UiButton variant="outline" type="button" @click="router.back()">Cancel</UiButton>
+        <UiButton variant="outline" type="button" @click="router.back()">取消</UiButton>
       </div>
     </form>
   </div>
