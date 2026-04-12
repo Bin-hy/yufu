@@ -45,7 +45,7 @@ onMounted(async () => {
     }
   } catch (e) {
     console.error('Failed to load client info', e)
-    error.value = 'Failed to load application information'
+    error.value = '加载应用信息失败'
   } finally {
     loading.value = false
   }
@@ -62,7 +62,7 @@ async function handleApprove() {
     window.location.href = resp.redirect_url
   } catch (e) {
     console.error('Authorization failed', e)
-    emitToast({ type: 'error', message: 'Authorization failed' })
+    emitToast({ type: 'error', message: '授权失败' })
     submitting.value = false
   }
 }
@@ -100,7 +100,7 @@ async function handleDeny() {
       <svg class="w-16 h-16 text-destructive mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
       </svg>
-      <h2 class="text-lg font-semibold text-foreground mb-2">Authorization Error</h2>
+      <h2 class="text-lg font-semibold text-foreground mb-2">授权错误</h2>
       <p class="text-muted-foreground">{{ error }}</p>
     </div>
 
@@ -113,7 +113,7 @@ async function handleDeny() {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
           </svg>
         </div>
-        <h1 class="text-xl font-bold">Authorize {{ clientInfo.client_name }}</h1>
+        <h1 class="text-xl font-bold">授权 {{ clientInfo.client_name }}</h1>
       </div>
 
       <div class="p-6 space-y-6">
@@ -121,13 +121,13 @@ async function handleDeny() {
         <div class="text-center">
           <p class="text-sm text-muted-foreground">
             <strong class="text-foreground">{{ clientInfo.client_name }}</strong>
-            wants to access your account
+            请求访问您的账户
           </p>
         </div>
 
         <!-- Permissions -->
         <div>
-          <h3 class="text-sm font-semibold text-foreground mb-3">This will allow the application to:</h3>
+          <h3 class="text-sm font-semibold text-foreground mb-3">该应用将获得以下权限：</h3>
           <div class="space-y-2">
             <div
               v-for="scope in clientInfo.scopes"
@@ -155,7 +155,7 @@ async function handleDeny() {
             @click="handleApprove"
           >
             <span v-if="submitting" class="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"></span>
-            Authorize {{ clientInfo.client_name }}
+            授权 {{ clientInfo.client_name }}
           </UiButton>
           <UiButton
             variant="outline"
@@ -163,13 +163,13 @@ async function handleDeny() {
             :disabled="submitting"
             @click="handleDeny"
           >
-            Cancel
+            取消
           </UiButton>
         </div>
 
         <!-- Privacy note -->
         <p class="text-xs text-muted-foreground text-center">
-          Authorizing will redirect to
+          授权后将跳转至
           <code class="bg-muted px-1 py-0.5 rounded text-xs break-all">{{ authorizeParams.redirect_uri }}</code>
         </p>
       </div>

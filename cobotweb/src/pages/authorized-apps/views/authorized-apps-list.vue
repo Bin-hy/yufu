@@ -50,7 +50,7 @@ onMounted(loadApps)
   <div class="space-y-6">
     <!-- 页面头部 -->
     <div>
-      <h2 class="text-2xl font-bold text-foreground">Authorized Applications</h2>
+      <h2 class="text-2xl font-bold text-foreground">已授权应用</h2>
       <p class="text-sm text-muted-foreground mt-1">
         管理你已授权访问账户的第三方应用。撤销授权后，该应用将无法再访问你的数据。
       </p>
@@ -79,7 +79,7 @@ onMounted(loadApps)
             <div>
               <div class="text-base font-semibold text-foreground">{{ app.client_name }}</div>
               <div class="text-sm text-muted-foreground mt-0.5">
-                Authorized: {{ app.authorized_at }}
+                授权时间：{{ app.authorized_at }}
               </div>
               <div class="flex flex-wrap gap-1 mt-1">
                 <span
@@ -97,7 +97,7 @@ onMounted(loadApps)
             variant="destructive"
             @click="openRevokeDialog(app)"
           >
-            Revoke
+            撤销
           </UiButton>
         </div>
       </div>
@@ -107,9 +107,9 @@ onMounted(loadApps)
         <svg class="w-16 h-16 text-muted-foreground mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
         </svg>
-        <h3 class="text-lg font-medium text-foreground mb-2">No authorized applications</h3>
+        <h3 class="text-lg font-medium text-foreground mb-2">暂无已授权应用</h3>
         <p class="text-muted-foreground">
-          You haven't authorized any third-party applications to access your account yet.
+          您尚未授权任何第三方应用访问您的账户。
         </p>
       </div>
     </div>
@@ -117,7 +117,7 @@ onMounted(loadApps)
     <!-- 撤销确认 -->
     <UiDialog
       v-model:open="confirmingRevoke"
-      title="Revoke Authorization"
+      title="撤销授权"
       @confirm="confirmRevoke"
       @cancel="() => { confirmingRevoke = false; appToRevoke = null }"
     >

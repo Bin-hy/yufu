@@ -75,6 +75,7 @@ impl OidcService {
     /// Register a new OAuth client. Returns (Model, plaintext_secret).
     pub async fn register_client(
         db: &DatabaseConnection,
+        user_id: IdType,
         client_id: String,
         name: String,
         redirect_uris: Vec<String>,
@@ -93,6 +94,7 @@ impl OidcService {
         let am = oauth_client::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
             client_id: Set(client_id),
+            user_id: Set(user_id),
             name: Set(name),
             redirect_uris: Set(redirect_uris.join(",")),
             allowed_scopes: Set(allowed_scopes.join(",")),
@@ -110,12 +112,19 @@ impl OidcService {
 // Client queries & secret regeneration
 // ---------------------------------------------------------------------------
 impl OidcService {
-    pub async fn list_clients(db: &DatabaseConnection) -> Result<Vec<oauth_client::Model>> {
-        Ok(oauth_client::Entity::list_all(db).await?)
+    pub async fn list_clients_by_user(
+        db: &DatabaseConnection,
+        user_id: IdType,
+    ) -> Result<Vec<oauth_client::Model>> {
+        Ok(oauth_client::Entity::list_by_user(db, user_id).await?)
     }
 
-    pub async fn get_client_by_id(db: &DatabaseConnection, id: i32) -> Result<oauth_client::Model> {
-        oauth_client::Entity::get_by_id(db, id)
+    pub async fn get_client_by_id_for_owner(
+        db: &DatabaseConnection,
+        id: i32,
+        user_id: IdType,
+    ) -> Result<oauth_client::Model> {
+        oauth_client::Entity::get_by_id_and_owner(db, id, user_id)
             .await?
             .ok_or(AppError::NotFound("client not found".to_string()))
     }
@@ -124,8 +133,9 @@ impl OidcService {
     pub async fn regenerate_client_secret(
         db: &DatabaseConnection,
         id: i32,
+        user_id: IdType,
     ) -> Result<(oauth_client::Model, String)> {
-        let client = Self::get_client_by_id(db, id).await?;
+        let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
 
         let mut buf = [0u8; 32];
         OsRng.fill_bytes(&mut buf);
@@ -144,12 +154,13 @@ impl OidcService {
     pub async fn update_client(
         db: &DatabaseConnection,
         id: i32,
+        user_id: IdType,
         name: Option<String>,
         redirect_uris: Option<Vec<String>>,
         allowed_scopes: Option<Vec<String>>,
         grant_types: Option<Vec<String>>,
     ) -> Result<oauth_client::Model> {
-        let client = Self::get_client_by_id(db, id).await?;
+        let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
         let mut am: oauth_client::ActiveModel = client.into();
         if let Some(v) = name {
             am.name = Set(v);
@@ -168,9 +179,9 @@ impl OidcService {
         Ok(updated)
     }
 
-    /// Delete an OAuth client by id.
-    pub async fn delete_client(db: &DatabaseConnection, id: i32) -> Result<()> {
-        let client = Self::get_client_by_id(db, id).await?;
+    /// Delete an OAuth client by id (owner only).
+    pub async fn delete_client(db: &DatabaseConnection, id: i32, user_id: IdType) -> Result<()> {
+        let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
         let am: oauth_client::ActiveModel = client.into();
         am.delete(db).await?;
         Ok(())

@@ -89,9 +89,9 @@ async function handleLogin() {
             </svg>
           </div>
         </div>
-        <h1 class="text-2xl font-bold text-center">Sign in to authorize</h1>
+        <h1 class="text-2xl font-bold text-center">登录以授权</h1>
         <p class="text-white text-opacity-80 text-center mt-1">
-          Sign in to continue to the application
+          登录以继续访问应用
         </p>
       </div>
 
@@ -100,7 +100,7 @@ async function handleLogin() {
           <!-- Username -->
           <div class="mb-6">
             <label for="username" class="block mb-2 text-sm font-medium text-foreground">
-              Username
+              用户名
             </label>
             <div class="relative">
               <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -122,7 +122,7 @@ async function handleLogin() {
           <!-- Password -->
           <div class="mb-6">
             <label for="password" class="block mb-2 text-sm font-medium text-foreground">
-              Password
+              密码
             </label>
             <div class="relative">
               <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -148,7 +148,7 @@ async function handleLogin() {
             :disabled="loading"
           >
             <span v-if="loading" class="mr-2 h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            Sign in
+            登录
           </UiButton>
         </form>
       </div>

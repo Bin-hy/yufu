@@ -53,14 +53,14 @@ onMounted(loadClients)
     <!-- 页面头部 -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <div>
-        <h2 class="text-2xl font-bold text-foreground">OAuth Apps</h2>
+        <h2 class="text-2xl font-bold text-foreground">OAuth 应用</h2>
         <p class="text-sm text-muted-foreground mt-1">管理已注册的 OAuth 应用，供第三方接入使用</p>
       </div>
       <UiButton @click="router.push({ name: 'oauth-create' })">
         <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
         </svg>
-        Register a new OAuth App
+        注册新应用
       </UiButton>
     </div>
 
@@ -109,7 +109,7 @@ onMounted(loadClients)
         </svg>
         <h3 class="text-lg font-medium text-foreground mb-2">还没有 OAuth 应用</h3>
         <p class="text-muted-foreground mb-4">注册一个 OAuth 应用以允许第三方接入</p>
-        <UiButton @click="router.push({ name: 'oauth-create' })">Register a new OAuth App</UiButton>
+        <UiButton @click="router.push({ name: 'oauth-create' })">注册新应用</UiButton>
       </div>
     </div>
 

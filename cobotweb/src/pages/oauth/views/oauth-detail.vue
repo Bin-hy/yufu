@@ -138,12 +138,12 @@ onMounted(async () => {
         <div class="flex-1">
           <h4 class="text-sm font-semibold text-yellow-800">Client secret</h4>
           <p class="text-sm text-yellow-700 mt-1 mb-3">
-            Make sure to copy your client secret now. You won't be able to see it again.
+            请立即复制 Client Secret，此后将无法再次查看。
           </p>
           <div class="flex gap-2">
             <code class="flex-1 px-3 py-2 bg-white border border-yellow-200 rounded text-sm font-mono break-all">{{ currentSecret }}</code>
             <UiButton size="sm" @click="copySecret">
-              {{ secretCopied ? 'Copied!' : 'Copy' }}
+              {{ secretCopied ? '已复制' : '复制' }}
             </UiButton>
           </div>
         </div>
@@ -153,7 +153,7 @@ onMounted(async () => {
     <!-- Client credentials -->
     <div class="bg-card rounded-lg border border-border shadow-sm">
       <div class="px-6 py-4 border-b border-border">
-        <h3 class="text-base font-semibold text-foreground">Client credentials</h3>
+        <h3 class="text-base font-semibold text-foreground">客户端凭据</h3>
       </div>
       <div class="px-6 py-4 space-y-4">
         <!-- Client ID -->
@@ -161,18 +161,18 @@ onMounted(async () => {
           <label class="block text-sm font-medium text-muted-foreground mb-1">Client ID</label>
           <div class="flex items-center gap-2">
             <code class="flex-1 px-3 py-2 bg-muted rounded text-sm font-mono">{{ client.client_id }}</code>
-            <UiButton size="sm" variant="outline" @click="copyClientId">Copy</UiButton>
+            <UiButton size="sm" variant="outline" @click="copyClientId">复制</UiButton>
           </div>
         </div>
 
         <!-- Client Secret actions -->
         <div>
-          <label class="block text-sm font-medium text-muted-foreground mb-1">Client secrets</label>
+          <label class="block text-sm font-medium text-muted-foreground mb-1">Client Secret</label>
           <p class="text-xs text-muted-foreground mb-2">
-            You need a client secret to authenticate as the application.
+            需要 Client Secret 才能以应用身份进行认证。
           </p>
           <UiButton variant="outline" @click="confirmRegenerate = true">
-            Generate a new client secret
+            重新生成 Client Secret
           </UiButton>
         </div>
       </div>
@@ -181,20 +181,20 @@ onMounted(async () => {
     <!-- Application settings -->
     <div class="bg-card rounded-lg border border-border shadow-sm">
       <div class="px-6 py-4 border-b border-border">
-        <h3 class="text-base font-semibold text-foreground">Application settings</h3>
+        <h3 class="text-base font-semibold text-foreground">应用设置</h3>
       </div>
       <div class="px-6 py-4 space-y-4">
         <div>
-          <label class="block text-sm font-semibold text-foreground mb-1">Application name</label>
+          <label class="block text-sm font-semibold text-foreground mb-1">应用名称</label>
           <UiInput v-model="editForm.name" class="w-full" />
         </div>
         <div>
-          <label class="block text-sm font-semibold text-foreground mb-1">Authorization callback URL</label>
+          <label class="block text-sm font-semibold text-foreground mb-1">授权回调地址</label>
           <UiInput v-model="editForm.redirect_uris" class="w-full" />
           <p class="text-xs text-muted-foreground mt-1">多个地址用逗号分隔</p>
         </div>
         <div class="flex items-center gap-2">
-          <label class="text-sm font-medium text-muted-foreground">Allowed scopes:</label>
+          <label class="text-sm font-medium text-muted-foreground">允许的权限范围：</label>
           <div class="flex flex-wrap gap-1">
             <span
               v-for="s in (client.allowed_scopes || '').split(',').filter(Boolean)"
@@ -206,7 +206,7 @@ onMounted(async () => {
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <label class="text-sm font-medium text-muted-foreground">Grant types:</label>
+          <label class="text-sm font-medium text-muted-foreground">授权类型：</label>
           <div class="flex flex-wrap gap-1">
             <span
               v-for="g in (client.grant_types || '').split(',').filter(Boolean)"
@@ -221,7 +221,7 @@ onMounted(async () => {
         <div class="pt-2">
           <UiButton :disabled="saving" @click="handleSave">
             <span v-if="saving" class="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"></span>
-            Update application
+            保存更改
           </UiButton>
         </div>
       </div>
