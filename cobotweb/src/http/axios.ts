@@ -10,13 +10,8 @@ import { refreshTokenRequest } from "@/pages/login/api"
 function logout() {
   const userStore = useUserStore()
   userStore.logout()
-  const currentRoute = router.currentRoute.value
-  // OIDC 登录页退出时保留 query 参数（避免 client_id 等 OIDC 参数丢失）
-  if (currentRoute.name === 'oidc-login') {
-    router.push({ name: 'oidc-login', query: currentRoute.query })
-  } else {
-    router.push('/login')
-  }
+  // 跳转到登录页面
+  router.push('/login')
 }
 
 /** 创建请求实例 */
@@ -48,10 +43,6 @@ function createInstance() {
 
       if (status === 401) {
         const reqUrl = String(get(error, "config.url") || "")
-        // 登录接口失败直接 reject，不走 refresh 逻辑
-        if (/login$/i.test(reqUrl)) {
-          return Promise.reject(error)
-        }
         // 避免刷新接口自身循环
         if (/refresh$/i.test(reqUrl)) {
           emitToast({ type: 'error', message: "登录已过期，请重新登录" })

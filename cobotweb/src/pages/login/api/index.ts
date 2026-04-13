@@ -2,17 +2,12 @@ import { request } from "@/http/axios"
 import type * as Auth from "./type"
 
 /** 登录并返回 Token */
-export async function loginApi(data: Auth.LoginRequestData): Promise<Auth.LoginResponseData> {
-  try {
-    return await request<Auth.LoginResponseData>({
-      url: "login",
-      method: "post",
-      data
-    })
-  } catch (e: any) {
-    // 登录接口失败时转换为可读的中文错误，避免 axios 拦截器显示英文原始消息
-    throw new Error(e?.response?.data || '用户名或密码错误')
-  }
+export function loginApi(data: Auth.LoginRequestData) {
+  return request<Auth.LoginResponseData>({
+    url: "login", // auth_old/login
+    method: "post",
+    data
+  })
 }
 
 export function registerApi(data: Auth.RegisterRequestData){

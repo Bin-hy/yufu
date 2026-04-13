@@ -22,64 +22,29 @@ const sizeClass = computed(() => {
 
 <template>
   <Teleport to="body">
-    <transition
-      enter-active-class="transition-all duration-200 ease-out"
-      leave-active-class="transition-all duration-150 ease-in"
-      enter-from-class="opacity-0"
-      leave-to-class="opacity-0"
-    >
+    <transition name="fade">
       <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <!-- 背景遮罩 -->
-        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="onCancel" />
-
-        <!-- 弹窗主体 -->
-        <transition
-          enter-active-class="transition-all duration-200 ease-out"
-          leave-active-class="transition-all duration-150 ease-in"
-          enter-from-class="opacity-0 scale-95 translate-y-2"
-          leave-to-class="opacity-0 scale-95 translate-y-2"
-        >
-          <div
-            v-if="visible"
-            class="relative z-10 w-full rounded-2xl border border-border bg-card text-card-foreground shadow-2xl"
-            :class="sizeClass"
-          >
-            <!-- 标题栏 -->
-            <div class="flex items-center justify-between px-6 pt-6 pb-4">
-              <h3 class="text-base font-semibold text-foreground">{{ props.title }}</h3>
-              <button
-                class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                @click="onCancel"
-              >
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <!-- 内容区 -->
-            <div class="px-6 pb-6" :class="props.contentScrollable ? 'max-h-[60vh] overflow-y-auto' : ''">
-              <slot />
-            </div>
-
-            <!-- 底部按钮 -->
-            <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/40 rounded-b-2xl">
-              <button
-                class="inline-flex h-9 items-center justify-center rounded-xl border border-input bg-background px-4 text-sm font-medium text-foreground hover:bg-accent transition-colors"
-                @click="onCancel"
-              >
-                取消
-              </button>
-              <button
-                class="inline-flex h-9 items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                @click="onConfirm"
-              >
-                确认
-              </button>
-            </div>
+        <div class="absolute inset-0 bg-black/40" @click="onCancel" />
+        <div class="relative z-10 w-full" :class="['rounded-lg border border-border bg-card text-card-foreground shadow-lg', sizeClass]">
+          <div class="px-4 py-3 border-b border-border">
+            <h3 class="text-base font-semibold">{{ props.title }}</h3>
           </div>
-        </transition>
+          <div class="px-4 py-3" :class="props.contentScrollable ? 'max-h-[70vh] overflow-y-auto' : ''">
+            <slot />
+          </div>
+          <div class="px-4 py-3 border-t border-border flex justify-end gap-2">
+            <button class="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm hover:bg-accent hover:text-accent-foreground" @click="onCancel">取消</button>
+            <button class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm text-primary-foreground hover:bg-primary/90" @click="onConfirm">确认</button>
+          </div>
+        </div>
       </div>
     </transition>
   </Teleport>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active { transition: opacity 0.2s; }
+.fade-enter-from,
+.fade-leave-to { opacity: 0; }
+</style>
