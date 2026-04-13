@@ -170,8 +170,9 @@ pub async fn patch_user_basic_data(
 ) -> Result<Json<UserVO>> {
     // 如果包含新密码，先做 bcrypt 哈希再存库
     if let Some(ref plain) = payload.password {
-        let hashed = bcrypt::hash(plain, bcrypt::DEFAULT_COST)
-            .map_err(|e| AppError::InternalServerError(anyhow::anyhow!("Password hash failed: {}", e)))?;
+        let hashed = bcrypt::hash(plain, bcrypt::DEFAULT_COST).map_err(|e| {
+            AppError::InternalServerError(anyhow::anyhow!("Password hash failed: {}", e))
+        })?;
         payload.password = Some(hashed);
     }
     let db = &state.database.connection;
