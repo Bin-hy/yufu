@@ -1,14 +1,15 @@
+use std::path::Path;
 use std::thread;
 
+use anyhow::Result;
 use clap::Parser;
+use tokio::net::TcpListener;
 use tracing::{debug, info, warn};
+
+use net4mqtt::broker;
 
 mod log;
 mod utils;
-
-use tokio::net::TcpListener;
-
-use net4mqtt::broker;
 
 const NAME: &str = "cobotsrv";
 const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
@@ -17,8 +18,8 @@ const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
 #[command(name = "cobotnil", version)]
 struct Args {
     /// Set config file path
-    #[arg(short, long)]
-    config: Option<String>,
+    #[arg(short, long, default_value_t = format!("cobotnil"))]
+    config: String,
 }
 
 pub fn parse(name: &str) -> (&str, &str, &str) {
@@ -30,12 +31,17 @@ pub fn parse(name: &str) -> (&str, &str, &str) {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let args = Args::parse();
-    let mut cfg: cobotsrv::config::Config = utils::load(
-        NAME.to_string(),
-        args.config.clone().map(|s| format!("{s}/{NAME}.toml")),
-    );
+    let config_path = format!("{}/{NAME}.toml", args.config);
+    let path = Path::new(&config_path);
+
+    let mut cfg: cobotsrv::config::Config = if path.try_exists()? {
+        toml::from_str(std::fs::read_to_string(path)?.as_str())?
+    } else {
+        eprintln!("=== No any config file, use default config ===");
+        Default::default()
+    };
 
     log::set(format!(
         "cobotrix={},cobotnil={},cobotsrv={},cobotlet={},http_log={}",
@@ -44,11 +50,11 @@ async fn main() {
 
     debug!("config : {:?}", cfg);
 
-    let broker_addr = MQTT_BROKER_ADDR.parse().unwrap();
+    let broker_addr = MQTT_BROKER_ADDR.parse()?;
     thread::spawn(move || broker::up_mqtt_broker(broker_addr));
     broker::wait_for_port_availabilty(broker_addr).await;
 
-    let mut dir_entries = tokio::fs::read_dir(args.config.unwrap()).await.unwrap();
+    let mut dir_entries = tokio::fs::read_dir(args.config).await.unwrap();
     let mut results = Vec::new();
     while let Some(entry) = dir_entries.next_entry().await.unwrap() {
         warn!("Entry: {:?}", entry.path());
@@ -59,11 +65,9 @@ async fn main() {
         }
         let alias = alias.to_string();
 
-        let cfg: cobotlet::config::Config = utils::load(
-            "cobotlet".to_string(),
-            entry.path().to_str().map(|s| s.to_string()),
-        );
-        //cfg.validate().unwrap();
+        let cfg: cobotlet::config::Config =
+            toml::from_str(std::fs::read_to_string(entry.path())?.as_str())?;
+
         debug!("config : {:?}", cfg);
         let listener = TcpListener::bind(&cfg.http.listen).await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -86,5 +90,7 @@ async fn main() {
     let listener = TcpListener::bind(cfg.http.listen).await.unwrap();
 
     cobotsrv::serve(cfg, listener, utils::shutdown_signal()).await;
-    info!("Server shutdown");
+    info!("Server graceful shutdown completed");
+
+    Ok(())
 }

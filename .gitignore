@@ -68,3 +68,8 @@ node_modules
 **/dist-ssr
 **/*.local
 
+# Configuration
+cobotsrv.toml
+cobotlet.toml
+cobotnil
+
