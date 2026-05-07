@@ -12,68 +12,8 @@ pub struct Config {
     pub oidc: Oidc,
     #[serde(default)]
     pub log: Log,
-
-    #[cfg(feature = "net4mqtt")]
-    #[serde(default)]
-    pub net4mqtt: Option<Net4mqtt>,
-
-    #[serde(default)]
-    pub nodes: Vec<Node>,
-    // database config
     #[serde(default)]
     pub database: Database,
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Node {
-    #[serde(default)]
-    pub alias: String,
-    #[serde(default)]
-    pub token: String,
-    #[serde(default)]
-    pub url: String,
-}
-
-#[cfg(feature = "net4mqtt")]
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Net4mqtt {
-    #[serde(default)]
-    pub mqtt_url: String,
-    #[serde(default)]
-    pub alias: String,
-    #[serde(default = "default_net4mqtt_listen")]
-    pub listen: SocketAddr,
-    #[serde(default = "default_net4mqtt_domain")]
-    pub domain: String,
-}
-
-#[cfg(feature = "net4mqtt")]
-impl Net4mqtt {
-    pub fn validate(&mut self) {
-        self.mqtt_url = self.mqtt_url.replace("{alias}", &self.alias)
-    }
-}
-
-#[cfg(feature = "net4mqtt")]
-impl Default for Net4mqtt {
-    fn default() -> Self {
-        Self {
-            mqtt_url: String::new(),
-            alias: String::new(),
-            listen: default_net4mqtt_listen(),
-            domain: default_net4mqtt_domain(),
-        }
-    }
-}
-
-#[cfg(feature = "net4mqtt")]
-fn default_net4mqtt_listen() -> SocketAddr {
-    SocketAddr::from_str("0.0.0.0:1077").expect("invalid listen socks address")
-}
-
-#[cfg(feature = "net4mqtt")]
-fn default_net4mqtt_domain() -> String {
-    String::from("net4mqtt.local")
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -84,6 +24,13 @@ pub struct Http {
     pub public: String,
     #[serde(default = "default_api_prefix")]
     pub api_prefix: String,
+    /// Backend URL for cobotrix management center (auth proxy target).
+    #[serde(default = "default_cobotrix_url")]
+    pub cobotrix_url: String,
+}
+
+fn default_cobotrix_url() -> String {
+    "http://127.0.0.1:4001".to_string()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -173,6 +120,7 @@ impl Default for Http {
             listen: default_http_listen(),
             public: Default::default(),
             api_prefix: default_api_prefix(),
+            cobotrix_url: default_cobotrix_url(),
         }
     }
 }

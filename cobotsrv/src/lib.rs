@@ -3,11 +3,10 @@ use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderValue, Method, StatusCode, Uri};
-use reqwest::Client;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
+use std::future::Future;
 use std::sync::Arc;
-use std::{future::Future, time::Duration};
 use tokio::net::TcpListener;
 
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -20,7 +19,6 @@ use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
 use crate::service::database::DatabaseService;
-use crate::store::{Node, NodeKind, Storage};
 use auth::claims::Claims;
 use auth::token_manager::IdTokenSigner;
 use auth::{AuthState, access_middleware_with_callback};
@@ -40,7 +38,6 @@ mod result;
 pub mod route;
 mod seed;
 pub mod service;
-mod store;
 mod swagger_docs;
 
 pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
@@ -48,43 +45,6 @@ where
     F: Future<Output = ()> + Send + 'static,
 {
     info!("Server listening on {}", listener.local_addr().unwrap());
-    let client_req = Client::builder();
-    let client_mem = Client::builder()
-        .connect_timeout(Duration::from_millis(500))
-        .timeout(Duration::from_millis(1000));
-
-    #[cfg(feature = "net4mqtt")]
-    let (client_req, client_mem) = if let Some(proxy) = match cfg.net4mqtt.clone() {
-        Some(c) => {
-            // References: https://github.com/seanmonstar/reqwest/issues/899
-            let target = reqwest::Url::parse(&format!("socks5h://{}", c.listen)).unwrap();
-            Some(reqwest::Proxy::custom(move |url| match url.host_str() {
-                Some(host) => {
-                    if host.ends_with(c.domain.as_str()) {
-                        Some(target.clone())
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            }))
-        }
-        None => None,
-    } {
-        info!("net4mqtt proxy: {:?}", proxy);
-        (client_req.proxy(proxy.clone()), client_mem.proxy(proxy))
-    } else {
-        (client_req, client_mem)
-    };
-
-    let store = Storage::new(client_mem.build().unwrap());
-    let nodes = store.get_map_nodes_mut();
-    for v in cfg.nodes.clone() {
-        nodes
-            .write()
-            .unwrap()
-            .insert(v.alias, Node::new(v.token, NodeKind::Static, v.url));
-    }
 
     // Initialize database connection
     let database_service = DatabaseService::new(&cfg.database)
@@ -93,75 +53,6 @@ where
     migration::Migrator::up(&database_service.connection, None)
         .await
         .unwrap();
-    #[cfg(feature = "net4mqtt")]
-    {
-        if let Some(mut c) = cfg.net4mqtt.clone() {
-            c.validate();
-            let (sender, mut receiver) =
-                tokio::sync::mpsc::channel::<(String, String, Vec<u8>)>(10);
-
-            let domain = c.domain.clone();
-
-            std::thread::spawn(move || {
-                tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(async move {
-                        loop {
-                            let listener = TcpListener::bind(c.listen).await.unwrap();
-                            match net4mqtt::proxy::local_socks(
-                                &c.mqtt_url,
-                                listener,
-                                ("-", &c.alias.clone()),
-                                Some(c.domain.clone()),
-                                Some(net4mqtt::proxy::VDataConfig {
-                                    receiver: Some(sender.clone()),
-                                    ..Default::default()
-                                }),
-                                false,
-                            )
-                            .await
-                            {
-                                Ok(_) => tracing::warn!(
-                                    "net4mqtt service is end, restart net4mqtt service"
-                                ),
-                                Err(e) => error!("mqtt4mqtt error: {:?}", e),
-                            }
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        }
-                    });
-            });
-
-            std::thread::spawn(move || {
-                let dns = net4mqtt::kxdns::Kxdns::new(domain);
-                tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(async move {
-                        loop {
-                            match receiver.recv().await {
-                                Some((agent_id, _local_id, data)) => {
-                                    if data.len() > 5 {
-                                        nodes.write().unwrap().insert(
-                                            agent_id.clone(),
-                                            Node::new(
-                                                "".to_string(),
-                                                NodeKind::Net4mqtt,
-                                                format!("http://{}", dns.registry(&agent_id)),
-                                            ),
-                                        );
-                                    } else {
-                                        nodes.write().unwrap().remove(&agent_id);
-                                    }
-                                }
-                                None => {
-                                    error!("net4mqtt discovery receiver channel closed");
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                }
-                            }
-                        }
-                    })
-            });
-        }
-    }
 
     // Middleware and AppState
     let auth_state = AuthState {
@@ -219,11 +110,11 @@ where
         }
     };
 
+    let database = Arc::new(database_service);
+
     let app_state = AppState {
         config: cfg.clone(),
-        client: client_req.build().unwrap(),
-        storage: store,
-        database: Arc::new(database_service),
+        database: database.clone(),
         auth_state: Arc::new(auth_state.clone()),
         id_token_signer: Arc::new(id_token_signer),
     };
@@ -268,11 +159,32 @@ where
     // routes don't need auth,public routes
     let sub_public_router = route::get_public_routes();
 
+    // Proxy routes: /mgmt/* → cobotrix (JWT auth, no RBAC)
+    let app_state_for_proxy = app_state.clone();
+    let proxy_router = route::proxy::route().layer(middleware::from_fn_with_state(
+        auth_state.clone(),
+        move |State(auth_state): State<AuthState>, req, next| {
+            let auth_state = auth_state.clone();
+            let app_state = app_state_for_proxy.clone();
+            async move {
+                access_middleware_with_callback(State(auth_state), req, next, move |claims, req| {
+                    let app_state = app_state.clone();
+                    async move {
+                        let req = access_callback(claims, req, app_state).await?;
+                        Ok::<Request<Body>, (StatusCode, String)>(req)
+                    }
+                })
+                .await
+            }
+        },
+    ));
+
     let api_prefix = &cfg.http.api_prefix;
     #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
     let mut app = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
+        .merge(proxy_router)
         .merge(get_no_prefix_routes())
         .layer({
             let origins: Vec<String> = app_state.clone().config.auth.origins;
@@ -388,8 +300,6 @@ async fn access_callback(
 #[derive(Clone)]
 pub struct AppState {
     config: Config,
-    client: Client,
-    storage: Storage,
     database: Arc<DatabaseService>,
     auth_state: Arc<AuthState>,
     id_token_signer: Arc<IdTokenSigner>,
