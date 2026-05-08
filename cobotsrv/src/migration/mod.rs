@@ -13,6 +13,10 @@ mod m20260331_000003_create_oauth_token;
 mod m20260331_000004_create_oauth_authorization_code;
 mod m20260401_000001_create_oauth_consent;
 mod m20260411_000001_rebuild_oauth_client_with_owner;
+mod m20260508_000001_create_application;
+mod m20260508_000002_create_permission;
+mod m20260508_000003_create_role_permission;
+mod m20260508_000004_create_user_permission;
 
 use crate::seed;
 pub struct Migrator;
@@ -33,6 +37,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20260331_000004_create_oauth_authorization_code::Migration),
             Box::new(m20260401_000001_create_oauth_consent::Migration),
             Box::new(m20260411_000001_rebuild_oauth_client_with_owner::Migration),
+            Box::new(m20260508_000001_create_application::Migration),
+            Box::new(m20260508_000002_create_permission::Migration),
+            Box::new(m20260508_000003_create_role_permission::Migration),
+            Box::new(m20260508_000004_create_user_permission::Migration),
         ];
         // Seeds run after all schema migrations
         // Note: SeaORM sorts migrations by name, so seed timestamps
