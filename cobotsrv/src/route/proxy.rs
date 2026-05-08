@@ -5,14 +5,19 @@ use axum::{
     response::Response,
     routing::any,
 };
-use http::{HeaderName, HeaderValue, StatusCode, header};
+use http::{HeaderName, HeaderValue, StatusCode};
 use tracing::warn;
 
 use crate::AppState;
 use crate::entity::user;
 
 /// Proxy management requests to cobotrix after auth.
-/// Injects X-User-Id, X-Username, X-Role-Id headers.
+///
+/// Forwards the original `Authorization` header so cobotrix can independently
+/// verify the JWT (defense in depth). Also injects `X-User-Id`, `X-Username`,
+/// `X-Role-Id` as enrichment for downstream code that doesn't want to re-decode
+/// the token; cobotrix should treat these as advisory and cross-check against
+/// the verified token's `sub` claim.
 pub fn route() -> Router<AppState> {
     Router::new().route("/mgmt/{*path}", any(proxy))
 }
@@ -41,9 +46,8 @@ async fn proxy(
     let target_path = path_query.strip_prefix("/mgmt").unwrap_or(path_query);
     let target_url = format!("{}{}", state.config.http.cobotrix_url, target_path);
 
-    // Inject trusted headers
+    // Inject trusted enrichment headers (Authorization is preserved for cobotrix to re-verify).
     let headers = req.headers_mut();
-    headers.remove(header::AUTHORIZATION);
     headers.insert(
         HeaderName::from_static("x-user-id"),
         HeaderValue::from_str(&user.id.to_string())
