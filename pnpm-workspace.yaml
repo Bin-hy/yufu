@@ -1,2 +1,3 @@
 packages:
-  - "cobotweb"
+  - "cobotweb/apps/*"
+  - "cobotweb/packages/*"

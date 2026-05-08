@@ -1,0 +1,30 @@
+{
+  "name": "@cobotweb/shared",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Shared types / HTTP factory / UI primitives across cobotweb apps.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types/pagination": "./src/types/pagination.ts",
+    "./types/device": "./src/types/device.ts",
+    "./types/task": "./src/types/task.ts",
+    "./http": "./src/http/factory.ts",
+    "./cache/cookies": "./src/cache/cookies.ts",
+    "./ui/button": "./src/ui/button.vue",
+    "./ui/input": "./src/ui/input.vue",
+    "./ui/select": "./src/ui/select.vue"
+  },
+  "dependencies": {
+    "axios": "^1.12.2",
+    "js-cookie": "^3.0.5",
+    "lodash-es": "^4.17.21"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.21"
+  },
+  "devDependencies": {
+    "@types/lodash-es": "^4.17.12",
+    "vue": "^3.5.21"
+  }
+}
