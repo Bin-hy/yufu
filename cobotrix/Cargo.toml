@@ -1,0 +1,55 @@
+[package]
+name = "cobotrix"
+description = "CoBotrix Management Center"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+net4mqtt = { workspace = true, optional = true }
+auth = { workspace = true }
+http-log = { workspace = true }
+signal = { workspace = true }
+
+axum = { workspace = true, features = ["multipart", "tracing"] }
+anyhow = { workspace = true, features = ["backtrace"] }
+clap = { workspace = true, features = ["derive"] }
+http = { workspace = true }
+http-body = { workspace = true }
+reqwest = { workspace = true, features = ["socks"] }
+serde = { workspace = true, features = ["serde_derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["trace", "cors"] }
+tracing = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true }
+rumqttc = { workspace = true }
+url = { workspace = true }
+dashmap = { workspace = true }
+
+http-body-util = "0.1.3"
+log = "0.4.28"
+
+# Database
+sea-orm = { version = "2.0.0-rc.2", features = [
+    "sqlx-postgres",
+    "runtime-tokio-rustls",
+    "macros",
+    "with-chrono",
+    "with-uuid",
+] }
+sea-orm-migration = "2.0.0-rc.2"
+mime_guess = { workspace = true, optional = true }
+rust-embed = { workspace = true, features = ["axum-ex"], optional = true }
+
+async-trait = "0.1.89"
+
+[features]
+webui = ["dep:rust-embed", "dep:mime_guess"]
+net4mqtt = ["dep:net4mqtt"]

@@ -1,0 +1,26 @@
+[http]
+listen = "127.0.0.1:4001"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5432/cobotrix_mgmt"
+max_connections = 10
+connect_timeout = 30
+
+# auth.secret defaults to env AUTH_SECRET (or hardcoded dev fallback) — same as
+# cobotsrv, so the dev cluster shares the secret automatically with no config.
+
+[mqtt]
+url = "mqtt://127.0.0.1:1883"
+client_id = "cobotrix"
+topic_prefix = "cobotrix"
+keep_alive_secs = 30
+
+[task]
+wait_timeout_ms = 5000
+result_cache_ttl_secs = 300
+
+[net4mqtt]
+alias = "cobotrix"
+mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
+listen = "127.0.0.1:1078"
+domain = "net4mqtt.local"
