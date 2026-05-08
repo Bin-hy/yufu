@@ -37,8 +37,8 @@
 | 阶段 | 范围 | 状态 | 解决 |
 |------|------|------|------|
 | 0. 止血 | cobotrix 自验 JWT（HS256 共享 secret） | ✅ 完成 | 业务接口裸奔 |
-| 1. OIDC client + RS256 | cobotrix 走 OAuth2 Authorization Code + PKCE，access_token 转 RS256，靠 JWKS 验签 | ⏳ 进行中 | 跨应用密钥隔离、SSO 体验 |
-| 2. Application + Permission（自研）| cobotsrv 加 Application 维度，扩 authority 表，提供 `/enforce` PDP | ⏳ 待启动 | 多应用权限隔离 + 集中决策 |
+| 1. OIDC client + RS256 | cobotrix 走 OAuth2 Authorization Code + PKCE，access_token 转 RS256，靠 JWKS 验签 | ✅ 完成 | 跨应用密钥隔离、SSO 体验 |
+| 2. Application + Permission（自研）| cobotsrv 加 Application 维度 + 独立 permission 表，提供 `/enforce` PDP | ⏳ 进行中 (2.A schema 已落) | 多应用权限隔离 + 集中决策 |
 | 3. 管理 UI | Application 注册 / Resource 定义 / Permission 分配三页面 | ⏳ 待启动 | 可视化运维 |
 
 ---
@@ -123,23 +123,42 @@ cobotsrv 已有 `oidc_admin` 路由可创建 client。Phase 1 用启动期 seed�
 
 **目的**：把权限模型从"全局 user × authority"扩到"per-application user × resource × action"，并提供集中的 PDP `/enforce` 给业务应用调用。
 
-### 2.1 数据模型扩展（在现有 cobotsrv 表上加列）
+### 2.1 数据模型扩展（独立 permission 表，不动 authority）
+
+设计修正：原计划是在 `authority` 表加列，落地时改为**新增独立 `permission` 表族**。理由：
+- `authority` 表的语义是"HTTP route 级 RBAC"（uri+method），是 cobotsrv 自家路由的访问控制
+- Phase 2 要的是"resource 级权限"（user × action × object），语义不同
+- 强行复用一个表会让 uri+method 必须可空，且查询语义混乱
+- 两套系统可以并存：cobotsrv 自家路由继续用 authority，跨应用 PDP 用 permission
+
+实际表结构（已落地于 [cobotsrv/src/migration/m20260508_*](../cobotsrv/src/migration/)）：
 
 ```
-applications
-  id PK, app_key UNIQUE (e.g. "cobotrix"), name, description, oidc_client_id FK→oidc_client
+application
+  id PK
+  app_key      UNIQUE   -- e.g. "cobotrix"
+  name, description
+  oidc_client_id FK→oauth_client (NULL = M2M-only / no browser identity)
+  timestamps
 
-authorities  ← 已存在，加列
-  + application_id FK→applications (NULL = 全局)
-  + resource_type  TEXT (e.g. "device", "task", NULL = action-only)
-  + resource_pattern TEXT (e.g. "device:cobotlet-0:*", NULL = any)
-  + action TEXT (e.g. "read", "write", "submit")
+permission
+  id PK
+  application_id FK→application  (required — 严格按应用隔离)
+  name           UNIQUE within app  -- e.g. "device:read", "task:submit"
+  description
+  action         TEXT     -- e.g. "read", "submit"
+  resource_type  TEXT?    -- e.g. "device", "task", NULL = action-only
+  resource_pattern TEXT?  -- glob, e.g. "cobotlet-0:*", NULL = any
+  timestamps
 
-user_authority   ← 已存在，按 application_id 隐式过滤即可
-role_authority   ← 同上
+role_permission   (role_id, permission_id) PK
+  纯 RBAC 绑定
+
+user_permission   (user_id, permission_id, allow) PK
+  ABAC 风格 explicit allow/deny override
 ```
 
-迁移策略：现有 authority 全部 application_id = NULL（视为全局），不破坏向后兼容。
+`init_oidc_bootstrap_clients` 自动 upsert：每注册一个 OIDC client，同时建一个 `app_key = client_id` 的 application 行（即使 oauth_client 已存在也补建，方便升级）。
 
 ### 2.2 access_token 携带 roles + permissions（粗粒度）
 

@@ -388,11 +388,13 @@ impl AppState {
         Ok(())
     }
 
-    /// Auto-register OIDC clients listed in `[[oidc.bootstrap_clients]]`.
-    /// Idempotent: clients matched by `client_id` are left untouched (secrets
-    /// never overwritten). New ones are inserted with the super-admin as owner.
+    /// Auto-register OIDC clients listed in `[[oidc.bootstrap_clients]]`,
+    /// and pair each one with an `Application` row so it shows up in the
+    /// permission system. Idempotent: existing rows are left untouched
+    /// (secrets are NEVER overwritten), but a missing `Application` link is
+    /// always backfilled so old DBs upgrade cleanly.
     async fn init_oidc_bootstrap_clients(&self) -> result::Result<()> {
-        use crate::entity::oauth_client;
+        use crate::entity::{application, oauth_client};
         use rand::RngCore;
         use rand::rngs::OsRng;
         use sea_orm::Set;
@@ -416,55 +418,85 @@ impl AppState {
             })?;
 
         for entry in bootstrap {
-            if oauth_client::Entity::get_by_client_id(db, &entry.client_id)
+            // ── 1. OIDC client ──
+            let oidc_client_id = match oauth_client::Entity::get_by_client_id(db, &entry.client_id)
                 .await?
-                .is_some()
             {
-                info!(client_id = %entry.client_id, "OIDC bootstrap client already exists, skipping");
-                continue;
-            }
-
-            // Use configured secret if present; otherwise generate one and log it ONCE.
-            let (secret, generated) = match &entry.client_secret {
-                Some(s) => (s.clone(), false),
+                Some(existing) => {
+                    info!(client_id = %entry.client_id, "OIDC bootstrap client already exists");
+                    existing.id
+                }
                 None => {
-                    let mut buf = [0u8; 32];
-                    OsRng.fill_bytes(&mut buf);
-                    (hex::encode(buf), true)
+                    let (secret, generated) = match &entry.client_secret {
+                        Some(s) => (s.clone(), false),
+                        None => {
+                            let mut buf = [0u8; 32];
+                            OsRng.fill_bytes(&mut buf);
+                            (hex::encode(buf), true)
+                        }
+                    };
+                    let secret_hash = bcrypt::hash(&secret, bcrypt::DEFAULT_COST).map_err(|e| {
+                        crate::error::AppError::InternalServerError(anyhow::anyhow!(
+                            "bcrypt hash failed for bootstrap client {}: {e}",
+                            entry.client_id
+                        ))
+                    })?;
+
+                    let now = chrono::Utc::now().naive_utc();
+                    let inserted = oauth_client::ActiveModel {
+                        id: ActiveValue::NotSet,
+                        client_id: Set(entry.client_id.clone()),
+                        user_id: Set(sadmin.id),
+                        name: Set(entry.name.clone()),
+                        redirect_uris: Set(entry.redirect_uris.join(",")),
+                        allowed_scopes: Set(entry.allowed_scopes.join(",")),
+                        client_secret_hash: Set(secret_hash),
+                        grant_types: Set(entry.grant_types.join(",")),
+                        create_time: Set(now),
+                        update_time: Set(now),
+                    }
+                    .insert(db)
+                    .await?;
+
+                    if generated {
+                        tracing::warn!(
+                            client_id = %entry.client_id,
+                            client_secret = %secret,
+                            "OIDC bootstrap client registered with AUTO-GENERATED secret — \
+                             copy this value to your client config NOW; it won't be shown again",
+                        );
+                    } else {
+                        info!(client_id = %entry.client_id, "OIDC bootstrap client registered (using configured secret)");
+                    }
+                    inserted.id
                 }
             };
-            let secret_hash = bcrypt::hash(&secret, bcrypt::DEFAULT_COST).map_err(|e| {
-                crate::error::AppError::InternalServerError(anyhow::anyhow!(
-                    "bcrypt hash failed for bootstrap client {}: {e}",
-                    entry.client_id
-                ))
-            })?;
 
-            let now = chrono::Utc::now().naive_utc();
-            oauth_client::ActiveModel {
-                id: ActiveValue::NotSet,
-                client_id: Set(entry.client_id.clone()),
-                user_id: Set(sadmin.id),
-                name: Set(entry.name.clone()),
-                redirect_uris: Set(entry.redirect_uris.join(",")),
-                allowed_scopes: Set(entry.allowed_scopes.join(",")),
-                client_secret_hash: Set(secret_hash),
-                grant_types: Set(entry.grant_types.join(",")),
-                create_time: Set(now),
-                update_time: Set(now),
-            }
-            .insert(db)
-            .await?;
-
-            if generated {
-                tracing::warn!(
-                    client_id = %entry.client_id,
-                    client_secret = %secret,
-                    "OIDC bootstrap client registered with AUTO-GENERATED secret — \
-                     copy this value to your client config NOW; it won't be shown again",
+            // ── 2. Application row (paired by app_key = client_id) ──
+            //
+            // Backfilled even when the oauth_client already existed, so users
+            // upgrading from before Phase 2.A get the Application implicitly.
+            if application::Entity::get_by_app_key(db, &entry.client_id)
+                .await?
+                .is_none()
+            {
+                let now = chrono::Utc::now().naive_utc();
+                application::ActiveModel {
+                    id: ActiveValue::NotSet,
+                    app_key: Set(entry.client_id.clone()),
+                    name: Set(entry.name.clone()),
+                    description: Set(None),
+                    oidc_client_id: Set(Some(oidc_client_id)),
+                    create_time: Set(now),
+                    update_time: Set(now),
+                }
+                .insert(db)
+                .await?;
+                info!(
+                    app_key = %entry.client_id,
+                    oidc_client_id,
+                    "Application registered for bootstrap OIDC client"
                 );
-            } else {
-                info!(client_id = %entry.client_id, "OIDC bootstrap client registered (using configured secret)");
             }
         }
 
