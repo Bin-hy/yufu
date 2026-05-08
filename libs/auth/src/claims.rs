@@ -52,6 +52,34 @@ where
     }
 }
 
+/// Standard JWT access token claims (RFC 7519).
+///
+/// Used for RS256-signed access tokens that cross service boundaries.
+/// Verified by holders of the IdP's public key (via JWKS) without any
+/// shared secret. `sub` is a string per OIDC; parse to your local ID type
+/// (e.g. `claims.sub.parse::<i32>()`) when needed.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct AccessTokenClaims {
+    pub iss: String,
+    pub sub: String,
+    pub aud: String,
+    pub iat: u64,
+    pub exp: u64,
+    pub jti: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub scope: String,
+}
+
+impl Display for AccessTokenClaims {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "iss={} sub={} aud={} jti={} exp={}",
+            self.iss, self.sub, self.aud, self.jti, self.exp
+        )
+    }
+}
+
 /// OIDC ID Token claims (RFC 7519 + OpenID Connect Core 1.0)
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct IdTokenClaims<IDTYPE>

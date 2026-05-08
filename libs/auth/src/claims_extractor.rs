@@ -1,4 +1,4 @@
-use crate::claims::Claims;
+use crate::claims::{AccessTokenClaims, Claims};
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use http::StatusCode;
@@ -53,6 +53,21 @@ where
         parts
             .extensions
             .get::<Claims<IDTYPE>>()
+            .cloned()
+            .ok_or((StatusCode::UNAUTHORIZED, "Missing or invalid token claims"))
+    }
+}
+
+impl<S> FromRequestParts<S> for AccessTokenClaims
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<AccessTokenClaims>()
             .cloned()
             .ok_or((StatusCode::UNAUTHORIZED, "Missing or invalid token claims"))
     }

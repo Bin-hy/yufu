@@ -67,10 +67,13 @@
 //! ```
 pub mod claims;
 mod claims_extractor;
+pub mod jwks;
 pub mod token_manager;
 
+use crate::jwks::JwksClient;
 use crate::token_manager::{TokenError, TokenManager};
 use axum::extract::State;
+use std::sync::Arc;
 
 use crate::claims::Claims;
 use axum::body::Body;
@@ -380,6 +383,54 @@ where
             next.run(request).await
         }
 
+        Err(TokenError::Expired) => {
+            (StatusCode::UNAUTHORIZED, "Token expired, please re-login").into_response()
+        }
+        Err(TokenError::InvalidSignature) => {
+            (StatusCode::UNAUTHORIZED, "Invalid token signature").into_response()
+        }
+        Err(TokenError::InvalidToken) => {
+            (StatusCode::UNAUTHORIZED, "Malformed token").into_response()
+        }
+        Err(e) => (
+            StatusCode::UNAUTHORIZED,
+            format!("Token validation failed: {:?}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// JWT verification middleware using a [`JwksClient`] (RS256, public-key only).
+///
+/// Use this in services that consume tokens issued by another service (e.g.
+/// cobotrix consuming cobotsrv-issued tokens). Validated [`crate::claims::AccessTokenClaims`]
+/// is inserted into request extensions so handlers can extract it.
+pub async fn access_middleware_rs256(
+    State(jwks): State<Arc<JwksClient>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let token = match request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        Some(t) => t.trim(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Missing or invalid Authorization header",
+            )
+                .into_response();
+        }
+    };
+
+    match jwks.verify(token) {
+        Ok(claims) => {
+            request.extensions_mut().insert(claims);
+            next.run(request).await
+        }
         Err(TokenError::Expired) => {
             (StatusCode::UNAUTHORIZED, "Token expired, please re-login").into_response()
         }
