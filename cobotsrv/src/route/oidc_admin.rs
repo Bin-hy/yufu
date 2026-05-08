@@ -4,10 +4,10 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::IdType;
+use crate::parse_user_id;
 use crate::result::Result;
 use crate::service::oidc::OidcService;
-use auth::claims::Claims;
+use auth::claims::AccessTokenClaims;
 
 // --- Request / Response types ---
 
@@ -88,23 +88,25 @@ pub fn get_auth_routes() -> Router<AppState> {
 // --- Client Handlers ---
 
 async fn list_clients(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ClientVO>>> {
     let db = &state.database.connection;
-    let list = OidcService::list_clients_by_user(db, claim.id).await?;
+    let user_id = parse_user_id(&claim.sub)?;
+    let list = OidcService::list_clients_by_user(db, user_id).await?;
     Ok(Json(list.into_iter().map(ClientVO::from).collect()))
 }
 
 async fn create_client(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(state): State<AppState>,
     Json(req): Json<ClientCreateReq>,
 ) -> Result<Json<ClientCreateResp>> {
     let db = &state.database.connection;
+    let user_id = parse_user_id(&claim.sub)?;
     let (inserted, client_secret) = OidcService::register_client(
         db,
-        claim.id,
+        user_id,
         uuid::Uuid::new_v4().to_string(),
         req.name,
         vec![req.redirect_uri],
@@ -126,26 +128,28 @@ async fn create_client(
 }
 
 async fn get_client(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(state): State<AppState>,
     Path(id): Path<i32>,
 ) -> Result<Json<ClientVO>> {
     let db = &state.database.connection;
-    let client = OidcService::get_client_by_id_for_owner(db, id, claim.id).await?;
+    let user_id = parse_user_id(&claim.sub)?;
+    let client = OidcService::get_client_by_id_for_owner(db, id, user_id).await?;
     Ok(Json(ClientVO::from(client)))
 }
 
 async fn update_client(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(state): State<AppState>,
     Path(id): Path<i32>,
     Json(req): Json<ClientUpdateReq>,
 ) -> Result<Json<ClientVO>> {
     let db = &state.database.connection;
+    let user_id = parse_user_id(&claim.sub)?;
     let updated = OidcService::update_client(
         db,
         id,
-        claim.id,
+        user_id,
         req.name,
         req.redirect_uris,
         req.allowed_scopes,
@@ -156,22 +160,24 @@ async fn update_client(
 }
 
 async fn delete_client(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(state): State<AppState>,
     Path(id): Path<i32>,
 ) -> Result<http::StatusCode> {
     let db = &state.database.connection;
-    OidcService::delete_client(db, id, claim.id).await?;
+    let user_id = parse_user_id(&claim.sub)?;
+    OidcService::delete_client(db, id, user_id).await?;
     Ok(http::StatusCode::NO_CONTENT)
 }
 
 async fn regenerate_secret(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(state): State<AppState>,
     Path(id): Path<i32>,
 ) -> Result<Json<SecretResp>> {
     let db = &state.database.connection;
-    let (_updated, new_secret) = OidcService::regenerate_client_secret(db, id, claim.id).await?;
+    let user_id = parse_user_id(&claim.sub)?;
+    let (_updated, new_secret) = OidcService::regenerate_client_secret(db, id, user_id).await?;
     Ok(Json(SecretResp {
         client_secret: new_secret,
     }))

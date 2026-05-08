@@ -1,4 +1,5 @@
-use auth::token_manager::TokenManager;
+use auth::token_manager::IdTokenSigner;
+use cobotsrv::config::Config;
 use cobotsrv::entity::role::RoleEnum;
 use cobotsrv::error::AppError;
 use testcontainers::core::{IntoContainerPort, WaitFor};
@@ -31,13 +32,22 @@ pub async fn get_postgres_container()
     Ok((container, db_url))
 }
 
+/// Mint a long-lived superadmin access token for tests, AND force the test
+/// server config to use HS256 (HMAC with `auth.secret`) so it accepts what we sign.
+///
+/// Production servers default to RS256 with an RSA key file, which would require
+/// generating + sharing a key per test. HMAC mode keeps tests fast and self-contained.
 #[allow(dead_code)]
-pub fn get_test_token(secret: String) -> String {
-    let token_manager = TokenManager {
-        secret,
-        expire_seconds: 60 * 60 * 24 * 365 * 100,
-    };
-    token_manager
-        .generate_token(RoleEnum::Superadmin.default_id())
+pub fn get_test_token(cfg: &mut Config) -> String {
+    cfg.oidc.signing_algorithm = "HS256".to_string();
+    let signer = IdTokenSigner::from_hmac(&cfg.auth.secret, cfg.auth.exp_seconds);
+    signer
+        .sign_access_token(
+            &RoleEnum::Superadmin.default_id().to_string(),
+            "cobotsrv-test",
+            "cobotsrv",
+            "",
+            60 * 60 * 24 * 365 * 100,
+        )
         .unwrap()
 }

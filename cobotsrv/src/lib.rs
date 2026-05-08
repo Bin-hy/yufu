@@ -19,9 +19,9 @@ use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
 use crate::service::database::DatabaseService;
-use auth::claims::Claims;
-use auth::token_manager::IdTokenSigner;
-use auth::{AuthState, access_middleware_with_callback};
+use auth::access_middleware_local_rs256;
+use auth::claims::AccessTokenClaims;
+use auth::token_manager::{IdTokenSigner, TokenManager};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
@@ -54,34 +54,29 @@ where
         .await
         .unwrap();
 
-    // Middleware and AppState
-    let auth_state = AuthState {
-        token_manager: auth::token_manager::TokenManager::new(
-            &cfg.auth.secret,
-            cfg.auth.exp_seconds,
-        ),
-        refresh_token_manager: auth::token_manager::TokenManager::new(
-            &cfg.auth.secret,
-            cfg.auth.refresh_exp_seconds,
-        ),
-    };
+    // Refresh tokens stay HS256 / opaque-internal (cobotsrv issues + verifies them itself,
+    // they never cross service boundaries). Access tokens move to RS256 via id_token_signer.
+    let refresh_token_manager = TokenManager::new(&cfg.auth.secret, cfg.auth.refresh_exp_seconds);
 
-    // Initialize IdTokenSigner: load RSA key from file or auto-generate
-    let id_token_signer = {
-        // Prefer oidc.rsa_private_key_path, fall back to auth.rsa_private_key_path
+    // Initialize IdTokenSigner. Default RS256 (load RSA from path, auto-generate if absent);
+    // tests / dev can opt into HS256 via oidc.signing_algorithm to skip the RSA dance.
+    let access_token_exp = cfg
+        .oidc
+        .access_token_expire_seconds
+        .unwrap_or(cfg.auth.exp_seconds);
+    let id_token_signer = if cfg.oidc.signing_algorithm.eq_ignore_ascii_case("HS256") {
+        info!("OIDC signer: HS256 (HMAC) — using auth.secret as key");
+        IdTokenSigner::from_hmac(&cfg.auth.secret, access_token_exp)
+    } else {
         let key_path = if !cfg.oidc.rsa_private_key_path.is_empty() {
             cfg.oidc.rsa_private_key_path.clone()
         } else {
             cfg.auth.rsa_private_key_path.clone()
         };
-        let token_exp = cfg
-            .oidc
-            .access_token_expire_seconds
-            .unwrap_or(cfg.auth.exp_seconds);
         match tokio::fs::read(&key_path).await {
             Ok(pem) => {
                 info!("Loaded RSA private key from {}", key_path);
-                IdTokenSigner::from_rsa_pem(&pem, token_exp)
+                IdTokenSigner::from_rsa_pem(&pem, access_token_exp)
                     .expect("Failed to parse RSA private key")
             }
             Err(_) => {
@@ -96,7 +91,6 @@ where
                 let pem_str = private_key
                     .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
                     .expect("Failed to encode RSA key to PEM");
-                // Save to file for persistence
                 if let Some(parent) = std::path::Path::new(&key_path).parent() {
                     let _ = tokio::fs::create_dir_all(parent).await;
                 }
@@ -104,23 +98,28 @@ where
                     .await
                     .expect("Failed to write RSA key file");
                 info!("Generated and saved RSA key to {}", key_path);
-                IdTokenSigner::from_rsa_pem(pem_str.as_bytes(), token_exp)
+                IdTokenSigner::from_rsa_pem(pem_str.as_bytes(), access_token_exp)
                     .expect("Failed to parse generated RSA key")
             }
         }
     };
 
     let database = Arc::new(database_service);
+    let id_token_signer = Arc::new(id_token_signer);
 
     let app_state = AppState {
         config: cfg.clone(),
         database: database.clone(),
-        auth_state: Arc::new(auth_state.clone()),
-        id_token_signer: Arc::new(id_token_signer),
+        refresh_token_manager: refresh_token_manager.clone(),
+        id_token_signer: id_token_signer.clone(),
     };
     let _ = app_state.init().await;
-    let app_state_for_middleware = app_state.clone();
-    // routes need auth
+
+    // Auth middleware stack (applied in reverse layer order — bottom runs first):
+    //   1. access_middleware_local_rs256 — verify Bearer JWT, inject AccessTokenClaims
+    //   2. load_user_middleware           — read claims.sub, load user::Model into ext
+    //   3. authority_check_middleware     — RBAC/ABAC check (uses user::Model)
+    //   4. recording_operation_middleware — audit log
     let sub_auth_router = route::get_auth_routes()
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
@@ -131,53 +130,27 @@ where
             authority_check_middleware_rbac_abac,
         ))
         .layer(middleware::from_fn_with_state(
-            auth_state.clone(),
-            move |State(auth_state): State<AuthState>, req, next| {
-                let auth_state = auth_state.clone();
-                let app_state = app_state_for_middleware.clone(); // Arc clone
+            app_state.clone(),
+            load_user_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            id_token_signer.clone(),
+            access_middleware_local_rs256,
+        ));
 
-                async move {
-                    access_middleware_with_callback(
-                        State(auth_state),
-                        req,
-                        next,
-                        move |claims, req| {
-                            let claims = claims.clone();
-                            let app_state = app_state.clone();
-                            async move {
-                                // 调用 access_callback 获取 Request 所有权
-                                let req = access_callback(claims, req, app_state).await?;
-                                Ok::<Request<Body>, (StatusCode, String)>(req)
-                            }
-                        },
-                    )
-                    .await
-                }
-            },
-        )); // 靠下的拦截器先执行
-
-    // routes don't need auth,public routes
+    // routes don't need auth, public routes
     let sub_public_router = route::get_public_routes();
 
-    // Proxy routes: /mgmt/* → cobotrix (JWT auth, no RBAC)
-    let app_state_for_proxy = app_state.clone();
-    let proxy_router = route::proxy::route().layer(middleware::from_fn_with_state(
-        auth_state.clone(),
-        move |State(auth_state): State<AuthState>, req, next| {
-            let auth_state = auth_state.clone();
-            let app_state = app_state_for_proxy.clone();
-            async move {
-                access_middleware_with_callback(State(auth_state), req, next, move |claims, req| {
-                    let app_state = app_state.clone();
-                    async move {
-                        let req = access_callback(claims, req, app_state).await?;
-                        Ok::<Request<Body>, (StatusCode, String)>(req)
-                    }
-                })
-                .await
-            }
-        },
-    ));
+    // Proxy routes: /mgmt/* → cobotrix (JWT auth + user load, no RBAC)
+    let proxy_router = route::proxy::route()
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            load_user_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            id_token_signer.clone(),
+            access_middleware_local_rs256,
+        ));
 
     let api_prefix = &cfg.http.api_prefix;
     #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
@@ -280,28 +253,58 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
-/// 鉴权成功后回调：将用户信息注入
-async fn access_callback(
-    claim: Claims<IdType>,
-    mut req: Request<Body>, // 拥有 Request 所有权
-    app_state: AppState,
-) -> Result<Request<Body>, (StatusCode, String)> {
-    let db = &app_state.database.connection;
+/// Middleware that loads the current user from DB based on a previously-verified
+/// [`AccessTokenClaims`] in request extensions. Run AFTER `access_middleware_local_rs256`.
+pub async fn load_user_middleware(
+    State(app_state): State<AppState>,
+    mut request: Request<Body>,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let claims = match request.extensions().get::<AccessTokenClaims>() {
+        Some(c) => c.clone(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Missing token claims (auth middleware not applied?)",
+            )
+                .into_response();
+        }
+    };
 
-    let user = user::Entity::find_by_id(claim.id)
-        .one(db)
+    let user_id = match parse_user_id(&claims.sub) {
+        Ok(id) => id,
+        Err(e) => return e.into_response(),
+    };
+
+    let user = match user::Entity::find_by_id(user_id)
+        .one(&app_state.database.connection)
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "No user id".to_string()))?
-        .ok_or((StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
-    req.extensions_mut().insert(user);
+    {
+        Ok(Some(u)) => u,
+        Ok(None) => return (StatusCode::UNAUTHORIZED, "User not found").into_response(),
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
 
-    Ok(req)
+    request.extensions_mut().insert(user);
+    next.run(request).await
 }
+
+/// Parse the JWT `sub` claim (string per OIDC spec) into our local `IdType` (i32).
+/// Returns `AppError::Unauthorized` so handlers can use `?` to bail out.
+pub fn parse_user_id(sub: &str) -> result::Result<IdType> {
+    sub.parse::<IdType>()
+        .map_err(|_| crate::error::AppError::Unauthorized(format!("invalid sub in token: {sub}")))
+}
+
 #[derive(Clone)]
 pub struct AppState {
     config: Config,
     database: Arc<DatabaseService>,
-    auth_state: Arc<AuthState>,
+    /// HS256 manager for opaque-internal refresh tokens (never crosses service boundaries).
+    refresh_token_manager: TokenManager,
+    /// RS256 signer for cross-service access tokens (also exposed via JWKS).
     id_token_signer: Arc<IdTokenSigner>,
 }
 pub type IdType = i32;
@@ -327,6 +330,55 @@ impl AppState {
             .oidc
             .refresh_token_expire_seconds
             .unwrap_or(self.config.auth.refresh_exp_seconds)
+    }
+
+    /// Issuer URL used in access/id token `iss` claim.
+    /// Priority: cfg.oidc.issuer > cfg.http.public > derived from listen address.
+    pub fn issuer(&self) -> String {
+        if !self.config.oidc.issuer.is_empty() {
+            self.config.oidc.issuer.clone()
+        } else if !self.config.http.public.is_empty() {
+            self.config.http.public.clone()
+        } else {
+            format!("http://{}", self.config.http.listen)
+        }
+    }
+
+    /// Sign an access token addressed to a given audience (`aud`).
+    /// Used by both the legacy `/api/v1/login` flow (`aud="cobotsrv"`) and the
+    /// OIDC token endpoint (`aud=client_id`).
+    pub fn sign_access_token(&self, sub: IdType, aud: &str, scope: &str) -> result::Result<String> {
+        let iss = self.issuer();
+        self.id_token_signer
+            .sign_access_token(
+                &sub.to_string(),
+                &iss,
+                aud,
+                scope,
+                self.oidc_access_token_exp(),
+            )
+            .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
+    }
+
+    /// Sign an access token for client_credentials grant (sub = client_id, no user).
+    pub fn sign_access_token_for_client(
+        &self,
+        client_id: &str,
+        aud: &str,
+        scope: &str,
+    ) -> result::Result<String> {
+        let iss = self.issuer();
+        self.id_token_signer
+            .sign_access_token(client_id, &iss, aud, scope, self.oidc_access_token_exp())
+            .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
+    }
+
+    pub fn refresh_token_manager(&self) -> &TokenManager {
+        &self.refresh_token_manager
+    }
+
+    pub fn id_token_signer(&self) -> &Arc<IdTokenSigner> {
+        &self.id_token_signer
     }
 
     // 初始化超级管理员权限

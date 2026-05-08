@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::result::Result;
 use crate::service::oidc::{CreateAuthCodeParams, OidcService, get_issuer_base};
-use crate::{AppState, IdType};
-use auth::claims::Claims;
+use crate::{AppState, IdType, parse_user_id};
+use auth::claims::AccessTokenClaims;
 use chrono::Utc;
 
 #[derive(Serialize, Clone)]
@@ -562,11 +562,12 @@ async fn introspect(
 }
 
 async fn userinfo(
-    claims: Claims<IdType>,
+    claims: AccessTokenClaims,
     State(state): State<AppState>,
 ) -> Result<Json<UserInfoResp>> {
     let db = &state.database.connection;
-    let user_vo = crate::service::user::UserService::get_user_by_id(db, claims.id).await?;
+    let user_id = parse_user_id(&claims.sub)?;
+    let user_vo = crate::service::user::UserService::get_user_by_id(db, user_id).await?;
 
     let email_domain = &state.config.oidc.email_domain;
     Ok(Json(UserInfoResp {
@@ -686,7 +687,7 @@ async fn authorize(
 
 /// GET /api/v1/oidc/authorize/client-info — returns client info for the consent page
 async fn authorize_client_info(
-    claims: Claims<IdType>,
+    claims: AccessTokenClaims,
     State(state): State<AppState>,
     axum::extract::Query(q): axum::extract::Query<ClientInfoQuery>,
 ) -> Result<Json<ClientInfoResp>> {
@@ -714,8 +715,9 @@ async fn authorize_client_info(
         })
         .collect();
 
+    let user_id = parse_user_id(&claims.sub)?;
     let already_consented =
-        if let Some(consent) = OidcService::find_consent(db, claims.id, &q.client_id).await? {
+        if let Some(consent) = OidcService::find_consent(db, user_id, &q.client_id).await? {
             OidcService::consent_covers_scopes(&consent, &scope_names)
         } else {
             false
@@ -731,7 +733,7 @@ async fn authorize_client_info(
 
 /// POST /api/v1/oidc/authorize/consent — approve or deny authorization
 async fn authorize_consent(
-    claims: Claims<IdType>,
+    claims: AccessTokenClaims,
     State(state): State<AppState>,
     Json(req): Json<ConsentRequest>,
 ) -> Result<Json<ConsentResponse>> {
@@ -779,14 +781,16 @@ async fn authorize_consent(
         ));
     }
 
+    let user_id = parse_user_id(&claims.sub)?;
+
     // Save consent
-    OidcService::save_consent(db, claims.id, &req.client_id, &scope_str).await?;
+    OidcService::save_consent(db, user_id, &req.client_id, &scope_str).await?;
 
     // Generate authorization code
     let code = OidcService::create_authorization_code(
         db,
         CreateAuthCodeParams {
-            user_id: claims.id,
+            user_id,
             client_id: req.client_id,
             redirect_uri: Some(req.redirect_uri.clone()),
             code_challenge: req.code_challenge,
@@ -812,11 +816,12 @@ async fn authorize_consent(
 
 /// GET /api/v1/oidc/authorized-apps — list user's authorized apps
 async fn list_authorized_apps(
-    claims: Claims<IdType>,
+    claims: AccessTokenClaims,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AuthorizedAppVO>>> {
     let db = &state.database.connection;
-    let consents = OidcService::list_user_consents(db, claims.id).await?;
+    let user_id = parse_user_id(&claims.sub)?;
+    let consents = OidcService::list_user_consents(db, user_id).await?;
 
     let apps: Vec<AuthorizedAppVO> = consents
         .into_iter()
@@ -837,11 +842,12 @@ async fn list_authorized_apps(
 
 /// DELETE /api/v1/oidc/authorized-apps/:consent_id — revoke user's authorization
 async fn revoke_authorized_app(
-    claims: Claims<IdType>,
+    claims: AccessTokenClaims,
     State(state): State<AppState>,
     axum::extract::Path(consent_id): axum::extract::Path<i32>,
 ) -> Result<http::StatusCode> {
+    let user_id = parse_user_id(&claims.sub)?;
     let db = &state.database.connection;
-    OidcService::revoke_consent(db, consent_id, claims.id).await?;
+    OidcService::revoke_consent(db, consent_id, user_id).await?;
     Ok(http::StatusCode::OK)
 }

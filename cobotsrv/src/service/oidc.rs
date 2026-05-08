@@ -355,12 +355,13 @@ impl OidcService {
         client: &oauth_client::Model,
     ) -> Result<(String, String, String)> {
         let base = get_issuer_base(state);
-        let access_token = state
-            .auth_state
-            .token_manager
-            .generate_token::<IdType>(entry.user_id)?;
+        let access_token = state.sign_access_token(
+            entry.user_id,
+            &client.client_id,
+            entry.scope.as_deref().unwrap_or(""),
+        )?;
 
-        let id_token = state.id_token_signer.sign_id_token::<IdType>(
+        let id_token = state.id_token_signer().sign_id_token::<IdType>(
             entry.user_id,
             &base,
             Some(&client.client_id),
@@ -402,12 +403,13 @@ impl OidcService {
         let db = &state.database.connection;
         let base = get_issuer_base(state);
 
-        let access_token = state
-            .auth_state
-            .token_manager
-            .generate_token::<IdType>(rec.user_id)?;
+        let access_token = state.sign_access_token(
+            rec.user_id,
+            &rec.client_id,
+            rec.scope.as_deref().unwrap_or(""),
+        )?;
 
-        let id_token = state.id_token_signer.sign_id_token::<IdType>(
+        let id_token = state.id_token_signer().sign_id_token::<IdType>(
             rec.user_id,
             &base,
             Some(&rec.client_id),
@@ -447,11 +449,7 @@ impl OidcService {
         state: &AppState,
         client: &oauth_client::Model,
     ) -> Result<String> {
-        let access_token = state
-            .auth_state
-            .token_manager
-            .generate_token::<String>(client.client_id.clone())?;
-        Ok(access_token)
+        state.sign_access_token_for_client(&client.client_id, &client.client_id, "")
     }
 }
 

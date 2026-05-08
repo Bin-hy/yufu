@@ -1,9 +1,9 @@
-use crate::IdType;
 use crate::entity::refresh_token;
 use crate::entity::role::{self, Entity as Role, RoleEnum, RoleVO};
 use crate::entity::user::{self, Entity as User, UserVO};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
+use crate::{AppState, IdType};
 use anyhow::anyhow;
 use auth::token_manager::TokenManager;
 use bcrypt::{DEFAULT_COST, hash, verify};
@@ -11,18 +11,20 @@ use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, Set};
 use sea_orm::{DatabaseConnection, EntityTrait};
 
+/// Audience used for tokens issued to cobotsrv's own UI / legacy login flow.
+pub const SELF_AUD: &str = "cobotsrv";
+
 #[derive(Clone)]
 pub struct UserService;
 
 impl UserService {
     // 登陆返回string token
     pub async fn auth(
-        db: &DatabaseConnection,
-        token_manager: &TokenManager,
-        refresh_manager: &TokenManager,
+        state: &AppState,
         username: &str,
         password: &str,
     ) -> Result<(String, String, UserVO)> {
+        let db = &state.database.connection;
         // 查找用户
         if let Some(exsiting_user) = User::find()
             .filter(user::Column::Username.eq(username))
@@ -36,10 +38,10 @@ impl UserService {
                     // 2.1 校验成功，分发对应权限的token
                     let jti = uuid::Uuid::new_v4().to_string();
 
-                    let access_token =
-                        token_manager.generate_token::<IdType>(exsiting_user.clone().id)?;
-                    let refresh_token = refresh_manager
-                        .generate_refresh_token::<IdType>(jti.clone(), exsiting_user.clone().id)?;
+                    let access_token = state.sign_access_token(exsiting_user.id, SELF_AUD, "")?;
+                    let refresh_token = state
+                        .refresh_token_manager()
+                        .generate_refresh_token::<IdType>(jti.clone(), exsiting_user.id)?;
 
                     // 2.1.2 插入到 refresh_token 中 用户SSO 单点登陆
                     refresh_token::Entity::upsert_refresh_token(db, jti, exsiting_user.id).await?;
@@ -62,16 +64,13 @@ impl UserService {
     }
 
     pub async fn register(
-        db: &DatabaseConnection,
-        token_manager: &TokenManager,
-        refresh_manager: &TokenManager,
+        state: &AppState,
         username: &str,
         password: &str,
         nickname: &str,
     ) -> Result<(String, String)> {
         let (user_db, access_token): (UserVO, String) = UserService::add_user_with_role(
-            db,
-            token_manager,
+            state,
             username,
             password,
             nickname,
@@ -81,21 +80,23 @@ impl UserService {
 
         // 签发 refresh_token
         let jti = uuid::Uuid::new_v4().to_string();
-        let refresh_token =
-            refresh_manager.generate_refresh_token::<IdType>(jti.clone(), user_db.id)?;
-        refresh_token::Entity::upsert_refresh_token(db, jti, user_db.id).await?;
+        let refresh_token = state
+            .refresh_token_manager()
+            .generate_refresh_token::<IdType>(jti.clone(), user_db.id)?;
+        refresh_token::Entity::upsert_refresh_token(&state.database.connection, jti, user_db.id)
+            .await?;
 
         Ok((access_token, refresh_token))
     }
 
     pub async fn add_user_with_role(
-        db: &DatabaseConnection,
-        token_manager: &TokenManager,
+        state: &AppState,
         username: &str,
         password: &str,
         nickname: &str,
         role_id: IdType,
     ) -> Result<(UserVO, String)> {
+        let db = &state.database.connection;
         // 1. 检查role是否存在
         let role = role::Entity::find_by_id(role_id)
             .one(db)
@@ -125,7 +126,7 @@ impl UserService {
 
         let mut user_vo = UserVO::from(inserted);
         user_vo.set_role(role::RoleVO::from(role));
-        let access_token = token_manager.generate_token::<IdType>(user_vo.clone().id)?;
+        let access_token = state.sign_access_token(user_vo.id, SELF_AUD, "")?;
 
         Ok((user_vo, access_token))
     }
@@ -145,12 +146,9 @@ impl UserService {
     }
 
     // 获取刷新token
-    pub async fn refresh_tokens(
-        db: &DatabaseConnection,
-        refresh_manager: &TokenManager,
-        access_manager: &TokenManager,
-        refresh_token: &str,
-    ) -> Result<(String, String)> {
+    pub async fn refresh_tokens(state: &AppState, refresh_token: &str) -> Result<(String, String)> {
+        let db = &state.database.connection;
+        let refresh_manager = state.refresh_token_manager();
         let claims = match refresh_manager.verify_refresh_token::<IdType>(refresh_token) {
             Ok(c) => c,
             Err(e) => {
@@ -169,7 +167,7 @@ impl UserService {
         // 2. 存储了 refresh token -> 返回 access_token
         let jti = uuid::Uuid::new_v4().to_string();
 
-        let access_token = access_manager.generate_token::<IdType>(claims.sub)?;
+        let access_token = state.sign_access_token(claims.sub, SELF_AUD, "")?;
         let refresh_token_new =
             refresh_manager.generate_refresh_token::<IdType>(jti.clone(), claims.sub)?;
         refresh_token::Entity::upsert_refresh_token(db, jti, claims.sub).await?;

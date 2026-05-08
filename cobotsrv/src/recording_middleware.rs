@@ -1,16 +1,17 @@
 use crate::entity::{authority, recording};
 use crate::error::AppError;
-use crate::{AppState, IdType};
-use auth::claims::Claims;
+use crate::{AppState, parse_user_id};
+use auth::claims::AccessTokenClaims;
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
+use http::StatusCode;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 /// 记录用户操作
 pub async fn recording_operation_middleware(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(app_state): State<AppState>,
     request: Request,
     next: Next,
@@ -41,13 +42,19 @@ pub async fn recording_operation_middleware(
         Err(e) => return AppError::from(e).into_response(),
     };
 
+    // claim.sub is a String per OIDC; parse to local IdType
+    let user_id = match parse_user_id(&claim.sub) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::UNAUTHORIZED, "invalid sub").into_response(),
+    };
+
     // save into db.
     let new_recording = recording::ActiveModel {
         id: ActiveValue::NotSet,
         name: Set(operation_name.to_owned()),
         method: Set(request_method.to_owned()),
         authority_uri: Set(operation_uri.to_owned()),
-        user_id: Set(claim.id.to_owned()),
+        user_id: Set(user_id),
         create_time: Set(Utc::now().naive_utc().to_owned()),
     };
     if let Err(e) = new_recording.insert(db).await {

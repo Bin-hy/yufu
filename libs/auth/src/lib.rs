@@ -447,3 +447,54 @@ pub async fn access_middleware_rs256(
             .into_response(),
     }
 }
+
+/// JWT verification middleware using the **local** [`crate::token_manager::IdTokenSigner`]
+/// (RS256, signer holds the private key, no JWKS roundtrip).
+///
+/// Use this in the IdP itself (e.g. cobotsrv) to verify tokens it just issued.
+/// External services should use [`access_middleware_rs256`] with a [`JwksClient`].
+///
+/// Validated [`crate::claims::AccessTokenClaims`] is inserted into request extensions.
+/// `aud` is NOT enforced here — apply per-route audience checks if needed.
+pub async fn access_middleware_local_rs256(
+    State(signer): State<Arc<crate::token_manager::IdTokenSigner>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let token = match request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        Some(t) => t.trim(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Missing or invalid Authorization header",
+            )
+                .into_response();
+        }
+    };
+
+    match signer.verify_access_token(token, None) {
+        Ok(claims) => {
+            request.extensions_mut().insert(claims);
+            next.run(request).await
+        }
+        Err(TokenError::Expired) => {
+            (StatusCode::UNAUTHORIZED, "Token expired, please re-login").into_response()
+        }
+        Err(TokenError::InvalidSignature) => {
+            (StatusCode::UNAUTHORIZED, "Invalid token signature").into_response()
+        }
+        Err(TokenError::InvalidToken) => {
+            (StatusCode::UNAUTHORIZED, "Malformed token").into_response()
+        }
+        Err(e) => (
+            StatusCode::UNAUTHORIZED,
+            format!("Token validation failed: {:?}", e),
+        )
+            .into_response(),
+    }
+}

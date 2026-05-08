@@ -3,25 +3,29 @@ use crate::error::AppError;
 use crate::result::Result;
 
 use crate::service::recording;
-use crate::{AppState, IdType};
-use auth::claims::Claims;
+use crate::{AppState, parse_user_id};
+use auth::claims::AccessTokenClaims;
 use axum::Json;
 use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use http::StatusCode;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 
 // 目前精细化到query只处理到path例如：get?/user/{user_id}
 // 检查每个请求的每个角色是否符合他的角色权限
 pub async fn authority_check_middleware_rbac_abac(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(app_state): State<AppState>,
     request: Request,
     next: Next,
 ) -> Response {
     let db = &app_state.database.connection;
-    let user_id = claim.id;
+    let user_id = match parse_user_id(&claim.sub) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::UNAUTHORIZED, "invalid sub").into_response(),
+    };
 
     // 从 extensions 中提取用户（已由 access_callback 加载）
     let user = match request.extensions().get::<user::Model>() {
@@ -156,15 +160,11 @@ pub async fn check_authority_abac(
     }
 
     // 校验 token 并获取用户
-    let claim = match state
-        .auth_state
-        .token_manager
-        .verify_token::<IdType>(token.as_str())
-    {
+    let claim = match state.id_token_signer().verify_access_token(&token, None) {
         Ok(claim) => claim,
         Err(_) => return Err(AppError::Forbidden("permission not access...".to_string())),
     };
-    let user_id = claim.id;
+    let user_id = parse_user_id(&claim.sub)?;
 
     let user = match user::Entity::find_by_id(user_id).one(db).await {
         Ok(Some(u)) => u,
