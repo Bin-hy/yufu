@@ -2,7 +2,8 @@ import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'node:path'
 
-export const ProjectRoot = resolve(import.meta.dirname, '../');
+// Walk up out of cobotweb/apps/cobotsrv/ to the cobotrix repository root.
+export const ProjectRoot = resolve(import.meta.dirname, '../../../');
 
 export default defineConfig(({ mode }) => {
     // 读取环境变量
@@ -56,7 +57,7 @@ export default defineConfig(({ mode }) => {
         },
         resolve: {
             alias: {
-                '@': resolve("./src"),
+                '@': resolve(import.meta.dirname, "./src"),
             },
         },
     }
