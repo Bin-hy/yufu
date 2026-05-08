@@ -313,6 +313,7 @@ impl AppState {
     pub async fn init(&self) -> result::Result<()> {
         self.ensure_sadmin_authorities().await?;
         self.init_sadmin_from_config().await?;
+        self.init_oidc_bootstrap_clients().await?;
         Ok(())
     }
 
@@ -384,6 +385,89 @@ impl AppState {
     // 初始化超级管理员权限
     async fn ensure_sadmin_authorities(&self) -> result::Result<()> {
         Service::ensure_sadmin_authorities(&self.database.connection).await?;
+        Ok(())
+    }
+
+    /// Auto-register OIDC clients listed in `[[oidc.bootstrap_clients]]`.
+    /// Idempotent: clients matched by `client_id` are left untouched (secrets
+    /// never overwritten). New ones are inserted with the super-admin as owner.
+    async fn init_oidc_bootstrap_clients(&self) -> result::Result<()> {
+        use crate::entity::oauth_client;
+        use rand::RngCore;
+        use rand::rngs::OsRng;
+        use sea_orm::Set;
+
+        let bootstrap = &self.config.oidc.bootstrap_clients;
+        if bootstrap.is_empty() {
+            return Ok(());
+        }
+
+        let db = &self.database.connection;
+
+        // Owner of bootstrap clients = the super-admin user we just seeded.
+        let sadmin = user::Entity::find()
+            .filter(user::Column::Username.eq(&self.config.auth.super_admin.username))
+            .one(db)
+            .await?
+            .ok_or_else(|| {
+                crate::error::AppError::InternalServerError(anyhow::anyhow!(
+                    "bootstrap clients require a super-admin user, none found"
+                ))
+            })?;
+
+        for entry in bootstrap {
+            if oauth_client::Entity::get_by_client_id(db, &entry.client_id)
+                .await?
+                .is_some()
+            {
+                info!(client_id = %entry.client_id, "OIDC bootstrap client already exists, skipping");
+                continue;
+            }
+
+            // Use configured secret if present; otherwise generate one and log it ONCE.
+            let (secret, generated) = match &entry.client_secret {
+                Some(s) => (s.clone(), false),
+                None => {
+                    let mut buf = [0u8; 32];
+                    OsRng.fill_bytes(&mut buf);
+                    (hex::encode(buf), true)
+                }
+            };
+            let secret_hash = bcrypt::hash(&secret, bcrypt::DEFAULT_COST).map_err(|e| {
+                crate::error::AppError::InternalServerError(anyhow::anyhow!(
+                    "bcrypt hash failed for bootstrap client {}: {e}",
+                    entry.client_id
+                ))
+            })?;
+
+            let now = chrono::Utc::now().naive_utc();
+            oauth_client::ActiveModel {
+                id: ActiveValue::NotSet,
+                client_id: Set(entry.client_id.clone()),
+                user_id: Set(sadmin.id),
+                name: Set(entry.name.clone()),
+                redirect_uris: Set(entry.redirect_uris.join(",")),
+                allowed_scopes: Set(entry.allowed_scopes.join(",")),
+                client_secret_hash: Set(secret_hash),
+                grant_types: Set(entry.grant_types.join(",")),
+                create_time: Set(now),
+                update_time: Set(now),
+            }
+            .insert(db)
+            .await?;
+
+            if generated {
+                tracing::warn!(
+                    client_id = %entry.client_id,
+                    client_secret = %secret,
+                    "OIDC bootstrap client registered with AUTO-GENERATED secret — \
+                     copy this value to your client config NOW; it won't be shown again",
+                );
+            } else {
+                info!(client_id = %entry.client_id, "OIDC bootstrap client registered (using configured secret)");
+            }
+        }
+
         Ok(())
     }
 
