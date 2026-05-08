@@ -1,7 +1,7 @@
 use std::thread;
 
 use clap::Parser;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 mod log;
 mod utils;
@@ -10,7 +10,8 @@ use tokio::net::TcpListener;
 
 use net4mqtt::broker;
 
-const NAME: &str = "cobotsrv";
+const COBOTSRV_NAME: &str = "cobotsrv";
+const COBOTRIX_NAME: &str = "cobotrix";
 const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
 
 #[derive(Parser)]
@@ -32,29 +33,45 @@ pub fn parse(name: &str) -> (&str, &str, &str) {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    let mut cfg: cobotsrv::config::Config = utils::load(
-        NAME.to_string(),
-        args.config.clone().map(|s| format!("{s}/{NAME}.toml")),
+
+    // Load cobotsrv config
+    let cobotsrv_cfg: cobotsrv::config::Config = utils::load(
+        COBOTSRV_NAME.to_string(),
+        args.config
+            .clone()
+            .map(|s| format!("{s}/{COBOTSRV_NAME}.toml")),
+    );
+
+    // Load cobotrix config
+    let cobotrix_cfg: cobotrix::config::Config = utils::load(
+        COBOTRIX_NAME.to_string(),
+        args.config
+            .clone()
+            .map(|s| format!("{s}/{COBOTRIX_NAME}.toml")),
     );
 
     log::set(format!(
         "cobotrix={},cobotnil={},cobotsrv={},cobotlet={},http_log={}",
-        cfg.log.level, cfg.log.level, cfg.log.level, cfg.log.level, cfg.log.level
+        cobotsrv_cfg.log.level,
+        cobotsrv_cfg.log.level,
+        cobotsrv_cfg.log.level,
+        cobotsrv_cfg.log.level,
+        cobotsrv_cfg.log.level
     ));
 
-    debug!("config : {:?}", cfg);
-
+    // Start MQTT broker
     let broker_addr = MQTT_BROKER_ADDR.parse().unwrap();
     thread::spawn(move || broker::up_mqtt_broker(broker_addr));
     broker::wait_for_port_availabilty(broker_addr).await;
 
+    // Start cobotlet instances
     let mut dir_entries = tokio::fs::read_dir(args.config.unwrap()).await.unwrap();
-    let mut results = Vec::new();
+    let mut cobotlet_nodes = Vec::new();
     while let Some(entry) = dir_entries.next_entry().await.unwrap() {
-        warn!("Entry: {:?}", entry.path());
         let file_name = entry.file_name().to_str().unwrap().to_string();
         let (srv, alias, _) = parse(&file_name);
-        if srv == NAME {
+        // Skip cobotsrv and cobotrix configs
+        if srv == COBOTSRV_NAME || srv == COBOTRIX_NAME {
             continue;
         }
         let alias = alias.to_string();
@@ -63,28 +80,40 @@ async fn main() {
             "cobotlet".to_string(),
             entry.path().to_str().map(|s| s.to_string()),
         );
-        //cfg.validate().unwrap();
         debug!("config : {:?}", cfg);
         let listener = TcpListener::bind(&cfg.http.listen).await.unwrap();
         let addr = listener.local_addr().unwrap();
-        info!("Server listening on {}", addr);
-        results.push((alias, addr));
+        info!("cobotlet[{alias}] listening on {}", addr);
+        cobotlet_nodes.push(cobotrix::config::Node {
+            alias: alias.to_string(),
+            url: format!("http://{addr}"),
+            ..Default::default()
+        });
 
         tokio::spawn(cobotlet::serve(cfg, listener, utils::shutdown_signal()));
     }
 
-    cfg.nodes.extend(
-        results
-            .into_iter()
-            .map(|(alias, addr)| cobotsrv::config::Node {
-                alias: alias.to_string(),
-                url: format!("http://{addr}"),
-                ..Default::default()
-            }),
+    // Start cobotsrv (auth service)
+    let cobotsrv_listener = TcpListener::bind(cobotsrv_cfg.http.listen).await.unwrap();
+    info!(
+        "cobotsrv listening on {}",
+        cobotsrv_listener.local_addr().unwrap()
     );
+    tokio::spawn(cobotsrv::serve(
+        cobotsrv_cfg,
+        cobotsrv_listener,
+        utils::shutdown_signal(),
+    ));
 
-    let listener = TcpListener::bind(cfg.http.listen).await.unwrap();
+    // Start cobotrix (management center) — registers cobotlet nodes
+    let mut cobotrix_cfg = cobotrix_cfg;
+    cobotrix_cfg.nodes.extend(cobotlet_nodes);
+    let cobotrix_listener = TcpListener::bind(cobotrix_cfg.http.listen).await.unwrap();
+    info!(
+        "cobotrix listening on {}",
+        cobotrix_listener.local_addr().unwrap()
+    );
+    cobotrix::serve(cobotrix_cfg, cobotrix_listener, utils::shutdown_signal()).await;
 
-    cobotsrv::serve(cfg, listener, utils::shutdown_signal()).await;
     info!("Server shutdown");
 }
