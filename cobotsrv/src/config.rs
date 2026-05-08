@@ -201,6 +201,16 @@ pub struct Oidc {
     /// UserInfo will return "{username}@{email_domain}".
     #[serde(default = "default_oidc_email_domain")]
     pub email_domain: String,
+
+    /// Algorithm used to sign access tokens. Defaults to RS256 (asymmetric, JWKS-friendly).
+    /// Use "HS256" for tests / local dev where loading an RSA key is overhead — falls back
+    /// to `auth.secret` as the HMAC key. Production should always be RS256.
+    #[serde(default = "default_signing_algorithm")]
+    pub signing_algorithm: String,
+}
+
+fn default_signing_algorithm() -> String {
+    "RS256".to_string()
 }
 
 impl Default for Oidc {
@@ -211,6 +221,7 @@ impl Default for Oidc {
             access_token_expire_seconds: None,
             refresh_token_expire_seconds: None,
             email_domain: default_oidc_email_domain(),
+            signing_algorithm: default_signing_algorithm(),
         }
     }
 }

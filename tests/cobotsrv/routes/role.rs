@@ -18,7 +18,7 @@ async fn test_add_role() -> Result<(), AppError> {
 
     let mut cfg = Config::default();
     cfg.database.url = db_url.clone();
-    let token = get_test_token(cfg.clone().auth.secret);
+    let token = get_test_token(&mut cfg);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;
@@ -52,7 +52,7 @@ async fn test_get_page_role() -> Result<(), AppError> {
 
     let mut cfg = Config::default();
     cfg.database.url = db_url.clone();
-    let token = get_test_token(cfg.clone().auth.secret);
+    let token = get_test_token(&mut cfg);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;
@@ -85,7 +85,7 @@ async fn test_patch_role() -> Result<(), AppError> {
 
     let mut cfg = Config::default();
     cfg.database.url = db_url.clone();
-    let token = get_test_token(cfg.clone().auth.secret);
+    let token = get_test_token(&mut cfg);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;

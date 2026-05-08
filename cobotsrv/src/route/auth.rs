@@ -96,9 +96,7 @@ pub async fn auth_register(
 
     // check username and password
     let (access_token, refresh_token) = UserService::register(
-        &state.database.connection,
-        &state.auth_state.token_manager,
-        &state.auth_state.refresh_token_manager,
+        &state,
         username.as_str(),
         password.as_str(),
         nickname.as_str(),
@@ -139,21 +137,13 @@ pub async fn login(
     State(state): State<AppState>,
     Json(login_data): Json<LoginData>,
 ) -> Result<(HeaderMap, Json<LoginRespData>)> {
-    let db = &state.database.connection;
-
     // 1. 校验请求数据
     let username = login_data.username.as_str();
     let password = login_data.password.as_str();
 
     // 2. 校验数据库账号密码
-    let (access_token, refresh_token, user_vo) = UserService::auth(
-        db,
-        &state.auth_state.token_manager,
-        &state.auth_state.refresh_token_manager,
-        username,
-        password,
-    )
-    .await?;
+    let (access_token, refresh_token, user_vo) =
+        UserService::auth(&state, username, password).await?;
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -193,13 +183,8 @@ pub async fn refresh(
         .ok_or_else(|| AppError::BadRequest("missing refresh token".to_string()))?;
 
     // 调用业务逻辑
-    let (access_token, new_refresh_token) = UserService::refresh_tokens(
-        &state.database.connection,
-        &state.auth_state.refresh_token_manager,
-        &state.auth_state.token_manager,
-        refresh_token,
-    )
-    .await?;
+    let (access_token, new_refresh_token) =
+        UserService::refresh_tokens(&state, refresh_token).await?;
 
     // 设置新的 refresh_token Cookie
     let mut headers = HeaderMap::new();
@@ -237,7 +222,7 @@ pub async fn logout(
 
     UserService::logout_by_refresh(
         &state.database.connection,
-        &state.auth_state.refresh_token_manager,
+        state.refresh_token_manager(),
         refresh_token,
     )
     .await?;

@@ -19,7 +19,7 @@ async fn test_get_recording_by_page() -> Result<(), AppError> {
 
     let mut cfg = Config::default();
     cfg.database.url = db_url.clone();
-    let token = get_test_token(cfg.clone().auth.secret);
+    let token = get_test_token(&mut cfg);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;
@@ -52,7 +52,7 @@ async fn test_get_recording_by_user_id() -> Result<(), AppError> {
 
     let mut cfg = Config::default();
     cfg.database.url = db_url.clone();
-    let token = get_test_token(cfg.clone().auth.secret);
+    let token = get_test_token(&mut cfg);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     // 先注册一个用户

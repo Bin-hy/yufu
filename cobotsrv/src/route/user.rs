@@ -1,10 +1,10 @@
 use crate::result::Result;
-use crate::{AppState, IdType};
+use crate::{AppState, IdType, parse_user_id};
 use anyhow::anyhow;
 
 use crate::entity::user::{UserAddWithRoleReq, UserPatchReq, UserRolePatchReq, UserVO};
 use crate::service::user::UserService;
-use auth::claims::Claims;
+use auth::claims::AccessTokenClaims;
 use axum::extract::{Path, Query};
 use axum::routing::{delete, patch};
 use axum::{
@@ -40,11 +40,12 @@ pub fn get_public_routes() -> Router<AppState> {
     ),
 ))]
 pub async fn get_user_by_id(
-    claim: Claims<IdType>,
+    claim: AccessTokenClaims,
     State(state): State<AppState>,
 ) -> Result<Json<user::Model>> {
     let db = &state.database.connection;
-    if let Some((user, _role_db_opt)) = user::Entity::find_with_role_by_id(db, claim.id).await? {
+    let user_id = parse_user_id(&claim.sub)?;
+    if let Some((user, _role_db_opt)) = user::Entity::find_with_role_by_id(db, user_id).await? {
         Ok(Json(user))
     } else {
         Err(AppError::InternalServerError(anyhow!("获取用户失败")))
@@ -106,13 +107,11 @@ pub async fn add_user_with_role(
     State(state): State<AppState>,
     Json(payload): Json<UserAddWithRoleReq>,
 ) -> Result<Json<UserVO>> {
-    let db = &state.database.connection;
     let username = payload.username;
     let nickname = payload.nickname.unwrap_or(username.clone().to_string());
 
     let (user_vo, _access_token) = UserService::add_user_with_role(
-        db,
-        &state.auth_state.token_manager,
+        &state,
         username.as_str(),
         payload.password.as_str(),
         nickname.as_str(),
