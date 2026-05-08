@@ -183,32 +183,41 @@ fn default_log_level() -> String {
     })
 }
 
-/// JWT verification settings. Must share `secret` and `exp_seconds` with cobotsrv
-/// (cobotrix only verifies tokens, never issues them in Phase 0).
+/// JWT verification settings. cobotrix is an OIDC client of cobotsrv: it pulls
+/// cobotsrv's public key from the JWKS endpoint at startup and uses it to verify
+/// every incoming Bearer token. No shared secret — Phase 1 (RS256) of the auth
+/// roadmap.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Auth {
-    #[serde(default = "default_auth_secret")]
-    pub secret: String,
-    #[serde(default = "default_auth_expire_seconds")]
-    pub exp_seconds: i64,
+    /// JWKS endpoint URL. Default: `{cobotsrv_base}/.well-known/jwks.json`.
+    #[serde(default = "default_jwks_url")]
+    pub jwks_url: String,
+    /// If set, only tokens with `aud` matching this value are accepted (Phase 2 strict mode).
+    /// Phase 1: leave None to accept any audience.
+    #[serde(default)]
+    pub expected_audience: Option<String>,
+    /// JWKS background refresh interval in seconds (default: 5 min).
+    #[serde(default = "default_jwks_refresh_secs")]
+    pub jwks_refresh_secs: u64,
 }
 
 impl Default for Auth {
     fn default() -> Self {
         Self {
-            secret: default_auth_secret(),
-            exp_seconds: default_auth_expire_seconds(),
+            jwks_url: default_jwks_url(),
+            expected_audience: None,
+            jwks_refresh_secs: default_jwks_refresh_secs(),
         }
     }
 }
 
-fn default_auth_secret() -> String {
-    env::var("AUTH_SECRET")
-        .unwrap_or_else(|_| "qwertyuiop.asdfghjkl.zxcvbnm.1234567890-=".to_string())
+fn default_jwks_url() -> String {
+    env::var("COBOTSRV_JWKS_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:4000/.well-known/jwks.json".to_string())
 }
 
-fn default_auth_expire_seconds() -> i64 {
-    7200
+fn default_jwks_refresh_secs() -> u64 {
+    300
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

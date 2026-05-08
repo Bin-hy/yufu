@@ -1,5 +1,5 @@
-use auth::AuthState;
-use auth::token_manager::TokenManager;
+use auth::access_middleware_rs256;
+use auth::jwks::JwksClient;
 use axum::Router;
 use axum::extract::Request;
 use axum::middleware;
@@ -184,17 +184,19 @@ where
         mqtt: mqtt_handle,
     };
 
-    // JWT verification — same HS256 secret as cobotsrv (cfg.auth).
-    // Phase 1 will swap this for RS256 + JWKS pulled from cobotsrv.
-    let auth_state = AuthState {
-        token_manager: TokenManager::new(&cfg.auth.secret, cfg.auth.exp_seconds),
-        // refresh tokens are issued/verified by cobotsrv only; cobotrix never sees them
-        refresh_token_manager: TokenManager::new(&cfg.auth.secret, cfg.auth.exp_seconds),
-    };
+    // JWT verification (Phase 1): pull cobotsrv's public key from JWKS, verify RS256.
+    // Hard-fail at startup if the JWKS is unreachable — running an unauthenticated cobotrix
+    // is worse than refusing to start.
+    let jwks = Arc::new(
+        JwksClient::new(&cfg.auth.jwks_url, cfg.auth.expected_audience.clone())
+            .await
+            .expect("failed to fetch cobotsrv JWKS at startup"),
+    );
+    jwks.spawn_refresher(cfg.auth.jwks_refresh_secs);
 
     let protected = get_protected_routes().layer(middleware::from_fn_with_state(
-        auth_state.clone(),
-        auth::access_middleware::<IdType>,
+        jwks.clone(),
+        access_middleware_rs256,
     ));
 
     let app = Router::new()

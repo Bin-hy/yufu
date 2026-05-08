@@ -6,12 +6,12 @@
 listen = "[::]:4001"
 api_prefix = "/api/v1"
 
-# JWT 验签配置。secret 必须与 cobotsrv 的 [auth].secret 完全一致，否则 cobotrix
-# 拿到 cobotsrv 颁发的 access_token 会验签失败。两边都默认从环境变量
-# AUTH_SECRET 读取，所以最简单的做法是设一个 AUTH_SECRET 给两个进程共用。
+# JWT 验签配置。cobotrix 作为 cobotsrv 的 OIDC client，启动时从 cobotsrv 的 JWKS
+# 端点拉取公钥用于验签 Bearer token。无需共享密钥。
 # [auth]
-# secret = "<same-as-cobotsrv-auth-secret>"
-# exp_seconds = 7200
+# jwks_url = "http://127.0.0.1:4000/.well-known/jwks.json"  # 或环境变量 COBOTSRV_JWKS_URL
+# jwks_refresh_secs = 300
+# expected_audience = "cobotrix"  # Phase 2 启用严格 aud 校验时填入
 
 [log]
 # Env: `LOG_LEVEL`
