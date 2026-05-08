@@ -207,6 +207,37 @@ pub struct Oidc {
     /// to `auth.secret` as the HMAC key. Production should always be RS256.
     #[serde(default = "default_signing_algorithm")]
     pub signing_algorithm: String,
+
+    /// OIDC clients to auto-register at startup. Existing entries (matched by `client_id`)
+    /// are left untouched — secrets are NEVER overwritten by config to avoid silent
+    /// rotation. Use the admin API to rotate secrets explicitly.
+    #[serde(default)]
+    pub bootstrap_clients: Vec<BootstrapClient>,
+}
+
+/// One row in `[[oidc.bootstrap_clients]]`. See `Oidc::bootstrap_clients`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BootstrapClient {
+    pub client_id: String,
+    pub name: String,
+    pub redirect_uris: Vec<String>,
+    #[serde(default = "default_bootstrap_scopes")]
+    pub allowed_scopes: Vec<String>,
+    #[serde(default = "default_bootstrap_grants")]
+    pub grant_types: Vec<String>,
+    /// If absent, a random secret is generated on first run and printed once
+    /// in the startup log so the operator can capture it. Set explicitly for
+    /// stable dev/test secrets.
+    #[serde(default)]
+    pub client_secret: Option<String>,
+}
+
+fn default_bootstrap_scopes() -> Vec<String> {
+    vec!["openid".into(), "profile".into(), "email".into()]
+}
+
+fn default_bootstrap_grants() -> Vec<String> {
+    vec!["authorization_code".into(), "refresh_token".into()]
 }
 
 fn default_signing_algorithm() -> String {
@@ -222,6 +253,7 @@ impl Default for Oidc {
             refresh_token_expire_seconds: None,
             email_domain: default_oidc_email_domain(),
             signing_algorithm: default_signing_algorithm(),
+            bootstrap_clients: Vec::new(),
         }
     }
 }

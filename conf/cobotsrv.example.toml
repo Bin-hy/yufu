@@ -46,6 +46,22 @@ refresh_token_expire_seconds = 604800
 # Default email domain for users without an email address.
 # UserInfo endpoint returns "{username}@{email_domain}".
 # email_domain = "cobotrix.local"
+
+# Algorithm for signing access tokens. RS256 (default) requires rsa_private_key_path;
+# HS256 falls back to auth.secret (handy for tests / no-key dev clusters).
+# signing_algorithm = "RS256"
+
+# OIDC clients to auto-register at startup. Existing entries (matched by client_id)
+# are left untouched — secrets are NEVER overwritten by config.
+# If client_secret is omitted, a random one is generated on first run and printed
+# ONCE in the startup log. Set explicitly here for stable dev/test secrets.
+# [[oidc.bootstrap_clients]]
+# client_id = "cobotrix"
+# name = "CoBotrix Management Center"
+# redirect_uris = ["http://localhost:5173/oauth/callback"]
+# allowed_scopes = ["openid", "profile", "email"]
+# grant_types = ["authorization_code", "refresh_token"]
+# client_secret = "<dev-only-stable-secret>"
 # Admin Dashboard Accounts
 # [[auth.accounts]]
 # username = "live777"
