@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 use auth::access_middleware_rs256;
 use auth::jwks::JwksClient;
+=======
+use auth::AuthState;
+use auth::token_manager::TokenManager;
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 use axum::Router;
 use axum::extract::Request;
 use axum::middleware;
@@ -184,6 +189,7 @@ where
         mqtt: mqtt_handle,
     };
 
+<<<<<<< HEAD
     // JWT verification (Phase 1): pull cobotsrv's public key from JWKS, verify RS256.
     // Hard-fail at startup if the JWKS is unreachable — running an unauthenticated cobotrix
     // is worse than refusing to start.
@@ -200,13 +206,30 @@ where
     let protected = get_protected_routes().layer(middleware::from_fn_with_state(
         jwks.clone(),
         access_middleware_rs256,
+=======
+    // JWT verification — same HS256 secret as cobotsrv (cfg.auth).
+    // Phase 1 will swap this for RS256 + JWKS pulled from cobotsrv.
+    let auth_state = AuthState {
+        token_manager: TokenManager::new(&cfg.auth.secret, cfg.auth.exp_seconds),
+        // refresh tokens are issued/verified by cobotsrv only; cobotrix never sees them
+        refresh_token_manager: TokenManager::new(&cfg.auth.secret, cfg.auth.exp_seconds),
+    };
+
+    let protected = get_protected_routes().layer(middleware::from_fn_with_state(
+        auth_state.clone(),
+        auth::access_middleware::<IdType>,
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
     ));
 
     let app = Router::new()
         .merge(protected)
         .merge(get_public_routes())
         .layer({
+<<<<<<< HEAD
             let origins: Vec<String> = app_state.config.http.cors_origins.clone();
+=======
+            let origins: Vec<String> = vec!["*".to_string()]; // internal, trust proxy
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
             let has_wildcard = origins.iter().any(|o| o == "*");
             let cors_layer = CorsLayer::new()
                 .allow_credentials(true)
@@ -284,6 +307,7 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
+<<<<<<< HEAD
 /// Sync required permissions to cobotsrv at startup.
 /// POSTs to cobotsrv's `/api/v1/application/sync-permissions` with
 /// client_id + client_secret (idempotent upsert).
@@ -333,6 +357,8 @@ async fn sync_permissions(cfg: &Config) {
     }
 }
 
+=======
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 #[derive(Clone)]
 pub struct AppState {
     config: Config,

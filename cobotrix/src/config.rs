@@ -25,6 +25,7 @@ pub struct Config {
 
     #[serde(default)]
     pub nodes: Vec<Node>,
+<<<<<<< HEAD
 
     /// Permissions that cobotrix requires. At startup cobotrix syncs these to
     /// cobotsrv so the admin can assign them to roles without manual creation.
@@ -49,6 +50,8 @@ pub struct PermissionSpec {
 
 fn default_resource_pattern() -> Option<String> {
     Some("*".to_string())
+=======
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -157,10 +160,15 @@ pub struct Http {
     pub listen: SocketAddr,
     #[serde(default)]
     pub public: String,
+<<<<<<< HEAD
     /// Allowed CORS origins. Default: `["*"]`.
     /// Set to specific origins if cobotrix is directly exposed.
     #[serde(default = "default_cors_origins")]
     pub cors_origins: Vec<String>,
+=======
+    #[serde(default = "default_api_prefix")]
+    pub api_prefix: String,
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 }
 
 impl Default for Http {
@@ -168,7 +176,11 @@ impl Default for Http {
         Self {
             listen: default_http_listen(),
             public: Default::default(),
+<<<<<<< HEAD
             cors_origins: default_cors_origins(),
+=======
+            api_prefix: default_api_prefix(),
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
         }
     }
 }
@@ -181,8 +193,13 @@ fn default_http_listen() -> SocketAddr {
     .expect("invalid listen address")
 }
 
+<<<<<<< HEAD
 fn default_cors_origins() -> Vec<String> {
     vec!["*".to_string()]
+=======
+fn default_api_prefix() -> String {
+    "/api/v1".to_string()
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +226,7 @@ fn default_log_level() -> String {
     })
 }
 
+<<<<<<< HEAD
 /// JWT verification settings. cobotrix is an OIDC client of cobotsrv: it pulls
 /// cobotsrv's public key from the JWKS endpoint at startup and uses it to verify
 /// every incoming Bearer token. No shared secret — Phase 1 (RS256) of the auth
@@ -237,21 +255,37 @@ pub struct Auth {
     /// Default true — cobotrix enforces permissions based on token claims.
     #[serde(default = "default_require_permissions")]
     pub require_permissions: bool,
+=======
+/// JWT verification settings. Must share `secret` and `exp_seconds` with cobotsrv
+/// (cobotrix only verifies tokens, never issues them in Phase 0).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Auth {
+    #[serde(default = "default_auth_secret")]
+    pub secret: String,
+    #[serde(default = "default_auth_expire_seconds")]
+    pub exp_seconds: i64,
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 }
 
 impl Default for Auth {
     fn default() -> Self {
         Self {
+<<<<<<< HEAD
             client_id: default_client_id(),
             client_secret: String::new(),
             jwks_url: default_jwks_url(),
             expected_audience: default_expected_audience(),
             jwks_refresh_secs: default_jwks_refresh_secs(),
             require_permissions: default_require_permissions(),
+=======
+            secret: default_auth_secret(),
+            exp_seconds: default_auth_expire_seconds(),
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
         }
     }
 }
 
+<<<<<<< HEAD
 fn default_jwks_url() -> String {
     env::var("COBOTSRV_JWKS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:4000/.well-known/jwks.json".to_string())
@@ -271,6 +305,15 @@ fn default_require_permissions() -> bool {
 
 fn default_jwks_refresh_secs() -> u64 {
     300
+=======
+fn default_auth_secret() -> String {
+    env::var("AUTH_SECRET")
+        .unwrap_or_else(|_| "qwertyuiop.asdfghjkl.zxcvbnm.1234567890-=".to_string())
+}
+
+fn default_auth_expire_seconds() -> i64 {
+    7200
+>>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
