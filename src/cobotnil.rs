@@ -1,8 +1,6 @@
-use std::path::Path;
-use std::thread;
-
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
+use std::thread;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
 
@@ -73,8 +71,10 @@ async fn main() -> Result<()> {
             toml::from_str(std::fs::read_to_string(entry.path())?.as_str())?;
 
         debug!("config : {:?}", cfg);
-        let listener = TcpListener::bind(&cfg.http.listen).await.unwrap();
-        let addr = listener.local_addr().unwrap();
+        let listener = TcpListener::bind(&cfg.http.listen)
+            .await
+            .context("failed to bind cobotlet listener")?;
+        let addr = listener.local_addr()?;
         info!("cobotlet[{alias}] listening on {}", addr);
         cobotlet_nodes.push(cobotrix::config::Node {
             alias: alias.to_string(),
@@ -86,11 +86,10 @@ async fn main() -> Result<()> {
     }
 
     // Start cobotsrv (auth service)
-    let cobotsrv_listener = TcpListener::bind(cobotsrv_cfg.http.listen).await.unwrap();
-    info!(
-        "cobotsrv listening on {}",
-        cobotsrv_listener.local_addr().unwrap()
-    );
+    let cobotsrv_listener = TcpListener::bind(&cobotsrv_cfg.http.listen)
+        .await
+        .context("failed to bind cobotsrv listener")?;
+    info!("cobotsrv listening on {}", cobotsrv_listener.local_addr()?);
     tokio::spawn(cobotsrv::serve(
         cobotsrv_cfg,
         cobotsrv_listener,
@@ -100,11 +99,10 @@ async fn main() -> Result<()> {
     // Start cobotrix (management center) — registers cobotlet nodes
     let mut cobotrix_cfg = cobotrix_cfg;
     cobotrix_cfg.nodes.extend(cobotlet_nodes);
-    let cobotrix_listener = TcpListener::bind(cobotrix_cfg.http.listen).await.unwrap();
-    info!(
-        "cobotrix listening on {}",
-        cobotrix_listener.local_addr().unwrap()
-    );
+    let cobotrix_listener = TcpListener::bind(&cobotrix_cfg.http.listen)
+        .await
+        .context("failed to bind cobotrix listener")?;
+    info!("cobotrix listening on {}", cobotrix_listener.local_addr()?);
     cobotrix::serve(cobotrix_cfg, cobotrix_listener, utils::shutdown_signal()).await;
 
     cobotsrv::serve(cfg, listener, utils::shutdown_signal()).await;
