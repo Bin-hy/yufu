@@ -9,7 +9,6 @@ use crate::entity::device::DeviceVO;
 use crate::error::AppError;
 use crate::result::Result;
 use crate::service::device::DeviceService;
-<<<<<<< HEAD
 use auth::require_perm;
 
 pub fn get_routes() -> Router<AppState> {
@@ -23,14 +22,6 @@ pub fn get_routes() -> Router<AppState> {
             "/devices/{cobotlet_alias}/{device_id}",
             get(get_one).layer(require_perm!("device:read")),
         )
-=======
-
-pub fn get_routes() -> Router<AppState> {
-    Router::new()
-        .route("/devices", get(list))
-        .route("/devices/{cobotlet_alias}", get(list_by_alias))
-        .route("/devices/{cobotlet_alias}/{device_id}", get(get_one))
->>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 }
 
 async fn list(State(state): State<AppState>) -> Result<Json<Vec<DeviceVO>>> {
