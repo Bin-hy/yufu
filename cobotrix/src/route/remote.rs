@@ -9,23 +9,16 @@ use tracing::Span;
 
 use crate::store::Node;
 use crate::{AppState, error::AppError, result::Result};
-<<<<<<< HEAD
 use auth::require_perm;
-=======
->>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 
 pub fn route() -> Router<AppState> {
     Router::new().route(
         "/remote/{device}/{module}",
-<<<<<<< HEAD
         get(remote)
             .post(remote)
             .patch(remote)
             .delete(remote)
             .layer(require_perm!("remote:proxy")),
-=======
-        get(remote).post(remote).patch(remote).delete(remote),
->>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
     )
 }
 
