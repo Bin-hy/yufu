@@ -43,6 +43,16 @@ function go(path: string) {
   if (path !== route.path) router.push(path)
 }
 function close(path: string) {
+  const needRedirect = tabs.activePath === path
+  let redirectTo = ''
+  if (needRedirect) {
+    const idx = tabs.visited.findIndex(v => v.path === path)
+    const next = tabs.visited[idx - 1] || tabs.visited[idx + 1]
+    redirectTo = next?.path || ''
+  }
   tabs.remove(path)
+  if (needRedirect && redirectTo) {
+    router.push(redirectTo)
+  }
 }
 </script>

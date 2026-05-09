@@ -179,10 +179,10 @@ onMounted(async () => {
         <p class="text-sm text-muted-foreground mt-1">管理应用级 resource 权限规则</p>
       </div>
       <div class="flex items-center gap-3">
-        <UiSelect v-model.number="filterAppId" class="w-48" @update:modelValue="onFilterChange">
-          <option :value="null">全部应用</option>
+        <UiSelect v-if="applications.length > 0" v-model.number="filterAppId" class="w-48" @update:modelValue="onFilterChange">
           <option v-for="app in applications" :key="app.id" :value="app.id">{{ app.name }}</option>
         </UiSelect>
+        <span v-else class="text-sm text-muted-foreground">暂无应用，请先<a href="/applications" class="text-primary hover:underline">注册应用</a></span>
         <UiButton @click="openCreateDialog">
           <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
