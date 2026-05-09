@@ -1,4 +1,15 @@
 services:
+    emqx:
+        image: emqx/emqx:latest
+        container_name: emqx
+        restart: always
+        ports:
+            - "${MQTT_PORT:-1883}:1883"          # MQTT TCP
+            - "${EMQX_DASHBOARD_PORT:-18083}:18083"  # Dashboard at http://localhost:18083 (admin / public)
+        volumes:
+            - cobotrix_emqx_data:/opt/emqx/data
+            - cobotrix_emqx_log:/opt/emqx/log
+
     postgres:
         image: postgres:18-alpine
         container_name: postgres18
@@ -6,12 +17,28 @@ services:
         ports:
             - "${POSTGRES_PORT:-5432}:5432"
         environment:
-            POSTGRES_USER: postgres
-            POSTGRES_PASSWORD: postgres
-            POSTGRES_DB: cobotrix
-            POSTGRES_PORT: 5432
+            POSTGRES_USER: ${POSTGRES_USER:-postgres}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+            POSTGRES_DB: ${POSTGRES_DB:-cobotrix}
         volumes:
             - cobotrix_postgres:/var/lib/postgresql
 
+# cobotrix 管理中心数据库，和主数据库分开，方便管理和备份
+    postgres_mgmt:
+        image: postgres:18-alpine
+        container_name: postgres18_mgmt
+        restart: always
+        ports:
+            - "${POSTGRES_MGMT_PORT:-5431}:5432"
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-postgres}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+            POSTGRES_DB: ${POSTGRES_MGMT_DB:-cobotrix_mgmt}
+        volumes:
+            - cobotrix_postgres_mgmt:/var/lib/postgresql
+
 volumes:
     cobotrix_postgres:
+    cobotrix_postgres_mgmt:
+    cobotrix_emqx_data:
+    cobotrix_emqx_log:
