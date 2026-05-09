@@ -21,10 +21,8 @@ cp .env.example .env
 # 本地 docker-compose 覆盖（开发只起 Postgres）
 cp compose.local.yml.example compose.local.yml
 
-# cobotsrv 后端配置（二选一）
-cp conf/cobotsrv.toml.example conf/cobotsrv.local.toml   # 个人覆盖，启动时 -c 显式指定
-# 或
-cp conf/cobotsrv.toml.example conf/cobotsrv.toml         # 覆盖默认文件（已被 .gitignore 忽略）
+# cobotsrv 后端配置
+cp conf/cobotsrv.example.toml cobotsrv.toml   # 覆盖默认文件（已被 .gitignore 忽略）
 
 # 前端 env
 cp cobotweb/.env.example cobotweb/.env.local

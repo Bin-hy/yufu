@@ -1,0 +1,16 @@
+[Unit]
+Description=CoBotrix let service
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/bin/cobotlet --config /etc/cobotrix/cobotlet.toml
+WorkingDirectory=/var/lib/cobotrix
+StateDirectory=cobotrix
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

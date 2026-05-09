@@ -1,6 +1,12 @@
+use std::path::Path;
 use std::thread;
 
+use anyhow::Result;
 use clap::Parser;
+use tokio::net::TcpListener;
+use tracing::{debug, info, warn};
+
+use net4mqtt::broker;
 use tracing::{debug, info};
 
 mod log;
@@ -18,8 +24,8 @@ const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
 #[command(name = "cobotnil", version)]
 struct Args {
     /// Set config file path
-    #[arg(short, long)]
-    config: Option<String>,
+    #[arg(short, long, default_value_t = format!("cobotnil"))]
+    config: String,
 }
 
 pub fn parse(name: &str) -> (&str, &str, &str) {
@@ -31,7 +37,7 @@ pub fn parse(name: &str) -> (&str, &str, &str) {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Load cobotsrv config
@@ -59,6 +65,9 @@ async fn main() {
         cobotsrv_cfg.log.level
     ));
 
+    debug!("config : {:?}", cfg);
+
+    let broker_addr = MQTT_BROKER_ADDR.parse()?;
     // Start MQTT broker
     let broker_addr = MQTT_BROKER_ADDR.parse().unwrap();
     thread::spawn(move || broker::up_mqtt_broker(broker_addr));
