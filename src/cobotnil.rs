@@ -4,7 +4,7 @@ use std::thread;
 use anyhow::Result;
 use clap::Parser;
 use tokio::net::TcpListener;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use net4mqtt::broker;
 use tracing::{debug, info};
