@@ -61,6 +61,19 @@ max_connections = 10
 # timeout  (Default: 30 ,unit: second)
 connect_timeout = 30
 
+# MQTT bridge to cobotlets (NanoMQ broker recommended). Required for the
+# /devices and /tasks endpoints to be functional.
+# [mqtt]
+# url = "mqtt://127.0.0.1:1883"
+# client_id = "cobotsrv"
+# topic_prefix = "cobotrix"
+# keep_alive_secs = 30
+
+# Tunables for the /tasks endpoint.
+# [task]
+# wait_timeout_ms = 5000          # default sync wait
+# result_cache_ttl_secs = 300     # how long async results are kept
+
 # [net4mqtt]
 # Global unique alias
 # alias = "liveman-0"
