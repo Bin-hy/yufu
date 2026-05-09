@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
 
 const COBOTSRV_BASE = (import.meta.env.VITE_COBOTSRV_URL ?? '').replace(/\/$/, '')
 const CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? 'cobotrix'
+const CLIENT_SECRET = import.meta.env.VITE_OIDC_CLIENT_SECRET ?? ''
 const REDIRECT_URI =
   import.meta.env.VITE_OIDC_REDIRECT_URI ?? `${window.location.origin}/oauth/callback`
 const SCOPE = 'openid profile email'
@@ -150,6 +151,7 @@ export async function refreshAccessToken(): Promise<string | null> {
     refresh_token: rt,
     client_id: CLIENT_ID,
   })
+  if (CLIENT_SECRET) body.set('client_secret', CLIENT_SECRET)
 
   try {
     const resp = await fetch(`${COBOTSRV_BASE}/oidc/token`, {
@@ -177,4 +179,29 @@ export async function refreshAccessToken(): Promise<string | null> {
 export async function logout(): Promise<void> {
   clearAuth()
   await redirectToLogin()
+}
+
+// ── UserInfo (OIDC /userinfo endpoint) ──
+
+export interface UserInfo {
+  sub: number
+  preferred_username?: string
+  name?: string
+  nickname?: string
+  email?: string
+}
+
+/** Fetch user profile from cobotsrv's OIDC /userinfo endpoint. */
+export async function fetchUserInfo(): Promise<UserInfo | null> {
+  const tok = getAccessToken()
+  if (!tok) return null
+  try {
+    const resp = await fetch(`${COBOTSRV_BASE}/api/v1/oidc/userinfo`, {
+      headers: { Authorization: `Bearer ${tok}` },
+    })
+    if (!resp.ok) return null
+    return (await resp.json()) as UserInfo
+  } catch {
+    return null
+  }
 }

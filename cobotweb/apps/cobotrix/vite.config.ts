@@ -6,17 +6,22 @@ export const ProjectRoot = resolve(import.meta.dirname, '../../../')
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '')
-    // proxy to cobotsrv which forwards /mgmt/* to cobotrix
-    const API_TARGET = env.VITE_COBOTSRV_URL || 'http://localhost:4000'
+    const COBOTRIX_URL = env.VITE_COBOTRIX_URL || 'http://localhost:4001'
+    const COBOTSRV_URL = env.VITE_COBOTSRV_URL || 'http://localhost:4000'
 
     return {
         plugins: [vue()],
         base: '/',
         server: {
             proxy: {
-                '/mgmt': { target: API_TARGET, changeOrigin: true, secure: false },
-                '/api': { target: API_TARGET, changeOrigin: true, secure: false },
-                '/hello': { target: API_TARGET, changeOrigin: true, secure: false },
+                // Business API → cobotrix (port 4001)
+                '/devices': { target: COBOTRIX_URL, changeOrigin: true, secure: false },
+                '/tasks': { target: COBOTRIX_URL, changeOrigin: true, secure: false },
+                '/remote': { target: COBOTRIX_URL, changeOrigin: true, secure: false },
+                '/hello': { target: COBOTRIX_URL, changeOrigin: true, secure: false },
+                // OIDC + JWKS → cobotsrv (port 4000)
+                '/oidc': { target: COBOTSRV_URL, changeOrigin: true, secure: false },
+                '/.well-known': { target: COBOTSRV_URL, changeOrigin: true, secure: false },
             },
         },
         build: {

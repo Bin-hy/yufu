@@ -25,6 +25,30 @@ pub struct Config {
 
     #[serde(default)]
     pub nodes: Vec<Node>,
+
+    /// Permissions that cobotrix requires. At startup cobotrix syncs these to
+    /// cobotsrv so the admin can assign them to roles without manual creation.
+    /// Each entry: `{ name, action, resource_type?, resource_pattern? }`
+    #[serde(default)]
+    pub permissions: Vec<PermissionSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PermissionSpec {
+    /// Canonical name, e.g. "device:read", "task:execute"
+    pub name: String,
+    /// Verb / capability, e.g. "read", "submit"
+    pub action: String,
+    /// Object class, e.g. "device", "task". None = action only.
+    #[serde(default)]
+    pub resource_type: Option<String>,
+    /// Glob pattern, e.g. "*", "cobotlet-0:*". Default: "*"
+    #[serde(default = "default_resource_pattern")]
+    pub resource_pattern: Option<String>,
+}
+
+fn default_resource_pattern() -> Option<String> {
+    Some("*".to_string())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -133,9 +157,7 @@ pub struct Http {
     pub listen: SocketAddr,
     #[serde(default)]
     pub public: String,
-    #[serde(default = "default_api_prefix")]
-    pub api_prefix: String,
-    /// Allowed CORS origins. Default: `["*"]` (safe when cobotrix is behind cobotsrv proxy).
+    /// Allowed CORS origins. Default: `["*"]`.
     /// Set to specific origins if cobotrix is directly exposed.
     #[serde(default = "default_cors_origins")]
     pub cors_origins: Vec<String>,
@@ -146,7 +168,6 @@ impl Default for Http {
         Self {
             listen: default_http_listen(),
             public: Default::default(),
-            api_prefix: default_api_prefix(),
             cors_origins: default_cors_origins(),
         }
     }
@@ -158,10 +179,6 @@ fn default_http_listen() -> SocketAddr {
         env::var("PORT").unwrap_or(String::from("4001"))
     ))
     .expect("invalid listen address")
-}
-
-fn default_api_prefix() -> String {
-    "/api/v1".to_string()
 }
 
 fn default_cors_origins() -> Vec<String> {
@@ -198,6 +215,14 @@ fn default_log_level() -> String {
 /// roadmap.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Auth {
+    /// OIDC client_id registered at cobotsrv. Used for client_credentials grant
+    /// when syncing permissions at startup. Default: `"cobotrix"`.
+    #[serde(default = "default_client_id")]
+    pub client_id: String,
+    /// OIDC client_secret matching cobotsrv's bootstrap client config.
+    /// Required for client_credentials grant.
+    #[serde(default)]
+    pub client_secret: String,
     /// JWKS endpoint URL. Default: `{cobotsrv_base}/.well-known/jwks.json`.
     #[serde(default = "default_jwks_url")]
     pub jwks_url: String,
@@ -217,6 +242,8 @@ pub struct Auth {
 impl Default for Auth {
     fn default() -> Self {
         Self {
+            client_id: default_client_id(),
+            client_secret: String::new(),
             jwks_url: default_jwks_url(),
             expected_audience: default_expected_audience(),
             jwks_refresh_secs: default_jwks_refresh_secs(),
@@ -228,6 +255,10 @@ impl Default for Auth {
 fn default_jwks_url() -> String {
     env::var("COBOTSRV_JWKS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:4000/.well-known/jwks.json".to_string())
+}
+
+fn default_client_id() -> String {
+    "cobotrix".to_string()
 }
 
 fn default_expected_audience() -> String {

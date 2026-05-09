@@ -1,12 +1,15 @@
 import { createRequest } from '@cobotweb/shared/http'
 import { clearAuth, getAccessToken, redirectToLogin, refreshAccessToken } from './auth'
 
-// All cobotrix-bound API calls go through cobotsrv's /mgmt/* proxy.
-// cobotsrv verifies the JWT once at the proxy layer, then cobotrix re-verifies
-// via JWKS — defense in depth.
+// API calls go directly to cobotrix. cobotrix independently verifies the JWT
+// (RS256 via JWKS) and enforces route-level require_perm! checks.
+// OIDC flows (authorize, token, refresh) go to cobotsrv — see auth.ts.
 export const request = createRequest({
-  baseURL: import.meta.env.VITE_COBOTSRV_URL ?? '',
+  baseURL: import.meta.env.VITE_COBOTRIX_URL ?? 'http://localhost:4001',
   getToken: () => getAccessToken() ?? undefined,
+  setToken: (_token: string) => {
+    // refreshAccessToken() already calls storeTokens()
+  },
   refreshToken: async () => {
     const newToken = await refreshAccessToken()
     if (!newToken) throw new Error('refresh failed')
