@@ -194,6 +194,9 @@ where
     );
     jwks.spawn_refresher(cfg.auth.jwks_refresh_secs);
 
+    // Sync required permissions to cobotsrv so the admin can assign them.
+    sync_permissions(&cfg).await;
+
     let protected = get_protected_routes().layer(middleware::from_fn_with_state(
         jwks.clone(),
         access_middleware_rs256,
@@ -279,6 +282,55 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 #[cfg(not(feature = "webui"))]
 async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
+}
+
+/// Sync required permissions to cobotsrv at startup.
+/// POSTs to cobotsrv's `/api/v1/application/sync-permissions` with
+/// client_id + client_secret (idempotent upsert).
+async fn sync_permissions(cfg: &Config) {
+    let perms = &cfg.permissions;
+    if perms.is_empty() {
+        return;
+    }
+
+    let cobotsrv_base = cfg
+        .auth
+        .jwks_url
+        .rsplit_once("/.well-known")
+        .map(|(base, _)| base.to_string())
+        .unwrap_or_else(|| cfg.auth.jwks_url.clone());
+
+    let client = reqwest::Client::new();
+
+    let body = serde_json::json!({
+        "client_id": cfg.auth.client_id,
+        "client_secret": cfg.auth.client_secret,
+        "permissions": perms.iter().map(|p| serde_json::json!({
+            "name": p.name,
+            "action": p.action,
+            "resource_type": p.resource_type,
+            "resource_pattern": p.resource_pattern,
+        })).collect::<Vec<_>>(),
+    });
+    match client
+        .post(format!(
+            "{}/api/v1/application/sync-permissions",
+            cobotsrv_base
+        ))
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => {
+            tracing::info!("{} permissions synced to cobotsrv", perms.len());
+        }
+        Ok(r) => {
+            tracing::warn!(status = %r.status(), "permission sync: cobotsrv returned error");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "permission sync: failed to reach cobotsrv");
+        }
+    }
 }
 
 #[derive(Clone)]

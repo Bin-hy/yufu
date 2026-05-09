@@ -2,16 +2,35 @@
 # 本文件是仓库中的可提交模板，不应包含任何真实密钥。
 
 [http]
-# Http Server Listen Address (建议仅监听 localhost，由 cobotsrv 代理访问)
+# Http Server Listen Address (生产环境建议仅监听 localhost)
 listen = "[::]:4001"
-api_prefix = "/api/v1"
 
 # JWT 验签配置。cobotrix 作为 cobotsrv 的 OIDC client，启动时从 cobotsrv 的 JWKS
 # 端点拉取公钥用于验签 Bearer token。无需共享密钥。
 [auth]
+# client_id = "cobotrix"           # OIDC client_id，对应 cobotsrv 的 bootstrap_clients
+# client_secret = ""               # OIDC client_secret，用于 refresh_token + permission sync
 # jwks_url = "http://127.0.0.1:4000/.well-known/jwks.json"  # 或环境变量 COBOTSRV_JWKS_URL
 # jwks_refresh_secs = 300
-# expected_audience = "cobotrix"  # 只接受 aud=cobotrix 的 token（拒绝 cobotsrv 后台登录的 token）
+# expected_audience = "cobotrix"  # 只接受 aud=cobotrix 的 token
+
+# 启动时自动同步到 cobotsrv 的权限列表。管理员在 cobotsrv 前端分配给角色即可。
+# [[permissions]]
+# name = "device:read"
+# action = "read"
+# resource_type = "device"
+# [[permissions]]
+# name = "task:execute"
+# action = "submit"
+# resource_type = "task"
+# [[permissions]]
+# name = "task:read"
+# action = "read"
+# resource_type = "task"
+# [[permissions]]
+# name = "remote:proxy"
+# action = "proxy"
+# resource_type = "remote"
 
 [log]
 # Env: `LOG_LEVEL`

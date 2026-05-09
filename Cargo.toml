@@ -63,6 +63,10 @@ utoipa = { version = "5.4", features = ["axum_extras"] }
 utoipa-swagger-ui = {version = "9.0", features = ["axum"]}
 uuid = {version = "1.18.1", features = ["v4"]}
 
+redb = "4"
+rumqttc = "0.24"
+dashmap = "6"
+
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["fs"] }

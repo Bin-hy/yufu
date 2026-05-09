@@ -60,8 +60,9 @@ async fn test_http_cluster() {
 
     let results = futures::future::join_all(rs).await;
 
-    let mut cfg = {
-        use cobotsrv::config::{Config, Http};
+    // cobotrix (management center) — handles remote proxy to cobotlets
+    let mut cobotrix_cfg = {
+        use cobotrix::config::{Config, Http};
         Config {
             http: Http {
                 listen: SocketAddr::new(ip, 0),
@@ -70,20 +71,19 @@ async fn test_http_cluster() {
             ..Default::default()
         }
     };
-
-    cfg.nodes.extend(
+    cobotrix_cfg.nodes.extend(
         results
             .into_iter()
-            .map(|(alias, addr)| cobotsrv::config::Node {
+            .map(|(alias, addr)| cobotrix::config::Node {
                 alias: alias.to_string(),
                 url: format!("http://{addr}"),
                 ..Default::default()
             }),
     );
 
-    let listener = TcpListener::bind(cfg.http.listen).await.unwrap();
+    let listener = TcpListener::bind(cobotrix_cfg.http.listen).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(cobotsrv::serve(cfg, listener, shutdown_signal()));
+    tokio::spawn(cobotrix::serve(cobotrix_cfg, listener, shutdown_signal()));
 
     let rs = devices.map(async |cfg| {
         let id = cfg.net4mqtt.unwrap().alias;

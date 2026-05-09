@@ -9,6 +9,31 @@ connect_timeout = 30
 # cobotrix pulls cobotsrv's public key from JWKS at startup. Default jwks_url
 # points at 127.0.0.1:4000 (matches conf/cobotnil/cobotsrv.toml's listen) so the
 # dev cluster works with no explicit auth config.
+[auth]
+client_id = "cobotrix"
+client_secret = "dev-cobotrix-secret-change-me"
+
+# Permissions cobotrix requires — automatically synced to cobotsrv at startup.
+# Admin assigns these to roles in cobotsrv's /permissions/assign page.
+[[permissions]]
+name = "device:read"
+action = "read"
+resource_type = "device"
+
+[[permissions]]
+name = "task:execute"
+action = "submit"
+resource_type = "task"
+
+[[permissions]]
+name = "task:read"
+action = "read"
+resource_type = "task"
+
+[[permissions]]
+name = "remote:proxy"
+action = "proxy"
+resource_type = "remote"
 
 [mqtt]
 url = "mqtt://127.0.0.1:1883"
