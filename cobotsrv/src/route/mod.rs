@@ -8,7 +8,6 @@ pub mod enforce;
 pub mod oidc;
 pub mod oidc_admin;
 pub mod permission;
-pub mod proxy;
 pub mod rbac;
 pub mod recording;
 pub mod role;
