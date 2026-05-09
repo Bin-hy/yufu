@@ -1,8 +1,6 @@
-use std::path::Path;
-use std::thread;
-
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
+use std::thread;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
 
@@ -69,14 +67,22 @@ async fn main() -> Result<()> {
 
     let broker_addr = MQTT_BROKER_ADDR.parse()?;
     // Start MQTT broker
-    let broker_addr = MQTT_BROKER_ADDR.parse().unwrap();
+    let broker_addr = MQTT_BROKER_ADDR
+        .parse()
+        .context("invalid MQTT broker address")?;
     thread::spawn(move || broker::up_mqtt_broker(broker_addr));
     broker::wait_for_port_availabilty(broker_addr).await;
 
     // Start cobotlet instances
-    let mut dir_entries = tokio::fs::read_dir(args.config.unwrap()).await.unwrap();
+    let mut dir_entries = tokio::fs::read_dir(&args.config)
+        .await
+        .context("failed to read config directory")?;
     let mut cobotlet_nodes = Vec::new();
-    while let Some(entry) = dir_entries.next_entry().await.unwrap() {
+    while let Some(entry) = dir_entries
+        .next_entry()
+        .await
+        .context("failed to read directory entry")?
+    {
         let file_name = entry.file_name().to_str().unwrap().to_string();
         let (srv, alias, _) = parse(&file_name);
         // Skip cobotsrv and cobotrix configs
@@ -90,8 +96,10 @@ async fn main() -> Result<()> {
             entry.path().to_str().map(|s| s.to_string()),
         );
         debug!("config : {:?}", cfg);
-        let listener = TcpListener::bind(&cfg.http.listen).await.unwrap();
-        let addr = listener.local_addr().unwrap();
+        let listener = TcpListener::bind(&cfg.http.listen)
+            .await
+            .context("failed to bind cobotlet listener")?;
+        let addr = listener.local_addr()?;
         info!("cobotlet[{alias}] listening on {}", addr);
         cobotlet_nodes.push(cobotrix::config::Node {
             alias: alias.to_string(),
@@ -103,11 +111,10 @@ async fn main() -> Result<()> {
     }
 
     // Start cobotsrv (auth service)
-    let cobotsrv_listener = TcpListener::bind(cobotsrv_cfg.http.listen).await.unwrap();
-    info!(
-        "cobotsrv listening on {}",
-        cobotsrv_listener.local_addr().unwrap()
-    );
+    let cobotsrv_listener = TcpListener::bind(&cobotsrv_cfg.http.listen)
+        .await
+        .context("failed to bind cobotsrv listener")?;
+    info!("cobotsrv listening on {}", cobotsrv_listener.local_addr()?);
     tokio::spawn(cobotsrv::serve(
         cobotsrv_cfg,
         cobotsrv_listener,
@@ -117,12 +124,12 @@ async fn main() -> Result<()> {
     // Start cobotrix (management center) — registers cobotlet nodes
     let mut cobotrix_cfg = cobotrix_cfg;
     cobotrix_cfg.nodes.extend(cobotlet_nodes);
-    let cobotrix_listener = TcpListener::bind(cobotrix_cfg.http.listen).await.unwrap();
-    info!(
-        "cobotrix listening on {}",
-        cobotrix_listener.local_addr().unwrap()
-    );
+    let cobotrix_listener = TcpListener::bind(&cobotrix_cfg.http.listen)
+        .await
+        .context("failed to bind cobotrix listener")?;
+    info!("cobotrix listening on {}", cobotrix_listener.local_addr()?);
     cobotrix::serve(cobotrix_cfg, cobotrix_listener, utils::shutdown_signal()).await;
 
     info!("Server shutdown");
+    Ok(())
 }

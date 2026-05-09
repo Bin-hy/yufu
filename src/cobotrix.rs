@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::{debug, info, warn};
 
@@ -13,7 +14,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let args = Args::parse();
     let cfg: cobotrix::config::Config = utils::load("cobotrix".to_string(), args.config);
 
@@ -34,8 +35,9 @@ async fn main() {
 
     let listener = tokio::net::TcpListener::bind(cfg.http.listen)
         .await
-        .unwrap();
+        .context("failed to bind listener")?;
 
     cobotrix::serve(cfg, listener, utils::shutdown_signal()).await;
     info!("Server shutdown");
+    Ok(())
 }
