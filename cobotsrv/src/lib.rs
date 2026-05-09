@@ -141,23 +141,11 @@ where
     // routes don't need auth, public routes
     let sub_public_router = route::get_public_routes();
 
-    // Proxy routes: /mgmt/* → cobotrix (JWT auth + user load, no RBAC)
-    let proxy_router = route::proxy::route()
-        .layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            load_user_middleware,
-        ))
-        .layer(middleware::from_fn_with_state(
-            id_token_signer.clone(),
-            access_middleware_local_rs256,
-        ));
-
     let api_prefix = &cfg.http.api_prefix;
     #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
     let mut app = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
-        .merge(proxy_router)
         .merge(get_no_prefix_routes())
         .layer({
             let origins: Vec<String> = app_state.clone().config.auth.origins;

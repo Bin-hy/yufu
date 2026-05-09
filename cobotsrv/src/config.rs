@@ -24,13 +24,6 @@ pub struct Http {
     pub public: String,
     #[serde(default = "default_api_prefix")]
     pub api_prefix: String,
-    /// Backend URL for cobotrix management center (auth proxy target).
-    #[serde(default = "default_cobotrix_url")]
-    pub cobotrix_url: String,
-}
-
-fn default_cobotrix_url() -> String {
-    "http://127.0.0.1:4001".to_string()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -120,7 +113,6 @@ impl Default for Http {
             listen: default_http_listen(),
             public: Default::default(),
             api_prefix: default_api_prefix(),
-            cobotrix_url: default_cobotrix_url(),
         }
     }
 }
