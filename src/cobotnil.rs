@@ -15,8 +15,8 @@ const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
 #[derive(Parser)]
 #[command(name = "cobotnil", version)]
 struct Args {
-    /// Set config file path
-    #[arg(short, long, default_value_t = format!("cobotnil"))]
+    /// Set config directory path (e.g. "conf/cobotnil")
+    #[arg(short, long, default_value_t = String::from("conf/cobotnil"))]
     config: String,
 }
 
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
         cobotsrv_cfg.log.level
     ));
 
-    debug!("config : {:?}", cfg);
+    debug!("config : {:?}", cobotsrv_cfg);
 
     let broker_addr = MQTT_BROKER_ADDR.parse()?;
     thread::spawn(move || broker::up_mqtt_broker(broker_addr));
