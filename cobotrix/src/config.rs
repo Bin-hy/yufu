@@ -135,6 +135,10 @@ pub struct Http {
     pub public: String,
     #[serde(default = "default_api_prefix")]
     pub api_prefix: String,
+    /// Allowed CORS origins. Default: `["*"]` (safe when cobotrix is behind cobotsrv proxy).
+    /// Set to specific origins if cobotrix is directly exposed.
+    #[serde(default = "default_cors_origins")]
+    pub cors_origins: Vec<String>,
 }
 
 impl Default for Http {
@@ -143,6 +147,7 @@ impl Default for Http {
             listen: default_http_listen(),
             public: Default::default(),
             api_prefix: default_api_prefix(),
+            cors_origins: default_cors_origins(),
         }
     }
 }
@@ -157,6 +162,10 @@ fn default_http_listen() -> SocketAddr {
 
 fn default_api_prefix() -> String {
     "/api/v1".to_string()
+}
+
+fn default_cors_origins() -> Vec<String> {
+    vec!["*".to_string()]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,21 +201,26 @@ pub struct Auth {
     /// JWKS endpoint URL. Default: `{cobotsrv_base}/.well-known/jwks.json`.
     #[serde(default = "default_jwks_url")]
     pub jwks_url: String,
-    /// If set, only tokens with `aud` matching this value are accepted (Phase 2 strict mode).
-    /// Phase 1: leave None to accept any audience.
-    #[serde(default)]
-    pub expected_audience: Option<String>,
+    /// If set, only tokens with `aud` matching this value are accepted.
+    /// Defaults to `"cobotrix"` — cobotrix only accepts tokens issued for itself.
+    #[serde(default = "default_expected_audience")]
+    pub expected_audience: String,
     /// JWKS background refresh interval in seconds (default: 5 min).
     #[serde(default = "default_jwks_refresh_secs")]
     pub jwks_refresh_secs: u64,
+    /// When true, route-level `require_perm!` layers are applied on protected routes.
+    /// Default true — cobotrix enforces permissions based on token claims.
+    #[serde(default = "default_require_permissions")]
+    pub require_permissions: bool,
 }
 
 impl Default for Auth {
     fn default() -> Self {
         Self {
             jwks_url: default_jwks_url(),
-            expected_audience: None,
+            expected_audience: default_expected_audience(),
             jwks_refresh_secs: default_jwks_refresh_secs(),
+            require_permissions: default_require_permissions(),
         }
     }
 }
@@ -214,6 +228,14 @@ impl Default for Auth {
 fn default_jwks_url() -> String {
     env::var("COBOTSRV_JWKS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:4000/.well-known/jwks.json".to_string())
+}
+
+fn default_expected_audience() -> String {
+    "cobotrix".to_string()
+}
+
+fn default_require_permissions() -> bool {
+    true
 }
 
 fn default_jwks_refresh_secs() -> u64 {

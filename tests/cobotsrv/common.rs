@@ -48,6 +48,8 @@ pub fn get_test_token(cfg: &mut Config) -> String {
             "cobotsrv",
             "",
             60 * 60 * 24 * 365 * 100,
+            vec![],
+            vec![],
         )
         .unwrap()
 }

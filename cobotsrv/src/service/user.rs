@@ -38,7 +38,9 @@ impl UserService {
                     // 2.1 校验成功，分发对应权限的token
                     let jti = uuid::Uuid::new_v4().to_string();
 
-                    let access_token = state.sign_access_token(exsiting_user.id, SELF_AUD, "")?;
+                    let access_token = state
+                        .sign_access_token(exsiting_user.id, SELF_AUD, "")
+                        .await?;
                     let refresh_token = state
                         .refresh_token_manager()
                         .generate_refresh_token::<IdType>(jti.clone(), exsiting_user.id)?;
@@ -126,7 +128,7 @@ impl UserService {
 
         let mut user_vo = UserVO::from(inserted);
         user_vo.set_role(role::RoleVO::from(role));
-        let access_token = state.sign_access_token(user_vo.id, SELF_AUD, "")?;
+        let access_token = state.sign_access_token(user_vo.id, SELF_AUD, "").await?;
 
         Ok((user_vo, access_token))
     }
@@ -167,7 +169,7 @@ impl UserService {
         // 2. 存储了 refresh token -> 返回 access_token
         let jti = uuid::Uuid::new_v4().to_string();
 
-        let access_token = state.sign_access_token(claims.sub, SELF_AUD, "")?;
+        let access_token = state.sign_access_token(claims.sub, SELF_AUD, "").await?;
         let refresh_token_new =
             refresh_manager.generate_refresh_token::<IdType>(jti.clone(), claims.sub)?;
         refresh_token::Entity::upsert_refresh_token(db, jti, claims.sub).await?;

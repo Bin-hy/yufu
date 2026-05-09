@@ -171,6 +171,42 @@ export const constantRoutes: RouteRecordRaw[] = [
           }
         ]
       },
+      // Application 注册管理
+      {
+        path: '/applications',
+        name: 'applications',
+        component: () => import('@/pages/applications/index.vue'),
+        meta: { title: '应用注册', icon: 'apps' },
+        children: [
+          {
+            path: '',
+            name: 'application-list',
+            component: () => import('@/pages/applications/views/application-list.vue'),
+            meta: { title: '应用列表' }
+          }
+        ]
+      },
+      // 资源权限管理
+      {
+        path: '/permissions',
+        name: 'permissions',
+        component: () => import('@/pages/permissions/index.vue'),
+        meta: { title: '资源权限', icon: 'security' },
+        children: [
+          {
+            path: '',
+            name: 'permission-list',
+            component: () => import('@/pages/permissions/views/permission-list.vue'),
+            meta: { title: '权限列表' }
+          },
+          {
+            path: 'assign',
+            name: 'permission-assign',
+            component: () => import('@/pages/permissions/views/permission-assign.vue'),
+            meta: { title: '权限分配' }
+          }
+        ]
+      },
       // 已授权应用
       {
         path: '/authorized-apps',

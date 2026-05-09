@@ -1,11 +1,8 @@
 /// OIDC Authorization Code + PKCE flow for cobotrix.
 ///
-/// cobotrix is a public OIDC client of cobotsrv (no client_secret in browser).
-/// On boot the router guard checks `isAuthenticated()`; if not, it kicks off
-/// `redirectToLogin()` which generates a PKCE pair, stashes the verifier in
-/// sessionStorage, and full-page redirects to cobotsrv's /oidc/authorize.
-/// cobotsrv bounces back to /oauth/callback with `code` + `state`, which
-/// `handleCallback()` exchanges for an access_token + refresh_token.
+/// cobotrix is a public OIDC client (no client_secret). PKCE provides
+/// proof-of-possession — cobotsrv accepts authorization_code tokens without
+/// client_secret when PKCE is used (RFC 7636).
 
 const STORAGE_KEYS = {
   accessToken: 'cobotrix.access_token',
@@ -18,11 +15,6 @@ const STORAGE_KEYS = {
 
 const COBOTSRV_BASE = (import.meta.env.VITE_COBOTSRV_URL ?? '').replace(/\/$/, '')
 const CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? 'cobotrix'
-// Public clients running PKCE technically don't need a secret, but cobotsrv's
-// current OIDC token endpoint still validates it. Bundling a "dev-only" secret
-// in the SPA is acceptable in development; production should use confidential
-// client + backend-for-frontend, or update cobotsrv to allow PKCE-only clients.
-const CLIENT_SECRET = import.meta.env.VITE_OIDC_CLIENT_SECRET ?? ''
 const REDIRECT_URI =
   import.meta.env.VITE_OIDC_REDIRECT_URI ?? `${window.location.origin}/oauth/callback`
 const SCOPE = 'openid profile email'
@@ -123,7 +115,6 @@ export async function handleCallback(code: string, state: string): Promise<strin
     client_id: CLIENT_ID,
     code_verifier: verifier,
   })
-  if (CLIENT_SECRET) body.set('client_secret', CLIENT_SECRET)
 
   const resp = await fetch(`${COBOTSRV_BASE}/oidc/token`, {
     method: 'POST',
@@ -159,7 +150,6 @@ export async function refreshAccessToken(): Promise<string | null> {
     refresh_token: rt,
     client_id: CLIENT_ID,
   })
-  if (CLIENT_SECRET) body.set('client_secret', CLIENT_SECRET)
 
   try {
     const resp = await fetch(`${COBOTSRV_BASE}/oidc/token`, {

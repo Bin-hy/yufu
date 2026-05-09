@@ -9,12 +9,19 @@ use crate::entity::device::DeviceVO;
 use crate::error::AppError;
 use crate::result::Result;
 use crate::service::device::DeviceService;
+use auth::require_perm;
 
 pub fn get_routes() -> Router<AppState> {
     Router::new()
-        .route("/devices", get(list))
-        .route("/devices/{cobotlet_alias}", get(list_by_alias))
-        .route("/devices/{cobotlet_alias}/{device_id}", get(get_one))
+        .route("/devices", get(list).layer(require_perm!("device:read")))
+        .route(
+            "/devices/{cobotlet_alias}",
+            get(list_by_alias).layer(require_perm!("device:read")),
+        )
+        .route(
+            "/devices/{cobotlet_alias}/{device_id}",
+            get(get_one).layer(require_perm!("device:read")),
+        )
 }
 
 async fn list(State(state): State<AppState>) -> Result<Json<Vec<DeviceVO>>> {

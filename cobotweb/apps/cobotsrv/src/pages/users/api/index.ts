@@ -101,4 +101,44 @@ export async function patchUserAuthorityOverride(payload: UseAuthorityPatchReq):
     })
 }
 
-// 注意：不要添加新的后端接口，这里保留通用分页查询，界面按 user_id 进行本地过滤
+// ======== 用户资源权限覆写接口 ========
+export async function getUserPermissionOverridesByPage(
+  page_number: number,
+  page_size: number
+): Promise<PageResult<import('@/types/models').UserPermVO>> {
+  return request<PageResult<import('@/types/models').UserPermVO>>({
+    url: '/user_permission_override',
+    method: 'GET',
+    params: { page_number, page_size },
+  })
+}
+
+export async function addUserPermissionOverride(
+  payload: import('./type').UserPermOverrideAddReq
+): Promise<import('@/types/models').UserPermVO> {
+  return request<import('@/types/models').UserPermVO>({
+    url: '/user_permission_override',
+    method: 'POST',
+    data: payload,
+  })
+}
+
+export async function patchUserPermissionOverride(
+  payload: import('./type').UserPermOverridePatchReq
+): Promise<import('@/types/models').UserPermVO> {
+  return request<import('@/types/models').UserPermVO>({
+    url: '/user_permission_override',
+    method: 'PATCH',
+    data: payload,
+  })
+}
+
+export async function deleteUserPermissionOverride(
+  payload: import('./type').UserPermOverrideDeleteReq
+): Promise<string> {
+  return request<string>({
+    url: '/user_permission_override',
+    method: 'DELETE',
+    data: payload,
+  })
+}

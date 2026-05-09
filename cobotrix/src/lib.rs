@@ -188,7 +188,7 @@ where
     // Hard-fail at startup if the JWKS is unreachable — running an unauthenticated cobotrix
     // is worse than refusing to start.
     let jwks = Arc::new(
-        JwksClient::new(&cfg.auth.jwks_url, cfg.auth.expected_audience.clone())
+        JwksClient::new(&cfg.auth.jwks_url, Some(cfg.auth.expected_audience.clone()))
             .await
             .expect("failed to fetch cobotsrv JWKS at startup"),
     );
@@ -203,7 +203,7 @@ where
         .merge(protected)
         .merge(get_public_routes())
         .layer({
-            let origins: Vec<String> = vec!["*".to_string()]; // internal, trust proxy
+            let origins: Vec<String> = app_state.config.http.cors_origins.clone();
             let has_wildcard = origins.iter().any(|o| o == "*");
             let cors_layer = CorsLayer::new()
                 .allow_credentials(true)

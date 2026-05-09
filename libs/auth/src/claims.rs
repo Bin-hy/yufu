@@ -58,6 +58,9 @@ where
 /// Verified by holders of the IdP's public key (via JWKS) without any
 /// shared secret. `sub` is a string per OIDC; parse to your local ID type
 /// (e.g. `claims.sub.parse::<i32>()`) when needed.
+///
+/// `roles` and `permissions` are embedded at token issuance so downstream
+/// services can make coarse-grained local decisions without calling the PDP.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct AccessTokenClaims {
     pub iss: String,
@@ -68,6 +71,10 @@ pub struct AccessTokenClaims {
     pub jti: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub scope: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<String>,
 }
 
 impl Display for AccessTokenClaims {

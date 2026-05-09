@@ -52,7 +52,12 @@ impl IntoResponse for AppError {
             AppError::NotFound(err) => (StatusCode::NOT_FOUND, err).into_response(),
             AppError::AlreadyExists(err) => (StatusCode::CONFLICT, err).into_response(),
             AppError::InternalServerError(err) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+                tracing::error!(?err, "internal server error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
+                    .into_response()
             }
             AppError::Throw(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
             AppError::Unauthorized(err) => (StatusCode::UNAUTHORIZED, err).into_response(),

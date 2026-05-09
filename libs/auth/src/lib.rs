@@ -498,3 +498,40 @@ pub async fn access_middleware_local_rs256(
             .into_response(),
     }
 }
+
+/// Macro: create an axum middleware layer that requires a specific permission
+/// in the token's `permissions` claim.
+///
+/// The token MUST already be verified by `access_middleware_rs256` or
+/// `access_middleware_local_rs256` so `AccessTokenClaims` is in request extensions.
+///
+/// # Usage
+///
+/// ```ignore
+/// use auth::require_perm;
+///
+/// Router::new()
+///     .route("/devices", get(list).layer(require_perm!("device:read")))
+/// ```
+#[macro_export]
+macro_rules! require_perm {
+    ($perm:expr) => {
+        axum::middleware::from_fn(
+            |request: axum::extract::Request, next: axum::middleware::Next| async move {
+                let allowed = request
+                    .extensions()
+                    .get::<$crate::claims::AccessTokenClaims>()
+                    .map(|c| c.permissions.iter().any(|p| p == $perm))
+                    .unwrap_or(false);
+                if allowed {
+                    next.run(request).await
+                } else {
+                    axum::response::IntoResponse::into_response((
+                        axum::http::StatusCode::FORBIDDEN,
+                        concat!("Missing permission: ", $perm),
+                    ))
+                }
+            },
+        )
+    };
+}

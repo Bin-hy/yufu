@@ -8,10 +8,10 @@ api_prefix = "/api/v1"
 
 # JWT 验签配置。cobotrix 作为 cobotsrv 的 OIDC client，启动时从 cobotsrv 的 JWKS
 # 端点拉取公钥用于验签 Bearer token。无需共享密钥。
-# [auth]
+[auth]
 # jwks_url = "http://127.0.0.1:4000/.well-known/jwks.json"  # 或环境变量 COBOTSRV_JWKS_URL
 # jwks_refresh_secs = 300
-# expected_audience = "cobotrix"  # Phase 2 启用严格 aud 校验时填入
+# expected_audience = "cobotrix"  # 只接受 aud=cobotrix 的 token（拒绝 cobotsrv 后台登录的 token）
 
 [log]
 # Env: `LOG_LEVEL`

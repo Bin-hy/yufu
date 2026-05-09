@@ -40,3 +40,43 @@ export interface UserAuthorityVO{
     create_time: string,
     update_time: string,
 }
+
+export interface ApplicationVO {
+    id: number
+    app_key: string
+    name: string
+    description?: string | null
+    oidc_client_id?: number | null
+    create_time: string
+    update_time: string
+}
+
+export interface PermissionVO {
+    id: number
+    application_id: number
+    name: string
+    description?: string | null
+    action: string
+    resource_type?: string | null
+    resource_pattern?: string | null
+    create_time: string
+    update_time: string
+}
+
+export interface UserPermVO {
+    user_id: number
+    permission_id: number
+    allow: boolean
+    create_time: string
+    update_time: string
+    user_vo?: UserVO | null
+    permission_vo?: PermissionVO | null
+}
+
+export interface RolePermVO {
+    role_id: number
+    permission_id: number
+    create_time: string
+    role?: RoleVO | null
+    permission?: PermissionVO | null
+}

@@ -13,11 +13,15 @@ use crate::AppState;
 use crate::error::AppError;
 use crate::mqtt::{Task, TaskResult};
 use crate::result::Result;
+use auth::require_perm;
 
 pub fn get_routes() -> Router<AppState> {
     Router::new()
-        .route("/tasks", post(submit))
-        .route("/tasks/{task_id}", get(get_result))
+        .route("/tasks", post(submit).layer(require_perm!("task:execute")))
+        .route(
+            "/tasks/{task_id}",
+            get(get_result).layer(require_perm!("task:read")),
+        )
 }
 
 #[derive(Debug, Deserialize)]

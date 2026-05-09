@@ -4,6 +4,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
+use crate::entity::oauth_client;
 use crate::result::Result;
 use crate::service::oidc::{CreateAuthCodeParams, OidcService, get_issuer_base};
 use crate::{AppState, IdType, parse_user_id};
@@ -339,13 +340,25 @@ async fn handle_authorization_code(
         ));
     }
 
-    // Authenticate client
-    let client = OidcService::authenticate_client(
-        db,
-        req.client_id.as_deref(),
-        req.client_secret.as_deref(),
-    )
-    .await?;
+    // PKCE (code_challenge present) provides proof-of-possession — public clients
+    // (SPA) don't need client_secret. Non-PKCE flows still require secret auth.
+    let pkce_used = !entry.code_challenge.is_empty();
+    let client = if pkce_used {
+        let cid = req
+            .client_id
+            .as_deref()
+            .ok_or(crate::error::AppError::BadRequest(
+                "missing client_id".to_string(),
+            ))?;
+        oauth_client::Entity::get_by_client_id(db, cid)
+            .await?
+            .ok_or(crate::error::AppError::Unauthorized(
+                "invalid client_id".to_string(),
+            ))?
+    } else {
+        OidcService::authenticate_client(db, req.client_id.as_deref(), req.client_secret.as_deref())
+            .await?
+    };
 
     // Validate consistency
     if entry.client_id != client.client_id
@@ -361,8 +374,8 @@ async fn handle_authorization_code(
         ));
     }
 
-    // Verify PKCE (only if the authorization request included a code_challenge)
-    if !entry.code_challenge.is_empty() {
+    // Verify PKCE
+    if pkce_used {
         let verifier = code_verifier.ok_or(crate::error::AppError::BadRequest(
             "missing code_verifier (PKCE was used during authorization)".to_string(),
         ))?;

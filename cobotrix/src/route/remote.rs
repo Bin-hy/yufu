@@ -9,11 +9,16 @@ use tracing::Span;
 
 use crate::store::Node;
 use crate::{AppState, error::AppError, result::Result};
+use auth::require_perm;
 
 pub fn route() -> Router<AppState> {
     Router::new().route(
         "/remote/{device}/{module}",
-        get(remote).post(remote).patch(remote).delete(remote),
+        get(remote)
+            .post(remote)
+            .patch(remote)
+            .delete(remote)
+            .layer(require_perm!("remote:proxy")),
     )
 }
 
