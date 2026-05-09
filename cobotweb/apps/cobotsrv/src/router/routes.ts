@@ -144,34 +144,18 @@ export const constantRoutes: RouteRecordRaw[] = [
           }
         ]
       },
-      // 应用管理 (OAuth/OIDC)
+      // 应用管理 (OAuth/OIDC) — 重定向到统一应用管理页
       {
         path: '/oauth',
-        name: 'oauth',
-        component: () => import('@/pages/oauth/index.vue'),
-        meta: { title: '应用管理', icon: 'apps' },
-        children: [
-          {
-            path: '',
-            name: 'oauth-list',
-            component: () => import('@/pages/oauth/views/oauth-list.vue'),
-            meta: { title: 'OAuth Apps' }
-          },
-          {
-            path: 'new',
-            name: 'oauth-create',
-            component: () => import('@/pages/oauth/views/oauth-create.vue'),
-            meta: { title: '注册应用' }
-          },
-          {
-            path: ':id',
-            name: 'oauth-detail',
-            component: () => import('@/pages/oauth/views/oauth-detail.vue'),
-            meta: { title: '应用详情' }
-          }
-        ]
+        redirect: '/applications',
+        meta: { hidden: true },
       },
-      // Application 注册管理
+      {
+        path: '/oauth/:pathMatch(.*)*',
+        redirect: '/applications',
+        meta: { hidden: true },
+      },
+      // 统一应用管理（OAuth Client + Application + Permission namespace）
       {
         path: '/applications',
         name: 'applications',

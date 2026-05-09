@@ -17,6 +17,12 @@ pub struct ClientCreateReq {
     pub homepage_url: Option<String>,
     pub description: Option<String>,
     pub redirect_uri: String,
+    #[serde(default)]
+    pub redirect_uris: Option<Vec<String>>,
+    #[serde(default)]
+    pub allowed_scopes: Option<Vec<String>>,
+    #[serde(default)]
+    pub grant_types: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -104,21 +110,23 @@ async fn create_client(
 ) -> Result<Json<ClientCreateResp>> {
     let db = &state.database.connection;
     let user_id = parse_user_id(&claim.sub)?;
+    let redirect_uris = req
+        .redirect_uris
+        .unwrap_or_else(|| vec![req.redirect_uri.clone()]);
+    let allowed_scopes = req
+        .allowed_scopes
+        .unwrap_or_else(|| vec!["openid".into(), "profile".into(), "email".into()]);
+    let grant_types = req
+        .grant_types
+        .unwrap_or_else(|| vec!["authorization_code".into(), "refresh_token".into()]);
     let (inserted, client_secret) = OidcService::register_client(
         db,
         user_id,
         uuid::Uuid::new_v4().to_string(),
         req.name,
-        vec![req.redirect_uri],
-        vec![
-            "openid".to_string(),
-            "profile".to_string(),
-            "email".to_string(),
-        ],
-        vec![
-            "authorization_code".to_string(),
-            "refresh_token".to_string(),
-        ],
+        redirect_uris,
+        allowed_scopes,
+        grant_types,
     )
     .await?;
     Ok(Json(ClientCreateResp {

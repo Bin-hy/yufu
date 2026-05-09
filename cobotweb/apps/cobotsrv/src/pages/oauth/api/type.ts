@@ -10,12 +10,15 @@ export interface ClientVO {
   update_time: string
 }
 
-// 注册应用请求（GitHub 风格：只需名称 + 回调 URL）
+// 注册应用请求
 export interface ClientCreateReq {
   name: string
   homepage_url?: string
   description?: string
   redirect_uri: string
+  redirect_uris?: string[]
+  allowed_scopes?: string[]
+  grant_types?: string[]
 }
 
 // 注册应用响应（含一次性 secret）

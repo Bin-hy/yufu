@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, watchEffect, computed } from 'vue'
 const props = withDefaults(
-  defineProps<{ open?: boolean; title?: string; size?: 'md' | 'lg' | 'xl'; contentScrollable?: boolean }>(),
-  { open: false, size: 'md', contentScrollable: true }
+  defineProps<{ open?: boolean; title?: string; size?: 'md' | 'lg' | 'xl'; contentScrollable?: boolean; hideFooter?: boolean }>(),
+  { open: false, size: 'md', contentScrollable: true, hideFooter: false }
 )
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'confirm'): void; (e: 'cancel'): void }>()
 const visible = ref(props.open)
@@ -63,7 +63,7 @@ const sizeClass = computed(() => {
             </div>
 
             <!-- 底部按钮 -->
-            <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/40 rounded-b-2xl">
+            <div v-if="!props.hideFooter" class="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/40 rounded-b-2xl">
               <button
                 class="inline-flex h-9 items-center justify-center rounded-xl border border-input bg-background px-4 text-sm font-medium text-foreground hover:bg-accent transition-colors"
                 @click="onCancel"

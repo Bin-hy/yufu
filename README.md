@@ -510,3 +510,236 @@ libs/auth/src/
 └── token_manager.rs   # IdTokenSigner (RSA/HMAC 双模���名, JWKS 导出)
 ```
 
+
+---
+
+## cobotsrv 权限平台架构
+
+### 定位与权责
+
+cobotsrv 是平台的**统一认证中心（IdP）+ 授权决策中心（PDP）**。它不包含任何具体业务应用的权限逻辑。
+
+```
+                         ┌──────────────────────────────────┐
+                         │            cobotsrv               │
+                         │                                  │
+   OIDC 认证 ──────────▶ │  /oidc/authorize                 │
+                         │  /oidc/token                     │
+                         │  /.well-known/jwks.json          │
+                         │                                  │
+   应用注册 ──────────▶  │  application 表                  │
+                         │  [[oidc.bootstrap_clients]]       │
+                         │                                  │
+   权限定义 ──────────▶  │  permission 表 (per-app)          │
+                         │  role_permission / user_permission │
+                         │                                  │
+   权限决策 ──────────▶  │  POST /api/v1/enforce (PDP)      │
+                         │  JWT claims.permissions (粗粒度)  │
+                         └──────────────┬───────────────────┘
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    ▼                   ▼                   ▼
+              ┌──────────┐       ┌──────────┐       ┌──────────┐
+              │ cobotrix │       │  应用 B   │       │  应用 C   │
+              │ (IoT 管理)│       │          │       │          │
+              └──────────┘       └──────────┘       └──────────┘
+```
+
+**cobotsrv 负责：**
+- OIDC 身份认证（签发 JWT，发布 JWKS 公钥）
+- 应用注册（application 表，app_key 唯一标识）
+- 权限规则管理（permission 表，per-application 隔离）
+- 角色-权限绑定 + 用户级覆写（ABAC allow/deny）
+- JWT 嵌入权限声明（粗粒度，本地 O(1) 判断）
+- PDP 远程决策（`/enforce`，细粒度 glob 匹配 resource_pattern）
+
+**cobotsrv 不负责：**
+- 定义具体应用的权限规则（由各应用自己在配置文件里声明）
+- 执行具体应用的权限检查（由各应用自己用 `require_perm!` 或调 `/enforce`）
+- 存储业务数据
+
+### 两套权限体系
+
+cobotsrv 本身有两套并行的权限体系，互不干扰：
+
+| 体系 | 表 | 粒度 | 适用场景 |
+|------|-----|------|---------|
+| **authority** | authority, authority_role, user_authority | URI + HTTP Method | cobotsrv **自己的** API 访问控制（谁能调 /api/v1/user） |
+| **permission** | application, permission, role_permission, user_permission | action + resource_type + resource_pattern | **接入应用的**业务权限（谁能读设备、提交任务） |
+
+```
+authority:  管理员 → 能不能调 POST /api/v1/user？   → cobotsrv RBAC 中间件
+permission: 用户   → 能不能在 cobotrix 里读设备？   → require_perm!("device:read")
+```
+
+### 数据模型
+
+```
+application               # 应用的"户口本"
+  ├── app_key (唯一标识)    # e.g. "cobotrix"
+  └── oidc_client_id → oauth_client (可选)
+        │
+        │ 1:N
+        ▼
+permission                # 权限规则定义
+  ├── name = "device:read"
+  ├── action = "read"
+  ├── resource_type = "device"
+  └── resource_pattern = "*"
+        │
+        ├── N:N ── role_permission    # 角色能干什么（RBAC）
+        │            role_id → role
+        │
+        └── N:N ── user_permission    # 用户个人覆写 allow/deny（ABAC）
+                     user_id → user
+```
+
+### 应用接入流程（以 cobotrix 为例）
+
+**Step 1 — 在 cobotsrv 注册应用**
+
+在 `conf/cobotsrv.toml` 配置 bootstrap client，启动时自动创建 oauth_client + application 行：
+
+```toml
+[[oidc.bootstrap_clients]]
+client_id = "cobotrix"
+name = "CoBotrix Management Center"
+redirect_uris = ["http://localhost:5173/oauth/callback"]
+allowed_scopes = ["openid", "profile", "email"]
+grant_types = ["authorization_code", "refresh_token"]
+client_secret = "your-secret-here"
+```
+
+**Step 2 — cobotrix 声明所需权限**
+
+在 cobotrix 的 `conf/cobotrix.toml` 中声明权限，启动时自动同步到 cobotsrv：
+
+```toml
+[auth]
+client_id = "cobotrix"
+client_secret = "your-secret-here"
+
+[[permissions]]
+name = "device:read"
+action = "read"
+resource_type = "device"
+
+[[permissions]]
+name = "task:execute"
+action = "submit"
+resource_type = "task"
+
+[[permissions]]
+name = "task:read"
+action = "read"
+resource_type = "task"
+
+[[permissions]]
+name = "remote:proxy"
+action = "proxy"
+resource_type = "remote"
+```
+
+同步机制：cobotrix 启动时调 `POST /api/v1/application/sync-permissions`（client_id + client_secret 认证），幂等 upsert。
+
+**Step 3 — 管理员分配权限**
+
+在 cobotsrv 管理前端 `/permissions/assign` 页面，将 permission 分配给角色。用户登录后 JWT 自动携带对应 permissions 数组。
+
+**Step 4 — cobotrix 侧 enforce**
+
+路由层用 `require_perm!` 本地检查（读 token claims，零网络开销）：
+
+```rust
+use auth::require_perm;
+
+Router::new()
+    .route("/devices", get(list).layer(require_perm!("device:read")))
+    .route("/tasks", post(submit).layer(require_perm!("task:execute")))
+    .route("/tasks/{id}", get(get_result).layer(require_perm!("task:read")))
+```
+
+细粒度场景（如"用户只能操作自己的设备"）调 PDP：
+
+```json
+POST /api/v1/enforce
+{
+  "application": "cobotrix",
+  "subject": 42,
+  "action": "read",
+  "resource_type": "device",
+  "resource_id": "cobotlet-0:sensor-3"
+}
+→ { "allow": true, "reason": "matched permission #17" }
+```
+
+### 新增管理 API 端点
+
+| 方法 | 路径 | 认证 | 作用 |
+|------|------|------|------|
+| GET/POST/PATCH/DELETE | `/api/v1/application` | JWT + RBAC | 应用注册 CRUD |
+| GET/POST/PATCH/DELETE | `/api/v1/permission` | JWT + RBAC | 权限规则 CRUD（支持 ?application_id= 过滤） |
+| POST/DELETE | `/api/v1/role_permission` | JWT + RBAC | 单条角色-权限绑定/解绑 |
+| POST/DELETE | `/api/v1/role_permission/batch` | JWT + RBAC | 批量角色-权限绑定/解绑 |
+| GET | `/api/v1/role_permission/{role_id}` | JWT + RBAC | 查某角色的权限列表 |
+| GET/POST/PATCH/DELETE | `/api/v1/user_permission_override` | JWT + RBAC | 用户权限覆写（ABAC allow/deny） |
+| POST | `/api/v1/enforce` | JWT + RBAC | PDP 细粒度决策（glob 匹配 resource_pattern） |
+| POST | `/api/v1/application/sync-permissions` | client_id + client_secret | 应用启动时同步权限声明（公开端点） |
+
+### cobotsrv 前端管理页面
+
+| 页面 | 路由 | 功能 |
+|------|------|------|
+| 应用注册 | `/applications` | 查看已注册的应用列表（bootstrap + sync 自动创建） |
+| 资源权限 | `/permissions` | 权限规则 CRUD，按 application 过滤 |
+| 权限分配 | `/permissions/assign` | 角色卡片 → 弹窗 checkbox diff → 批量保存 |
+| 用户覆写 | `/users` → 权限覆写弹窗 | 资源权限 tab（allow/deny），与 API 权限 tab 并列 |
+
+### Token 权限嵌入
+
+用户登录或刷新 token 时，`sign_access_token()` 自动解析用户权限：
+
+```
+resolve_user_permissions(db, user_id, aud):
+  1. 查 user → role
+  2. 查 application WHERE app_key = aud
+  3. 查 application 下所有 permission
+  4. 查 user_permission 覆写（allow/deny，优先于 RBAC）
+  5. 查 role_permission（通过用户角色）
+  6. 返回 (roles, permission_names)
+  → 嵌入 JWT claims: { roles: ["User"], permissions: ["device:read", "task:execute"] }
+```
+
+### 架构约定
+
+- **Permission 名称即契约**：应用在路由里写 `require_perm!("device:read")`，同时在 config 里声明同名 permission，不需要额外的路由→权限映射表
+- **粗粒度走 claims**：路由级检查用 `require_perm!` 读 JWT，零网络开销
+- **细粒度走 PDP**：需要匹配 resource_id 时调 `/enforce`，调用方自己缓存（建议 5s）
+- **应用之间隔离**：permission 通过 application_id 严格隔离，token 的 aud 决定查哪个应用的权限
+- **cobotsrv 不管业务规则**：不在 cobotsrv 代码里硬编码任何应用的具体权限
+- **require_perm! 宏**：位于 `libs/auth` crate，`#[macro_export]` 导出，任何接入应用都可以用
+
+### 文件结构（权限相关）
+
+```
+cobotsrv/src/
+├── route/
+│   ├── application.rs        # 应用注册 CRUD
+│   ├── permission.rs         # 权限规则 CRUD
+│   ├── role_permission.rs    # 角色-权限绑定管理
+│   ├── user_permission.rs    # 用户权限覆写管理
+│   ├── enforce.rs            # PDP 决策端点
+│   └── sync_permissions.rs   # 应用启动时同步权限
+├── entity/
+│   ├── application.rs
+│   ├── permission.rs
+│   ├── role_permission.rs
+│   └── user_permission.rs
+├── service/
+│   └── permission.rs         # resolve_user_permissions + enforce
+└── seed/
+    └── m20260508_000006_seed_permission_authorities.rs
+
+libs/auth/src/
+├── claims.rs                 # AccessTokenClaims (含 roles + permissions 字段)
+└── lib.rs                    # require_perm! 宏

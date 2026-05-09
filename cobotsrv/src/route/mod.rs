@@ -13,6 +13,7 @@ pub mod rbac;
 pub mod recording;
 pub mod role;
 pub mod role_permission;
+pub mod sync_permissions;
 pub mod user;
 pub mod user_authority;
 pub mod user_permission;
@@ -39,6 +40,7 @@ pub fn get_public_routes() -> Router<AppState> {
         .merge(user::get_public_routes())
         .merge(auth::get_public_routes())
         .merge(rbac::get_public_routes())
+        .merge(sync_permissions::get_public_routes())
 }
 
 pub fn get_no_prefix_routes() -> Router<AppState> {
