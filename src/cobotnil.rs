@@ -5,14 +5,9 @@ use tokio::net::TcpListener;
 use tracing::{debug, info};
 
 use net4mqtt::broker;
-use tracing::{debug, info};
 
 mod log;
 mod utils;
-
-use tokio::net::TcpListener;
-
-use net4mqtt::broker;
 
 const COBOTSRV_NAME: &str = "cobotsrv";
 const COBOTRIX_NAME: &str = "cobotrix";
@@ -21,8 +16,8 @@ const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
 #[derive(Parser)]
 #[command(name = "cobotnil", version)]
 struct Args {
-    /// Set config file path
-    #[arg(short, long, default_value_t = format!("cobotnil"))]
+    /// Set config directory path (e.g. "conf/cobotnil")
+    #[arg(short, long, default_value_t = String::from("conf/cobotnil"))]
     config: String,
 }
 
@@ -41,17 +36,13 @@ async fn main() -> Result<()> {
     // Load cobotsrv config
     let cobotsrv_cfg: cobotsrv::config::Config = utils::load(
         COBOTSRV_NAME.to_string(),
-        args.config
-            .clone()
-            .map(|s| format!("{s}/{COBOTSRV_NAME}.toml")),
+        Some(format!("{}/{COBOTSRV_NAME}.toml", args.config)),
     );
 
     // Load cobotrix config
     let cobotrix_cfg: cobotrix::config::Config = utils::load(
         COBOTRIX_NAME.to_string(),
-        args.config
-            .clone()
-            .map(|s| format!("{s}/{COBOTRIX_NAME}.toml")),
+        Some(format!("{}/{COBOTRIX_NAME}.toml", args.config)),
     );
 
     log::set(format!(
@@ -63,11 +54,10 @@ async fn main() -> Result<()> {
         cobotsrv_cfg.log.level
     ));
 
-    debug!("config : {:?}", cfg);
+    debug!("config : {:?}", cobotsrv_cfg);
 
-    let broker_addr = MQTT_BROKER_ADDR.parse()?;
     // Start MQTT broker
-    let broker_addr = MQTT_BROKER_ADDR
+    let broker_addr: std::net::SocketAddr = MQTT_BROKER_ADDR
         .parse()
         .context("invalid MQTT broker address")?;
     thread::spawn(move || broker::up_mqtt_broker(broker_addr));
