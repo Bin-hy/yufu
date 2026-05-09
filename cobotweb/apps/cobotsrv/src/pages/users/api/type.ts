@@ -54,3 +54,22 @@ export interface UseAuthorityPatchReq{
     authority_id: number,
     allow: boolean,
 }
+
+// ==============================
+// 用户资源权限覆写请求
+export interface UserPermOverrideAddReq {
+  user_id: number
+  permission_id: number
+  allow: boolean
+}
+
+export interface UserPermOverridePatchReq {
+  user_id: number
+  permission_id: number
+  allow: boolean
+}
+
+export interface UserPermOverrideDeleteReq {
+  user_id: number
+  permission_id: number
+}

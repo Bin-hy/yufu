@@ -355,11 +355,13 @@ impl OidcService {
         client: &oauth_client::Model,
     ) -> Result<(String, String, String)> {
         let base = get_issuer_base(state);
-        let access_token = state.sign_access_token(
-            entry.user_id,
-            &client.client_id,
-            entry.scope.as_deref().unwrap_or(""),
-        )?;
+        let access_token = state
+            .sign_access_token(
+                entry.user_id,
+                &client.client_id,
+                entry.scope.as_deref().unwrap_or(""),
+            )
+            .await?;
 
         let id_token = state.id_token_signer().sign_id_token::<IdType>(
             entry.user_id,
@@ -403,11 +405,13 @@ impl OidcService {
         let db = &state.database.connection;
         let base = get_issuer_base(state);
 
-        let access_token = state.sign_access_token(
-            rec.user_id,
-            &rec.client_id,
-            rec.scope.as_deref().unwrap_or(""),
-        )?;
+        let access_token = state
+            .sign_access_token(
+                rec.user_id,
+                &rec.client_id,
+                rec.scope.as_deref().unwrap_or(""),
+            )
+            .await?;
 
         let id_token = state.id_token_signer().sign_id_token::<IdType>(
             rec.user_id,

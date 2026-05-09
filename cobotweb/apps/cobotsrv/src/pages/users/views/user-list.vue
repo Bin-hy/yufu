@@ -1,9 +1,9 @@
 <script lang="ts" setup>
 import { ref, computed, onMounted, onActivated } from 'vue'
 import { emitToast } from '@/utils/toast'
-import { getUsersByPage, getModifiableRoles, patchUserRole, deleteUser, getUserAuthorityOverridesByPage, addUserAuthorityOverride, deleteUserAuthorityOverride, patchUserAuthorityOverride } from '../api'
+import { getUsersByPage, getModifiableRoles, patchUserRole, deleteUser, getUserAuthorityOverridesByPage, addUserAuthorityOverride, deleteUserAuthorityOverride, patchUserAuthorityOverride, getUserPermissionOverridesByPage, addUserPermissionOverride, patchUserPermissionOverride, deleteUserPermissionOverride } from '../api'
 import type { RoleVO, UserVO } from '@/types/models'
-import type { AuthorityVO, UserAuthorityVO } from '@/types/models'
+import type { AuthorityVO, UserAuthorityVO, PermissionVO, UserPermVO } from '@/types/models'
 import Pagination from '@/components/ui/pagination/pagination.vue'
 import { useRoute, useRouter } from 'vue-router'
 import UiInput from '@/components/ui/input/input.vue'
@@ -12,6 +12,7 @@ import UiSelect from '@/components/ui/select/select.vue'
 import UiDialog from '@/components/ui/dialog/dialog.vue'
 import UiCheckbox from '@/components/ui/checkbox/checkbox.vue'
 import * as authorityApi from '@/pages/authority/api'
+import * as permApi from '@/pages/permissions/api'
 import { kickoutUserRequest } from '@/pages/login/api'
 
 // 状态
@@ -44,6 +45,9 @@ const userToDelete = ref<UserVO | null>(null)
 const overrideDialogOpen = ref(false)
 const overrideUser = ref<UserVO | null>(null)
 const overrideLoading = ref(false)
+const overrideTab = ref<'authority' | 'permission'>('authority')
+
+// --- authority tab state ---
 const overrides = ref<UserAuthorityVO[]>([])
 const authOptions = ref<AuthorityVO[]>([])
 const roleAuthorityIds = ref<Set<number>>(new Set())
@@ -56,6 +60,22 @@ const filteredAuthOptions = computed(() => {
   if (!q) return authOptions.value
   return authOptions.value.filter(a =>
     a.name.toLowerCase().includes(q) || a.authority_uri.toLowerCase().includes(q)
+  )
+})
+
+// --- permission tab state ---
+const permOptions = ref<PermissionVO[]>([])
+const permOverrides = ref<UserPermVO[]>([])
+const rolePermIds = ref<Set<number>>(new Set())
+const permQuery = ref('')
+const selectedPermId = ref<number | null>(null)
+const selectedPermAllow = ref<boolean>(true)
+
+const filteredPermOptions = computed(() => {
+  const q = permQuery.value.trim().toLowerCase()
+  if (!q) return permOptions.value
+  return permOptions.value.filter(p =>
+    p.name.toLowerCase().includes(q) || p.action.toLowerCase().includes(q)
   )
 })
 
@@ -150,20 +170,25 @@ function openDeleteDialog(user: UserVO) {
 
 async function openOverrideDialog(user: UserVO) {
   overrideUser.value = user
+  overrideTab.value = 'authority'
   overrideDialogOpen.value = true
   overrideLoading.value = true
   try {
-    // 1) 加载所有权限（供展示与新增）
+    // Load authority data
     const authPage = await authorityApi.getAuthoritiesByPage(1, 1000)
     authOptions.value = authPage.data_list || []
-
-    // 2) 获取角色拥有的权限
     const rolePage = await authorityApi.getAuthorityByRoleId(user.role_id)
-    roleAuthorityIds.value = new Set((rolePage.data_list || []).map(a => a.id))
-
-    // 3) 获取所有用户的覆写列表后，按 user_id 过滤当前用户的覆写
+    roleAuthorityIds.value = new Set((rolePage.data_list || []).map((a: AuthorityVO) => a.id))
     const ovPage = await getUserAuthorityOverridesByPage(1, 1000)
-    overrides.value = (ovPage.data_list || []).filter(i => i.user_vo?.id === user.id)
+    overrides.value = (ovPage.data_list || []).filter((i: UserAuthorityVO) => i.user_vo?.id === user.id)
+
+    // Load permission data
+    const permPage = await permApi.getPermissionsByPage(1, 1000)
+    permOptions.value = permPage.data_list || []
+    const rolePermPage = await permApi.getRolePermissionsByRoleId(user.role_id)
+    rolePermIds.value = new Set((rolePermPage.data_list || []).map((p: PermissionVO) => p.id))
+    const povPage = await getUserPermissionOverridesByPage(1, 1000)
+    permOverrides.value = (povPage.data_list || []).filter((i: UserPermVO) => i.user_vo?.id === user.id)
   } catch (e) {
     console.error('加载权限覆写数据失败', e)
   } finally {
@@ -239,6 +264,73 @@ async function clearOverride(authorityId: number) {
     overrides.value = (ovPage.data_list || []).filter(i => i.user_vo?.id === overrideUser.value!.id)
   } catch (e) {
     console.error('取消覆写失败', e)
+  } finally {
+    overrideLoading.value = false
+  }
+}
+
+// --- Permission overrides ---
+async function addPermOverride() {
+  if (!overrideUser.value?.id || selectedPermId.value == null) return
+  try {
+    overrideLoading.value = true
+    await addUserPermissionOverride({
+      user_id: overrideUser.value.id,
+      permission_id: selectedPermId.value,
+      allow: selectedPermAllow.value,
+    })
+    const povPage = await getUserPermissionOverridesByPage(1, 1000)
+    permOverrides.value = (povPage.data_list || []).filter((i: UserPermVO) => i.user_vo?.id === overrideUser.value!.id)
+    selectedPermId.value = null
+    selectedPermAllow.value = true
+  } catch (e) {
+    console.error('新增资源权限覆写失败', e)
+  } finally {
+    overrideLoading.value = false
+  }
+}
+
+async function setPermOverrideAllow(permId: number, allow: boolean) {
+  if (!overrideUser.value?.id) return
+  const existing = permOverrides.value.find(i => i.permission_vo?.id === permId)
+  try {
+    overrideLoading.value = true
+    if (existing) {
+      await patchUserPermissionOverride({
+        user_id: overrideUser.value.id,
+        permission_id: permId,
+        allow,
+      })
+    } else {
+      await addUserPermissionOverride({
+        user_id: overrideUser.value.id,
+        permission_id: permId,
+        allow,
+      })
+    }
+    const povPage = await getUserPermissionOverridesByPage(1, 1000)
+    permOverrides.value = (povPage.data_list || []).filter((i: UserPermVO) => i.user_vo?.id === overrideUser.value!.id)
+  } catch (e) {
+    console.error('设置资源权限覆写失败', e)
+  } finally {
+    overrideLoading.value = false
+  }
+}
+
+async function clearPermOverride(permId: number) {
+  if (!overrideUser.value?.id) return
+  const existing = permOverrides.value.find(i => i.permission_vo?.id === permId)
+  if (!existing) return
+  try {
+    overrideLoading.value = true
+    await deleteUserPermissionOverride({
+      user_id: overrideUser.value.id,
+      permission_id: permId,
+    })
+    const povPage = await getUserPermissionOverridesByPage(1, 1000)
+    permOverrides.value = (povPage.data_list || []).filter((i: UserPermVO) => i.user_vo?.id === overrideUser.value!.id)
+  } catch (e) {
+    console.error('取消资源权限覆写失败', e)
   } finally {
     overrideLoading.value = false
   }
@@ -435,87 +527,171 @@ onActivated(async () => {
       @confirm="() => {}"
     >
       <div class="space-y-4">
-        <!-- 新增覆写 -->
-        <div class="rounded-md border border-border p-3">
-          <div class="flex items-end gap-3">
-            <div class="flex-1">
-              <label class="block text-xs font-medium mb-1">搜索权限</label>
-              <UiInput v-model="authQuery" placeholder="按名称或URI搜索..." />
-            </div>
-            <div class="flex-1">
-              <label class="block text-xs font-medium mb-1">选择权限</label>
-              <UiSelect v-model.number="selectedAuthorityId" class="w-full">
-                <option :value="null">请选择</option>
-                <option v-for="a in filteredAuthOptions" :key="a.id" :value="a.id">{{ a.name }}（{{ a.authority_uri }}）</option>
-              </UiSelect>
-            </div>
-            <div>
-              <label class="block text-xs font-medium mb-1">是否允许</label>
-              <div class="flex items-center h-9">
-                <UiCheckbox v-model="selectedAllow" />
-                <span class="ml-2 text-sm">允许</span>
-              </div>
-            </div>
-            <UiButton :disabled="overrideLoading || selectedAuthorityId == null" @click="addOverride">
-              <span v-if="overrideLoading" class="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"></span>
-              添加覆写
-            </UiButton>
-          </div>
+        <!-- Tab 切换 -->
+        <div class="flex border-b border-border">
+          <button
+            class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+            :class="overrideTab === 'authority' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="overrideTab = 'authority'"
+          >API 权限</button>
+          <button
+            class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+            :class="overrideTab === 'permission' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="overrideTab = 'permission'"
+          >资源权限</button>
         </div>
 
-        <!-- 权限总览（融合角色权限与覆写状态） -->
-        <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-border text-sm">
-            <thead>
-              <tr>
-                <th class="px-3 py-2 text-left">权限名称</th>
-                <th class="px-3 py-2 text-left">权限标识</th>
-                <th class="px-3 py-2 text-left">角色拥有</th>
-                <th class="px-3 py-2 text-left">覆写</th>
-                <th class="px-3 py-2 text-left">实际权限</th>
-                <th class="px-3 py-2 text-left">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="overrideLoading">
-                <td colspan="6" class="px-3 py-6 text-center text-muted-foreground">加载中...</td>
-              </tr>
-              <tr v-else-if="filteredAuthOptions.length === 0">
-                <td colspan="6" class="px-3 py-6 text-center text-muted-foreground">暂无权限数据</td>
-              </tr>
-              <tr v-else v-for="a in filteredAuthOptions" :key="a.id" class="border-t border-border">
-                <td class="px-3 py-2">{{ a.name }}</td>
-                <td class="px-3 py-2">{{ a.authority_uri }}</td>
-                <td class="px-3 py-2">
-                  <span :class="roleAuthorityIds.has(a.id) ? 'text-green-600' : 'text-muted-foreground'">
-                    {{ roleAuthorityIds.has(a.id) ? '是' : '否' }}
-                  </span>
-                </td>
-                <td class="px-3 py-2">
-                  <span v-if="overrides.find(i => i.authority_vo?.id === a.id) as any"></span>
-                  <template v-if="overrides.find(i => i.authority_vo?.id === a.id)">
-                    <span :class="(overrides.find(i => i.authority_vo?.id === a.id)!.allow) ? 'text-green-600' : 'text-red-600'">
-                      {{ (overrides.find(i => i.authority_vo?.id === a.id)!.allow) ? '允许' : '拒绝' }}
+        <!-- Authority Tab -->
+        <template v-if="overrideTab === 'authority'">
+          <div class="rounded-md border border-border p-3">
+            <div class="flex items-end gap-3">
+              <div class="flex-1">
+                <label class="block text-xs font-medium mb-1">搜索权限</label>
+                <UiInput v-model="authQuery" placeholder="按名称或URI搜索..." />
+              </div>
+              <div class="flex-1">
+                <label class="block text-xs font-medium mb-1">选择权限</label>
+                <UiSelect v-model.number="selectedAuthorityId" class="w-full">
+                  <option :value="null">请选择</option>
+                  <option v-for="a in filteredAuthOptions" :key="a.id" :value="a.id">{{ a.name }}（{{ a.authority_uri }}）</option>
+                </UiSelect>
+              </div>
+              <div>
+                <label class="block text-xs font-medium mb-1">是否允许</label>
+                <div class="flex items-center h-9">
+                  <UiCheckbox v-model="selectedAllow" />
+                  <span class="ml-2 text-sm">允许</span>
+                </div>
+              </div>
+              <UiButton :disabled="overrideLoading || selectedAuthorityId == null" @click="addOverride">
+                <span v-if="overrideLoading" class="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"></span>
+                添加覆写
+              </UiButton>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-border text-sm">
+              <thead>
+                <tr>
+                  <th class="px-3 py-2 text-left">权限名称</th>
+                  <th class="px-3 py-2 text-left">权限标识</th>
+                  <th class="px-3 py-2 text-left">角色拥有</th>
+                  <th class="px-3 py-2 text-left">覆写</th>
+                  <th class="px-3 py-2 text-left">实际权限</th>
+                  <th class="px-3 py-2 text-left">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="overrideLoading"><td colspan="6" class="px-3 py-6 text-center text-muted-foreground">加载中...</td></tr>
+                <tr v-else-if="filteredAuthOptions.length === 0"><td colspan="6" class="px-3 py-6 text-center text-muted-foreground">暂无权限数据</td></tr>
+                <tr v-else v-for="a in filteredAuthOptions" :key="a.id" class="border-t border-border">
+                  <td class="px-3 py-2">{{ a.name }}</td>
+                  <td class="px-3 py-2">{{ a.authority_uri }}</td>
+                  <td class="px-3 py-2">
+                    <span :class="roleAuthorityIds.has(a.id) ? 'text-green-600' : 'text-muted-foreground'">{{ roleAuthorityIds.has(a.id) ? '是' : '否' }}</span>
+                  </td>
+                  <td class="px-3 py-2">
+                    <template v-if="overrides.find(i => i.authority_vo?.id === a.id)">
+                      <span :class="(overrides.find(i => i.authority_vo?.id === a.id)!.allow) ? 'text-green-600' : 'text-red-600'">
+                        {{ (overrides.find(i => i.authority_vo?.id === a.id)!.allow) ? '允许' : '拒绝' }}
+                      </span>
+                    </template>
+                    <template v-else><span class="text-muted-foreground">未设置</span></template>
+                  </td>
+                  <td class="px-3 py-2">
+                    <span :class="((overrides.find(i => i.authority_vo?.id === a.id)?.allow) ?? roleAuthorityIds.has(a.id)) ? 'text-green-600' : 'text-red-600'">
+                      {{ ((overrides.find(i => i.authority_vo?.id === a.id)?.allow) ?? roleAuthorityIds.has(a.id)) ? '有权限' : '无权限' }}
                     </span>
-                  </template>
-                  <template v-else>
-                    <span class="text-muted-foreground">未设置</span>
-                  </template>
-                </td>
-                <td class="px-3 py-2">
-                  <span :class="((overrides.find(i => i.authority_vo?.id === a.id)?.allow) ?? roleAuthorityIds.has(a.id)) ? 'text-green-600' : 'text-red-600'">
-                    {{ ((overrides.find(i => i.authority_vo?.id === a.id)?.allow) ?? roleAuthorityIds.has(a.id)) ? '有权限' : '无权限' }}
-                  </span>
-                </td>
-                <td class="px-3 py-2 flex gap-2">
-                  <UiButton size="sm" variant="outline" @click="() => setOverrideAllow(a.id, true)">允许</UiButton>
-                  <UiButton size="sm" variant="outline" @click="() => setOverrideAllow(a.id, false)">拒绝</UiButton>
-                  <UiButton size="sm" variant="destructive" @click="() => clearOverride(a.id)" :disabled="!overrides.find(i => i.authority_vo?.id === a.id)">取消覆写</UiButton>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                  </td>
+                  <td class="px-3 py-2 flex gap-2">
+                    <UiButton size="sm" variant="outline" @click="() => setOverrideAllow(a.id, true)">允许</UiButton>
+                    <UiButton size="sm" variant="outline" @click="() => setOverrideAllow(a.id, false)">拒绝</UiButton>
+                    <UiButton size="sm" variant="destructive" @click="() => clearOverride(a.id)" :disabled="!overrides.find(i => i.authority_vo?.id === a.id)">取消覆写</UiButton>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+
+        <!-- Permission Tab -->
+        <template v-if="overrideTab === 'permission'">
+          <div class="rounded-md border border-border p-3">
+            <div class="flex items-end gap-3">
+              <div class="flex-1">
+                <label class="block text-xs font-medium mb-1">搜索权限</label>
+                <UiInput v-model="permQuery" placeholder="按名称或动作搜索..." />
+              </div>
+              <div class="flex-1">
+                <label class="block text-xs font-medium mb-1">选择权限</label>
+                <UiSelect v-model.number="selectedPermId" class="w-full">
+                  <option :value="null">请选择</option>
+                  <option v-for="p in filteredPermOptions" :key="p.id" :value="p.id">{{ p.name }}（{{ p.action }} {{ p.resource_type || '*' }}）</option>
+                </UiSelect>
+              </div>
+              <div>
+                <label class="block text-xs font-medium mb-1">是否允许</label>
+                <div class="flex items-center h-9">
+                  <UiCheckbox v-model="selectedPermAllow" />
+                  <span class="ml-2 text-sm">允许</span>
+                </div>
+              </div>
+              <UiButton :disabled="overrideLoading || selectedPermId == null" @click="addPermOverride">
+                <span v-if="overrideLoading" class="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block"></span>
+                添加覆写
+              </UiButton>
+            </div>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-border text-sm">
+              <thead>
+                <tr>
+                  <th class="px-3 py-2 text-left">权限名</th>
+                  <th class="px-3 py-2 text-left">动作</th>
+                  <th class="px-3 py-2 text-left">资源</th>
+                  <th class="px-3 py-2 text-left">角色拥有</th>
+                  <th class="px-3 py-2 text-left">覆写</th>
+                  <th class="px-3 py-2 text-left">实际权限</th>
+                  <th class="px-3 py-2 text-left">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="overrideLoading"><td colspan="7" class="px-3 py-6 text-center text-muted-foreground">加载中...</td></tr>
+                <tr v-else-if="filteredPermOptions.length === 0"><td colspan="7" class="px-3 py-6 text-center text-muted-foreground">暂无权限数据</td></tr>
+                <tr v-else v-for="p in filteredPermOptions" :key="p.id" class="border-t border-border">
+                  <td class="px-3 py-2">
+                    <span class="font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded text-xs">{{ p.name }}</span>
+                  </td>
+                  <td class="px-3 py-2">{{ p.action }}</td>
+                  <td class="px-3 py-2 text-xs text-muted-foreground">{{ p.resource_type || '*' }}:{{ p.resource_pattern || '*' }}</td>
+                  <td class="px-3 py-2">
+                    <span :class="rolePermIds.has(p.id) ? 'text-green-600' : 'text-muted-foreground'">{{ rolePermIds.has(p.id) ? '是' : '否' }}</span>
+                  </td>
+                  <td class="px-3 py-2">
+                    <template v-if="permOverrides.find(i => i.permission_vo?.id === p.id)">
+                      <span :class="permOverrides.find(i => i.permission_vo?.id === p.id)!.allow ? 'text-green-600' : 'text-red-600'">
+                        {{ permOverrides.find(i => i.permission_vo?.id === p.id)!.allow ? '允许' : '拒绝' }}
+                      </span>
+                    </template>
+                    <template v-else><span class="text-muted-foreground">未设置</span></template>
+                  </td>
+                  <td class="px-3 py-2">
+                    <span :class="((permOverrides.find(i => i.permission_vo?.id === p.id)?.allow) ?? rolePermIds.has(p.id)) ? 'text-green-600' : 'text-red-600'">
+                      {{ ((permOverrides.find(i => i.permission_vo?.id === p.id)?.allow) ?? rolePermIds.has(p.id)) ? '有权限' : '无权限' }}
+                    </span>
+                  </td>
+                  <td class="px-3 py-2 flex gap-2">
+                    <UiButton size="sm" variant="outline" @click="() => setPermOverrideAllow(p.id, true)">允许</UiButton>
+                    <UiButton size="sm" variant="outline" @click="() => setPermOverrideAllow(p.id, false)">拒绝</UiButton>
+                    <UiButton size="sm" variant="destructive" @click="() => clearPermOverride(p.id)" :disabled="!permOverrides.find(i => i.permission_vo?.id === p.id)">取消覆写</UiButton>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </div>
     </UiDialog>
   </div>

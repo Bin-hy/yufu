@@ -314,6 +314,7 @@ impl AppState {
         self.ensure_sadmin_authorities().await?;
         self.init_sadmin_from_config().await?;
         self.init_oidc_bootstrap_clients().await?;
+        self.ensure_self_application().await?;
         Ok(())
     }
 
@@ -348,7 +349,18 @@ impl AppState {
     /// Sign an access token addressed to a given audience (`aud`).
     /// Used by both the legacy `/api/v1/login` flow (`aud="cobotsrv"`) and the
     /// OIDC token endpoint (`aud=client_id`).
-    pub fn sign_access_token(&self, sub: IdType, aud: &str, scope: &str) -> result::Result<String> {
+    pub async fn sign_access_token(
+        &self,
+        sub: IdType,
+        aud: &str,
+        scope: &str,
+    ) -> result::Result<String> {
+        let (roles, permissions) = crate::service::permission::resolve_user_permissions(
+            &self.database.connection,
+            sub,
+            aud,
+        )
+        .await?;
         let iss = self.issuer();
         self.id_token_signer
             .sign_access_token(
@@ -357,6 +369,8 @@ impl AppState {
                 aud,
                 scope,
                 self.oidc_access_token_exp(),
+                roles,
+                permissions,
             )
             .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
     }
@@ -370,7 +384,15 @@ impl AppState {
     ) -> result::Result<String> {
         let iss = self.issuer();
         self.id_token_signer
-            .sign_access_token(client_id, &iss, aud, scope, self.oidc_access_token_exp())
+            .sign_access_token(
+                client_id,
+                &iss,
+                aud,
+                scope,
+                self.oidc_access_token_exp(),
+                vec![],
+                vec![],
+            )
             .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
     }
 
@@ -385,6 +407,34 @@ impl AppState {
     // 初始化超级管理员权限
     async fn ensure_sadmin_authorities(&self) -> result::Result<()> {
         Service::ensure_sadmin_authorities(&self.database.connection).await?;
+        Ok(())
+    }
+
+    /// Ensure cobotsrv itself has an `application` row so its own admin tokens
+    /// (`aud = "cobotsrv"`) get permission claims resolved. Idempotent.
+    async fn ensure_self_application(&self) -> result::Result<()> {
+        use crate::entity::application;
+        use sea_orm::Set;
+
+        let db = &self.database.connection;
+        if application::Entity::get_by_app_key(db, "cobotsrv")
+            .await?
+            .is_none()
+        {
+            let now = chrono::Utc::now().naive_utc();
+            application::ActiveModel {
+                id: sea_orm::ActiveValue::NotSet,
+                app_key: Set("cobotsrv".to_string()),
+                name: Set("cobotsrv 管理端".to_string()),
+                description: Set(Some("cobotsrv 自身管理后台".to_string())),
+                oidc_client_id: Set(None),
+                create_time: Set(now),
+                update_time: Set(now),
+            }
+            .insert(db)
+            .await?;
+            tracing::info!("created self-application: app_key=cobotsrv");
+        }
         Ok(())
     }
 

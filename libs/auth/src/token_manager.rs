@@ -333,7 +333,10 @@ impl IdTokenSigner {
     /// Sign a standard JWT access token (RFC 7519 claims) with RS256 (or HS256 fallback).
     ///
     /// `aud` is the application/client this token is intended for; consumers should verify it.
+    /// `roles` and `permissions` are embedded so downstream services can make coarse-grained
+    /// local decisions without calling the PDP on every request.
     /// Returns the encoded token. `jti` is generated as a fresh UUID v4.
+    #[allow(clippy::too_many_arguments)]
     pub fn sign_access_token(
         &self,
         sub: &str,
@@ -341,6 +344,8 @@ impl IdTokenSigner {
         aud: &str,
         scope: &str,
         ttl_seconds: i64,
+        roles: Vec<String>,
+        permissions: Vec<String>,
     ) -> JwtResult<String> {
         let now = Utc::now();
         let exp = now + Duration::seconds(ttl_seconds);
@@ -352,6 +357,8 @@ impl IdTokenSigner {
             exp: exp.timestamp() as u64,
             jti: Uuid::new_v4().to_string(),
             scope: scope.to_string(),
+            roles,
+            permissions,
         };
 
         if let Some(ref rsa_key) = self.rsa_encoding_key {
