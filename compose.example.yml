@@ -5,7 +5,12 @@ services:
         restart: always
         ports:
             - "${MQTT_PORT:-1883}:1883"          # MQTT TCP
-            - "${EMQX_DASHBOARD_PORT:-18083}:18083"  # Dashboard at http://localhost:18083 (admin / public)
+            - "${MQTT_DASHBOARD_PORT:-18083}:18083"  # Dashboard at http://localhost:18083 (admin / public)
+        environment:
+            EMQX_DASHBOARD__DEFAULT_USERNAME: ${MQTT_DASHBOARD_USERNAME:-admin}
+            EMQX_DASHBOARD__DEFAULT_PASSWORD: ${MQTT_DASHBOARD_PASSWORD:-changeme123456}
+
+            EMQX_ALLOW_ANONYMOUS: "false"
         volumes:
             - cobotrix_emqx_data:/opt/emqx/data
             - cobotrix_emqx_log:/opt/emqx/log
