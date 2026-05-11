@@ -1,2 +1,4 @@
 packages:
   - "cobotweb"
+allowBuilds:
+  esbuild: true

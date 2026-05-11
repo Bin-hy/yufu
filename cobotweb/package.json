@@ -7,8 +7,7 @@
     "dev": "vite",
     "build:server": "",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview",
-    "pre": "npm run build && npm run preview"
+    "preview": "vite preview"
   },
   "dependencies": {
     "axios": "^1.12.2",

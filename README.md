@@ -1,10 +1,15 @@
-# cobotrix
+# CoBotrix
 
 CoBotrix (Co-Robotics Matrix) 协熵云枢
 
 一个针对智能设备的云平台框架，通常为远程智能设备，比如 Robotics。
 
 提供统一的网络通信，统一的 API 和用户权限和设备管理
+
+## 构建依赖
+- [cargo](https://www.rust-lang.org/)
+- [nodejs](https://nodejs.org/)
+- [pnpm](https://pnpm.io/)
 
 ## 运行
 
@@ -18,11 +23,8 @@ CoBotrix (Co-Robotics Matrix) 协熵云枢
 # 根目录 env（compose.yml 会读取 .env）
 cp .env.example .env
 
-# 本地 docker-compose 覆盖（开发只起 Postgres）
-cp compose.local.yml.example compose.local.yml
-
 # cobotsrv 后端配置
-cp conf/cobotsrv.example.toml cobotsrv.toml   # 覆盖默认文件（已被 .gitignore 忽略）
+cp conf/cobotsrv.example.toml cobotsrv.toml   # 默认配置文件（已被 .gitignore 忽略）
 
 # 前端 env
 cp cobotweb/.env.example cobotweb/.env.local
@@ -31,7 +33,7 @@ cp cobotweb/.env.example cobotweb/.env.local
 安全提示：
 
 - `conf/oidc_rsa_private.pem` 无需手动创建：`cobotsrv` 首次启动时若不存在会自动生成 2048-bit RSA 密钥并落盘，后续启动复用；该文件已被 `.gitignore` 忽略，**切勿提交**。
-- `conf/cobotsrv.local.toml` 里若写了 `[auth.super_admin]` 明文密码，请只留在本机，不要提交也不要分享。
+- `cobotsrv.toml` 请只留在本机，不要提交也不要分享。
 - `cobotweb/.env.example` 默认把 `VITE_BASE_URL` 设为相对路径 `/api/v1`，适用于模式 A / C 和同域反代的模式 B；跨域 split 部署需要改为绝对 URL（见下文"模式 B"）。
 
 ### 2. 启动基础设施
@@ -39,13 +41,13 @@ cp cobotweb/.env.example cobotweb/.env.local
 开发/测试环境（只起 Postgres，`cobotnil` 自带 MQTT broker 不需要额外跑 EMQX）：
 
 ```bash
-docker compose -f compose.local.yml up -d
+docker compose up
 ```
 
 生产环境（Postgres + EMQX，依赖根目录 `.env`）：
 
 ```bash
-docker compose up -d
+docker compose -f conf/compose.prod.yaml up -d
 ```
 
 ---
@@ -58,21 +60,19 @@ docker compose up -d
 
 ```bash
 # Step 1 前端构建 → 产物落到 assets/cobotsrv/
-cd cobotweb
-npm install          # 首次或依赖变化时
-npm run build        # 读取 cobotweb/.env.local 或 .env.production.local
-cd ..
+pnpm install
+pnpm run build
 
 # Step 2 后端构建（开启 webui feature 触发 embed）
 cargo build --release --features webui --bin cobotsrv
 
 # Step 3 运行
-./target/release/cobotsrv -c conf/cobotsrv.local.toml
+./target/release/cobotsrv -c cobotsrv.toml
 ```
 
 前端 env 建议：`cobotweb/.env.local`（或 `.env.production.local`）保持 `VITE_BASE_URL=/api/v1`。请求走同源相对路径，无需 CORS。
 
-浏览器访问 `http://<cobotsrv-host>:4000/`（默认端口，可在 `conf/cobotsrv.local.toml` `[http] listen` 修改）。
+浏览器访问 `http://<cobotsrv-host>:4000/`（默认端口，可在 `cobotsrv.toml` `[http] listen` 修改）。
 
 ---
 
@@ -83,12 +83,11 @@ cargo build --release --features webui --bin cobotsrv
 ```bash
 # 后端（不开 webui，体积更小）
 cargo build --release --bin cobotsrv
-./target/release/cobotsrv -c conf/cobotsrv.local.toml
+./target/release/cobotsrv -c cobotsrv.toml
 
 # 前端
-cd cobotweb
-npm install
-npm run build        # 产物在 assets/cobotsrv/（路径由 vite.config.ts 的 build.outDir 决定）
+pnpm install
+pnpm run build        # 产物在 assets/cobotsrv/（路径由 vite.config.ts 的 build.outDir 决定）
 ```
 
 然后把 `assets/cobotsrv/` 目录里的静态文件部署到你的静态托管方案。两种子场景：
@@ -129,7 +128,7 @@ VITE_BASE_URL=https://api.example.com/api/v1
 
 注意 `VITE_BASE_URL` 在 `vite build` 时被固化，切换目标 API 需重新构建。
 
-后端 `conf/cobotsrv.local.toml` 必须把前端域名加入 CORS 白名单：
+后端 `cobotsrv.toml` 必须把前端域名加入 CORS 白名单：
 
 ```toml
 [auth]
@@ -149,10 +148,10 @@ origins = [
 cargo run -- -c conf/cobotnil
 
 # 或只跑后端单服务
-cargo run --bin cobotsrv -- -c conf/cobotsrv.local.toml
+cargo run --bin cobotsrv -- -c cobotsrv.toml
 
 # 终端 2：前端 dev server
-cd cobotweb && npm run dev
+pnpm run dev
 ```
 
 前端 env：`cobotweb/.env.local` 保持 `VITE_BASE_URL=/api/v1`（走 Vite proxy），或者设成绝对 URL（跳过 proxy 直连后端，比如 `http://localhost:4000/api/v1`）。两种都能跑，前者更接近生产形态。
