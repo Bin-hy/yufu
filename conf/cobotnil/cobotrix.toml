@@ -6,7 +6,6 @@ url = "postgres://postgres:postgres@localhost:5432/cobotrix_mgmt"
 max_connections = 10
 connect_timeout = 30
 
-<<<<<<< HEAD
 # cobotrix pulls cobotsrv's public key from JWKS at startup. Default jwks_url
 # points at 127.0.0.1:4000 (matches conf/cobotnil/cobotsrv.toml's listen) so the
 # dev cluster works with no explicit auth config.
@@ -35,10 +34,6 @@ resource_type = "task"
 name = "remote:proxy"
 action = "proxy"
 resource_type = "remote"
-=======
-# auth.secret defaults to env AUTH_SECRET (or hardcoded dev fallback) — same as
-# cobotsrv, so the dev cluster shares the secret automatically with no config.
->>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 
 [mqtt]
 url = "mqtt://127.0.0.1:1883"

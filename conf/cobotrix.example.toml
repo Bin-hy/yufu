@@ -2,7 +2,6 @@
 # 本文件是仓库中的可提交模板，不应包含任何真实密钥。
 
 [http]
-<<<<<<< HEAD
 # Http Server Listen Address (生产环境建议仅监听 localhost)
 listen = "[::]:4001"
 
@@ -32,18 +31,6 @@ listen = "[::]:4001"
 # name = "remote:proxy"
 # action = "proxy"
 # resource_type = "remote"
-=======
-# Http Server Listen Address (建议仅监听 localhost，由 cobotsrv 代理访问)
-listen = "[::]:4001"
-api_prefix = "/api/v1"
-
-# JWT 验签配置。secret 必须与 cobotsrv 的 [auth].secret 完全一致，否则 cobotrix
-# 拿到 cobotsrv 颁发的 access_token 会验签失败。两边都默认从环境变量
-# AUTH_SECRET 读取，所以最简单的做法是设一个 AUTH_SECRET 给两个进程共用。
-# [auth]
-# secret = "<same-as-cobotsrv-auth-secret>"
-# exp_seconds = 7200
->>>>>>> fa2da33 (feat(cobotrix): add management center crate with self-verifying JWT auth)
 
 [log]
 # Env: `LOG_LEVEL`
