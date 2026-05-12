@@ -149,8 +149,9 @@ pub async fn enforce(db: &DatabaseConnection, req: &EnforceRequest) -> Result<En
         if !allowed_ids.contains(&perm.id) && !role_perm_set.contains(&perm.id) {
             continue;
         }
-        // action must match
-        if perm.action != req.action {
+        // action must match (allow matching against either the action verb
+        // like "read" or the full permission name like "device:read")
+        if perm.action != req.action && perm.name != req.action {
             continue;
         }
         // resource_type must match if specified

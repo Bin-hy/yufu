@@ -342,12 +342,6 @@ impl AppState {
         aud: &str,
         scope: &str,
     ) -> result::Result<String> {
-        let (roles, permissions) = crate::service::permission::resolve_user_permissions(
-            &self.database.connection,
-            sub,
-            aud,
-        )
-        .await?;
         let iss = self.issuer();
         self.id_token_signer
             .sign_access_token(
@@ -356,8 +350,8 @@ impl AppState {
                 aud,
                 scope,
                 self.oidc_access_token_exp(),
-                roles,
-                permissions,
+                vec![],
+                vec![],
             )
             .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
     }
