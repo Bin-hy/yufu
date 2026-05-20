@@ -239,6 +239,17 @@ pub struct Auth {
     pub require_permissions: bool,
 }
 
+impl Auth {
+    /// Derive cobotsrv's base URL from the JWKS URL by stripping the
+    /// `/.well-known/jwks.json` suffix. Used by `EnforceClient` to call
+    /// cobotsrv's PDP enforce endpoint.
+    pub fn cobotsrv_base_url(&self) -> String {
+        self.jwks_url
+            .trim_end_matches("/.well-known/jwks.json")
+            .to_string()
+    }
+}
+
 impl Default for Auth {
     fn default() -> Self {
         Self {

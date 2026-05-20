@@ -26,6 +26,7 @@ use crate::store::{Node, NodeKind, Storage};
 struct Assets;
 
 pub mod config;
+pub mod enforce;
 pub mod entity;
 pub mod error;
 mod migration;
@@ -197,10 +198,39 @@ where
     // Sync required permissions to cobotsrv so the admin can assign them.
     sync_permissions(&cfg).await;
 
-    let protected = get_protected_routes().layer(middleware::from_fn_with_state(
-        jwks.clone(),
-        access_middleware_rs256,
-    ));
+    // PDP-based permission enforcement. When `auth.require_permissions = true`
+    // (the default), EnforceClient is injected so `require_perm!` calls
+    // cobotsrv's `/api/v1/enforce` at request time (cached, TTL 10 s).
+    // When false the middleware layer is omitted entirely and `require_perm!`
+    // falls back to JWT-embedded permissions (or allows all if absent).
+    async fn enforce_injector(
+        enforce: axum::extract::State<Arc<dyn auth::PermissionChecker>>,
+        mut request: Request,
+        next: middleware::Next,
+    ) -> impl IntoResponse {
+        request.extensions_mut().insert(enforce.0.clone());
+        next.run(request).await
+    }
+
+    let protected = if cfg.auth.require_permissions {
+        let enforce_client: Arc<dyn auth::PermissionChecker> = Arc::new(
+            enforce::EnforceClient::new(cfg.auth.cobotsrv_base_url(), 10),
+        );
+        get_protected_routes()
+            .layer(middleware::from_fn_with_state(
+                enforce_client,
+                enforce_injector,
+            ))
+            .layer(middleware::from_fn_with_state(
+                jwks.clone(),
+                access_middleware_rs256,
+            ))
+    } else {
+        get_protected_routes().layer(middleware::from_fn_with_state(
+            jwks.clone(),
+            access_middleware_rs256,
+        ))
+    };
 
     let app = Router::new()
         .merge(protected)
@@ -293,12 +323,7 @@ async fn sync_permissions(cfg: &Config) {
         return;
     }
 
-    let cobotsrv_base = cfg
-        .auth
-        .jwks_url
-        .rsplit_once("/.well-known")
-        .map(|(base, _)| base.to_string())
-        .unwrap_or_else(|| cfg.auth.jwks_url.clone());
+    let cobotsrv_base = cfg.auth.cobotsrv_base_url();
 
     let client = reqwest::Client::new();
 

@@ -73,3 +73,5 @@ cobotsrv.toml
 cobotlet.toml
 cobotnil
 
+# redb
+data/

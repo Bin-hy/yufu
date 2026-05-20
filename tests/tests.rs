@@ -37,14 +37,13 @@ async fn test_http_cluster() {
         Config {
             http: Http {
                 listen: SocketAddr::new(ip, 0),
-                ..Default::default()
             },
             net4mqtt: Some(Net4mqtt {
                 alias: format!("test-cobotlet-{}", i),
-                mqtt_url: format!(
+                mqtt_url: Some(format!(
                     "mqtt://{}/{}?client_id=test-cobotlet-{}",
                     broker_addr, MQTT_TOPIC_PREFIX, i
-                ),
+                )),
             }),
             ..Default::default()
         }

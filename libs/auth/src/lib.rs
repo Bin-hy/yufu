@@ -73,6 +73,8 @@ pub mod token_manager;
 use crate::jwks::JwksClient;
 use crate::token_manager::{TokenError, TokenManager};
 use axum::extract::State;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::claims::Claims;
@@ -499,11 +501,32 @@ pub async fn access_middleware_local_rs256(
     }
 }
 
-/// Macro: create an axum middleware layer that requires a specific permission
-/// in the token's `permissions` claim.
+/// Trait for async permission checking, used by the `require_perm!` macro
+/// to support PDP-based enforcement (calling cobotsrv's `/enforce` endpoint)
+/// instead of relying on permissions embedded in the JWT claims.
+///
+/// If a `PermissionChecker` is present in request extensions, `require_perm!`
+/// will use it for an async PDP check. Otherwise it falls back to
+/// `AccessTokenClaims.permissions` (backward compatible with cobotsrv).
+pub trait PermissionChecker: Send + Sync {
+    fn check_permission<'a>(
+        &'a self,
+        subject: &str,
+        permission: &str,
+        auth_header: &str,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+}
+
+/// Macro: create an axum middleware layer that requires a specific permission.
 ///
 /// The token MUST already be verified by `access_middleware_rs256` or
 /// `access_middleware_local_rs256` so `AccessTokenClaims` is in request extensions.
+///
+/// **Two modes** (checked in order):
+/// 1. If `Arc<dyn PermissionChecker>` is in request extensions, calls it for an
+///    async PDP check (e.g. cobotrix calling cobotsrv's `/api/v1/enforce`).
+/// 2. Otherwise falls back to checking `AccessTokenClaims.permissions` embedded
+///    in the JWT (backward compatible with cobotsrv).
 ///
 /// # Usage
 ///
@@ -517,7 +540,33 @@ pub async fn access_middleware_local_rs256(
 macro_rules! require_perm {
     ($perm:expr) => {
         axum::middleware::from_fn(
-            |request: axum::extract::Request, next: axum::middleware::Next| async move {
+            |mut request: axum::extract::Request, next: axum::middleware::Next| async move {
+                // Mode 1: PDP-based check via PermissionChecker in extensions
+                if let Some(checker) = request
+                    .extensions()
+                    .get::<std::sync::Arc<dyn $crate::PermissionChecker>>()
+                {
+                    let sub = request
+                        .extensions()
+                        .get::<$crate::claims::AccessTokenClaims>()
+                        .map(|c| c.sub.clone())
+                        .unwrap_or_default();
+                    let auth_header = request
+                        .headers()
+                        .get("Authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default();
+                    let allowed = checker.check_permission(&sub, $perm, auth_header).await;
+                    if allowed {
+                        return next.run(request).await;
+                    }
+                    return axum::response::IntoResponse::into_response((
+                        axum::http::StatusCode::FORBIDDEN,
+                        concat!("Missing permission: ", $perm),
+                    ));
+                }
+
+                // Mode 2: fallback to JWT-embedded permissions
                 let allowed = request
                     .extensions()
                     .get::<$crate::claims::AccessTokenClaims>()
