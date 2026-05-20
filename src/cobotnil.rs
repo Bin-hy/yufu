@@ -1,7 +1,8 @@
-use anyhow::{Context, Result};
-use clap::Parser;
 use std::path::Path;
 use std::thread;
+
+use anyhow::{Context, Result};
+use clap::Parser;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
 
@@ -18,7 +19,7 @@ const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
 #[command(name = "cobotnil", version)]
 struct Args {
     /// Set config directory path (e.g. "conf/cobotnil")
-    #[arg(short, long, default_value_t = String::from("conf/cobotnil"))]
+    #[arg(short, long, default_value_t = String::from("cobotnil"))]
     config: String,
 }
 
@@ -31,35 +32,29 @@ pub fn parse(name: &str) -> (&str, &str, &str) {
     (v[0], v[1], v[v.len() - 1])
 }
 
-fn load_cfg<T: serde::de::DeserializeOwned + Default>(path: &Path, label: &str) -> T {
-    if path.try_exists().unwrap_or(false) {
-        toml::from_str(
-            std::fs::read_to_string(path)
-                .unwrap_or_else(|e| panic!("failed to read {label}: {e}"))
-                .as_str(),
-        )
-        .unwrap_or_else(|e| panic!("failed to parse {label}: {e}"))
-    } else {
-        eprintln!("=== No {label} config file, using defaults ===");
-        T::default()
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Load cobotsrv config
-    let cobotsrv_cfg: cobotsrv::config::Config = load_cfg(
-        Path::new(&format!("{}/{COBOTSRV_NAME}.toml", args.config)),
-        COBOTSRV_NAME,
-    );
+    let cobotsrv_config_path = format!("{}/{COBOTSRV_NAME}.toml", args.config);
+    let path = Path::new(&cobotsrv_config_path);
+    let cobotsrv_cfg: cobotsrv::config::Config = if path.try_exists()? {
+        toml::from_str(std::fs::read_to_string(path)?.as_str())?
+    } else {
+        eprintln!("=== No cobotsrv config file, use default config ===");
+        Default::default()
+    };
 
     // Load cobotrix config
-    let cobotrix_cfg: cobotrix::config::Config = load_cfg(
-        Path::new(&format!("{}/{COBOTRIX_NAME}.toml", args.config)),
-        COBOTRIX_NAME,
-    );
+    let cobotrix_config_path = format!("{}/{COBOTRIX_NAME}.toml", args.config);
+    let path = Path::new(&cobotrix_config_path);
+    let cobotrix_cfg: cobotrix::config::Config = if path.try_exists()? {
+        toml::from_str(std::fs::read_to_string(path)?.as_str())?
+    } else {
+        eprintln!("=== No cobotrix config file, use default config ===");
+        Default::default()
+    };
 
     log::set(format!(
         "cobotrix={level},cobotnil={level},cobotsrv={level},cobotlet={level},http_log={level}",
