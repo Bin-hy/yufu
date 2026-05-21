@@ -71,7 +71,7 @@ node_modules
 # Local configuration overrides (root-level only, not conf/ templates)
 /cobotusr.toml
 /cobotlet.toml
-cobotnil
+/cobotnil
 
 # redb
 data/
