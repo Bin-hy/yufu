@@ -8,16 +8,9 @@
     "paths": {
       "@/*": ["src/*"]
     },
-    /* 修复vue3中tsx语法的问题 */
-    "jsx": "preserve",
-    "jsxImportSource": "vue",
-    /* Linting */
     "strict": false,
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUnusedParameters": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
 }

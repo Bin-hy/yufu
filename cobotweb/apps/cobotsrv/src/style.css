@@ -5,102 +5,23 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-
-    --primary: 224 76% 53%; /* #2563eb */
-    --primary-foreground: 210 40% 98%;
-
-    --secondary: 233 86% 59%; /* #4f46e5 */
-    --secondary-foreground: 210 40% 98%;
-
+    --foreground: 222.2 47.4% 11.2%;
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
-
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 224 76% 53%;
-
-    --radius: 0.5rem;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 224 76% 53%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+    --primary: 222.2 47.4% 11.2%;
     --primary-foreground: 210 40% 98%;
-
-    --secondary: 233 86% 59%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224 76% 53%;
-  }
-
-  body {
-    @apply bg-background text-foreground antialiased;
+    --ring: 222.2 47.4% 11.2%;
+    --radius: 0.5rem;
   }
 }
 
-/* 兼容性增强：暗色模式下提升硬编码灰度文字的可读性
-   项目部分页面使用了 tailwind 的 text-gray-* 类（更偏向浅色主题），
-   这里在 .dark 下将其映射到语义化颜色，确保对比度充足。 */
-@layer utilities {
-  .dark .text-gray-900,
-  .dark .text-gray-800,
-  .dark .text-gray-700,
-  .dark .text-neutral-900,
-  .dark .text-neutral-800,
-  .dark .text-neutral-700,
-  .dark .text-slate-900,
-  .dark .text-slate-800,
-  .dark .text-slate-700,
-  .dark .text-zinc-900,
-  .dark .text-zinc-800,
-  .dark .text-zinc-700 {
-    @apply text-foreground;
-  }
-
-  .dark .text-gray-600,
-  .dark .text-gray-500,
-  .dark .text-gray-400,
-  .dark .text-neutral-600,
-  .dark .text-neutral-500,
-  .dark .text-neutral-400,
-  .dark .text-slate-600,
-  .dark .text-slate-500,
-  .dark .text-slate-400,
-  .dark .text-zinc-600,
-  .dark .text-zinc-500,
-  .dark .text-zinc-400 {
-    @apply text-muted-foreground;
-  }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
 }

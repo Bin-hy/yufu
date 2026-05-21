@@ -1,18 +1,8 @@
-import './style.css'
 import { createApp } from 'vue'
 import App from './app.vue'
-// core
-import { pinia } from '@/pinia'
-import { router } from '@/router'
-import { useUserStore } from '@/pinia/stores/user'
+import { router, registerGuard } from './router'
+import './style.css'
 
-const app = createApp(App)
+registerGuard(router)
 
-app.use(pinia)
-app.use(router)
-
-// 初始化用户信息（从本地存储恢复）
-const userStore = useUserStore()
-userStore.initUserInfo()
-
-app.mount('#app')
+createApp(App).use(router).mount('#app')

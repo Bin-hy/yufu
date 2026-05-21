@@ -1,0 +1,108 @@
+[http]
+# Http Server Listen Address
+# listen = "[::]:4000"
+# api_prefix = "/api/v1"
+
+# Headers["Authorization"] = "Bearer {token}"
+ [auth]
+# JSON WEB TOKEN secret
+# secret = "<jwt_secret>"
+# static JWT token, superadmin, debuggger can use this token
+# tokens = ["live777"]
+# expiration_seconds, default 5min.
+exp_seconds = 300
+# refresh_expiration_seconds, default 30d.
+refresh_exp_seconds = 2592000 # 30*24*3600
+
+# CORS origins 列表
+origins = [
+    "http://localhost:5173",
+    "https://example.com"
+]
+
+# add a superadmin
+[auth.super_admin]
+# username = "sadmin"
+# password = "sadmin"
+
+# OIDC / OAuth2 Provider Configuration
+[oidc]
+# Public issuer URL for OIDC discovery (/.well-known/openid-configuration).
+# Clients use this to locate token/userinfo/jwks endpoints.
+# If empty, falls back to http.public, then derived from http.listen.
+# issuer = "https://auth.example.com"
+
+# RSA private key path for ID Token signing (RS256).
+# Auto-generated if the file does not exist.
+rsa_private_key_path = "conf/oidc_rsa_private.local.pem"
+
+# Token lifetimes (optional, defaults to auth.exp_seconds / auth.refresh_exp_seconds)
+access_token_expire_seconds = 3600
+refresh_token_expire_seconds = 604800
+
+# Default email domain for users without an email address.
+# UserInfo endpoint returns "{username}@{email_domain}".
+# email_domain = "cobotrix.local"
+
+# Algorithm for signing access tokens. RS256 (default) requires rsa_private_key_path;
+# HS256 falls back to auth.secret (handy for tests / no-key dev clusters).
+# signing_algorithm = "RS256"
+
+# OIDC clients to auto-register at startup. Existing entries (matched by client_id)
+# are left untouched — secrets are NEVER overwritten by config.
+# If client_secret is omitted, a random one is generated on first run and printed
+# ONCE in the startup log. Set explicitly here for stable dev/test secrets.
+# [[oidc.bootstrap_clients]]
+# client_id = "cobotrix"
+# name = "CoBotrix Management Center"
+# redirect_uris = ["http://localhost:5173/oauth/callback"]
+# allowed_scopes = ["openid", "profile", "email"]
+# grant_types = ["authorization_code", "refresh_token"]
+# client_secret = "<dev-only-stable-secret>"
+# Admin Dashboard Accounts
+# [[auth.accounts]]
+# username = "live777"
+# password = "live777"
+
+[log]
+# Env: `LOG_LEVEL`
+# Default: info
+# Values: off, error, warn, info, debug, trace
+# level = "warn"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5432/cobotrix"
+# max connections (Default: 10, unit: second)
+max_connections = 10
+# timeout  (Default: 30 ,unit: second)
+connect_timeout = 30
+
+# [net4mqtt]
+# Global unique alias
+# alias = "liveman-0"
+# `client_id={alias}` use alias as MQTT `client_id`
+# mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
+# listen = "127.0.0.1:1077"
+# domain = "net4mqtt.local"
+
+# [[nodes]]
+# Globally unique id
+# alias = "static-0"
+# Auth token
+# token = "live777"
+# Live777 Address
+# url = "http://127.0.0.1:7777"
+
+# [[nodes]]
+# alias = "static-1"
+# token = "live777"
+# url = "http://127.0.0.1:7778"
+
+# [[nodes]]
+# Globally unique id
+# alias = "static-0"
+# Auth token
+# token = "live777"
+# Live777 Address
+# url = "http://liveion-0.net4mqtt.local:7777"
+

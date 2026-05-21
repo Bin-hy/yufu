@@ -57,11 +57,11 @@ desktop.ini
 # OIDC RSA private keys (any environment)
 conf/oidc_rsa_private*.pem
 
-# cobotweb build output (baked into cobotsrv binary via rust-embed when --features webui)
+# cobotweb build output (baked into cobotusr binary via rust-embed when --features webui)
 assets/*
-!assets/cobotsrv/
-assets/cobotsrv/*
-!assets/cobotsrv/.gitkeep
+!assets/cobotusr/
+assets/cobotusr/*
+!assets/cobotusr/.gitkeep
 node_modules
 **/node_modules
 **/dist
@@ -69,7 +69,7 @@ node_modules
 **/*.local
 
 # Configuration
-cobotsrv.toml
+cobotusr.toml
 cobotlet.toml
 cobotnil
 

@@ -780,7 +780,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "cobotrix"
+name = "cobotrix-root"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "auth",
+ "clap",
+ "cobotlet",
+ "cobotsrv",
+ "cobotusr",
+ "futures",
+ "net4mqtt",
+ "portpicker",
+ "reqwest",
+ "serde",
+ "signal",
+ "testcontainers",
+ "testcontainers-modules",
+ "tokio",
+ "toml 0.9.8",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "cobotsrv"
 version = "0.0.0"
 dependencies = [
  "anyhow",
@@ -814,32 +839,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cobotrix-root"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "auth",
- "clap",
- "cobotlet",
- "cobotrix",
- "cobotsrv",
- "futures",
- "net4mqtt",
- "portpicker",
- "reqwest",
- "serde",
- "signal",
- "testcontainers",
- "testcontainers-modules",
- "tokio",
- "toml 0.9.8",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "cobotsrv"
+name = "cobotusr"
 version = "0.0.0"
 dependencies = [
  "anyhow",

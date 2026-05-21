@@ -17,6 +17,10 @@ name = "cobotlet"
 path = "src/cobotlet.rs"
 
 [[bin]]
+name = "cobotusr"
+path = "src/cobotusr.rs"
+
+[[bin]]
 name = "cobotsrv"
 path = "src/cobotsrv.rs"
 
@@ -25,7 +29,7 @@ name = "cobotrix"
 path = "src/cobotrix.rs"
 
 [workspace]
-members = [".", "cobotlet", "cobotsrv", "cobotrix", "libs/auth"]
+members = [".", "cobotlet", "cobotusr", "cobotsrv", "libs/auth"]
 
 [workspace.package]
 version = "0.0.0"
@@ -83,8 +87,8 @@ testcontainers = {version = "0.25.0", features = ["blocking"]}
 testcontainers-modules = { version = "0.13.0", features = ["postgres"] }
 
 cobotlet = { path = "cobotlet" }
+cobotusr = { path = "cobotusr" }
 cobotsrv = { path = "cobotsrv" }
-cobotrix = { path = "cobotrix" }
 signal = { workspace = true }
 
 [dev-dependencies]
@@ -94,7 +98,7 @@ reqwest = { workspace = true, features = ["socks", "json"] }
 
 [features]
 default = ["net4mqtt"]
-webui = ["cobotlet/webui", "cobotsrv/webui", "cobotrix/webui"]
-net4mqtt = ["cobotlet/net4mqtt", "cobotsrv/net4mqtt", "cobotrix/net4mqtt"]
-openapi= ["cobotsrv/openapi"]
+webui = ["cobotlet/webui", "cobotusr/webui", "cobotsrv/webui"]
+net4mqtt = ["cobotlet/net4mqtt", "cobotusr/net4mqtt", "cobotsrv/net4mqtt"]
+openapi = ["cobotusr/openapi"]
 

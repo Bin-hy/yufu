@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
 use tracing::{Level, debug, info, warn};
 
@@ -43,25 +43,23 @@ async fn main() -> Result<()> {
 
     #[cfg(debug_assertions)]
     log::set(format!(
-        "cobotrix={},cobotsrv={},net4mqtt={},http_log={}",
-        log_level, log_level, log_level, log_level
+        "cobotsrv={},net4mqtt={},http_log={}",
+        log_level, log_level, log_level
     ));
 
     #[cfg(not(debug_assertions))]
-    log::set(format!(
-        "cobotrix={},cobotsrv={},http_log={}",
-        log_level, log_level, log_level
-    ));
+    log::set(format!("cobotsrv={},http_log={}", log_level, log_level));
 
     warn!("set log level: [{}]", log_level);
     debug!("config : {:?}", cfg);
 
-    let listener = tokio::net::TcpListener::bind(cfg.http.listen).await?;
+    let listener = tokio::net::TcpListener::bind(cfg.http.listen)
+        .await
+        .context("failed to bind listener")?;
     let addr = listener.local_addr()?;
     info!("Server listening on {}", addr);
 
     cobotsrv::serve(cfg, listener, utils::shutdown_signal()).await;
     info!("Server graceful shutdown completed");
-
     Ok(())
 }

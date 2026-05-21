@@ -1,0 +1,31 @@
+[http]
+listen = "127.0.0.1:4000"
+
+[mqtt]
+url = "mqtt://127.0.0.1:1883"
+client_id = "cobotsrv"
+topic_prefix = "cobotrix"
+keep_alive_secs = 30
+
+[task]
+wait_timeout_ms = 5000
+result_cache_ttl_secs = 300
+
+[net4mqtt]
+# Global unique alias
+alias = "cobotsrv"
+# `client_id={alias}` use alias as MQTT `client_id`
+mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
+listen = "127.0.0.1:1077"
+domain = "net4mqtt.local"
+
+# Auto-register cobotrix as an OIDC client on first start so the dev frontend
+# can run Authorization Code + PKCE without manual registration.
+# Stable secret is OK here because this file is only used by the dev cluster.
+[[oidc.bootstrap_clients]]
+client_id = "cobotrix"
+name = "CoBotrix Management Center (dev)"
+redirect_uris = ["http://localhost:5173/oauth/callback", "http://localhost:4001/oauth/callback"]
+allowed_scopes = ["openid", "profile", "email"]
+grant_types = ["authorization_code", "refresh_token"]
+client_secret = "dev-cobotrix-secret-change-me"

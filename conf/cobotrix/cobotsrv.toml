@@ -1,0 +1,19 @@
+# cobotsrv - Device Management Server
+# cobotrix 统一启动器配置目录（conf/cobotrix/）下的 cobotsrv 配置。
+# 复制自 conf/cobotsrv.example.toml，按需修改。
+
+[http]
+listen = "127.0.0.1:4001"
+
+[auth]
+client_id = "cobotsrv"
+client_secret = ""
+jwks_url = "http://127.0.0.1:4000/.well-known/jwks.json"
+expected_audience = "cobotsrv"
+require_permissions = true
+
+[log]
+level = "info"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5432/cobotsrv"
