@@ -1,0 +1,29 @@
+# cobotusr - User & Auth Service (IdP + PDP)
+# cobotrix 统一启动器配置目录（conf/cobotrix/）下的 cobotusr 配置。
+# 复制自 conf/cobotusr.example.toml，按需修改。
+
+[http]
+listen = "127.0.0.1:4000"
+
+[auth]
+exp_seconds = 3600
+refresh_exp_seconds = 2592000
+origins = ["*"]
+
+[auth.super_admin]
+username = "admin"
+password = "admin"
+
+[oidc]
+# bootstrap_clients 会在启动时自动创建 OIDC Client
+[[oidc.bootstrap_clients]]
+client_id = "cobotsrv"
+name = "CoBotrix Device Management Server"
+redirect_uris = ["http://localhost:5174/oauth/callback"]
+grant_types = ["authorization_code", "refresh_token", "client_credentials"]
+
+[log]
+level = "info"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5432/cobotusr"

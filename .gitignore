@@ -68,9 +68,9 @@ node_modules
 **/dist-ssr
 **/*.local
 
-# Configuration
-cobotusr.toml
-cobotlet.toml
+# Local configuration overrides (root-level only, not conf/ templates)
+/cobotusr.toml
+/cobotlet.toml
 cobotnil
 
 # redb
