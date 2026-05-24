@@ -70,6 +70,11 @@ async fn test_http_cluster() {
             ..Default::default()
         }
     };
+    let test_root = format!("target/test-artifacts/{}", uuid::Uuid::new_v4());
+    let rsa_private_key_path = format!("{test_root}/oidc_rsa_private.pem");
+    cfg.oidc.rsa_private_key_path = rsa_private_key_path.clone();
+    cfg.auth.rsa_private_key_path = rsa_private_key_path;
+    cfg.storage.root_dir = format!("{test_root}/storage");
 
     cfg.nodes.extend(
         results

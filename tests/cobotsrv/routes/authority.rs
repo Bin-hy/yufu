@@ -1,5 +1,4 @@
 use super::super::common::*;
-use cobotsrv::config::Config;
 use cobotsrv::entity::authority::{
     AuthorityDeleteReq, AuthorityInsertReq, AuthorityPatchReq, AuthorityVO,
 };
@@ -17,8 +16,7 @@ async fn test_add_authority() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
@@ -58,8 +56,7 @@ async fn test_get_page_authorities() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
@@ -87,8 +84,7 @@ async fn test_patch_authority() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
@@ -142,8 +138,7 @@ async fn test_delete_authority() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 

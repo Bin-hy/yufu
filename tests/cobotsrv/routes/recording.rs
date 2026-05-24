@@ -1,5 +1,4 @@
 use super::super::common::*;
-use cobotsrv::config::Config;
 use cobotsrv::entity::recording::RecordingVO;
 use cobotsrv::entity::role::RoleEnum;
 use cobotsrv::entity::{PageSelectQuery, PageSelectQueryResult};
@@ -17,8 +16,7 @@ async fn test_get_recording_by_page() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
@@ -50,8 +48,7 @@ async fn test_get_recording_by_user_id() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 

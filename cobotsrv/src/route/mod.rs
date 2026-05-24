@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::modules::im;
 use axum::Router;
 
 pub mod auth;
@@ -24,6 +25,7 @@ pub fn get_auth_routes() -> Router<AppState> {
         .merge(user_authority::get_auth_routes())
         .merge(oidc::get_auth_routes())
         .merge(oidc_admin::get_auth_routes())
+        .nest("/im", im::router::init_im_router())
 }
 
 pub fn get_public_routes() -> Router<AppState> {

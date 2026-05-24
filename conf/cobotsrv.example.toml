@@ -61,6 +61,10 @@ max_connections = 10
 # timeout  (Default: 30 ,unit: second)
 connect_timeout = 30
 
+[storage]
+# Local storage root for IM uploads and downloads.
+root_dir = "storage"
+
 # [net4mqtt]
 # Global unique alias
 # alias = "liveman-0"

@@ -1,4 +1,3 @@
-use cobotsrv::config::Config;
 use cobotsrv::entity::PageSelectQuery;
 use cobotsrv::entity::role::RoleEnum;
 use cobotsrv::entity::user::{UserAddWithRoleReq, UserPatchReq, UserVO};
@@ -18,8 +17,7 @@ async fn test_get_page_users() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
@@ -48,8 +46,7 @@ async fn test_patch_user() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
@@ -90,8 +87,7 @@ async fn test_get_user_by_id() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
@@ -123,8 +119,7 @@ async fn test_add_user_with_role() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     let token = get_test_token(cfg.clone().auth.secret);
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 

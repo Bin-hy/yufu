@@ -1,5 +1,7 @@
 use axum::body::Body;
 use axum::extract::State;
+#[cfg(feature = "openapi")]
+use axum::{Json, response::Html, routing::get};
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderValue, Method, StatusCode, Uri};
@@ -11,11 +13,14 @@ use std::{future::Future, time::Duration};
 use tokio::net::TcpListener;
 
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{error, info, info_span};
+use tracing::{error, info, info_span, warn};
 
 use crate::config::Config;
 use crate::entity::role::RoleEnum;
 use crate::entity::user;
+use crate::modules::im::service::{
+    ConnectionManager, ImEvents, WsHandle, event_channel, spawn_event_service,
+};
 use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
@@ -34,6 +39,7 @@ pub mod config;
 pub mod entity;
 pub mod error;
 mod migration;
+pub mod modules;
 pub mod rbac;
 mod recording_middleware;
 mod result;
@@ -219,6 +225,14 @@ where
         }
     };
 
+    let ws_handle = Arc::new(ConnectionManager::new());
+    let (im_events, im_event_receiver) = event_channel();
+    let _im_event_service = spawn_event_service(
+        database_service.connection.clone(),
+        ws_handle.clone(),
+        im_event_receiver,
+    );
+
     let app_state = AppState {
         config: cfg.clone(),
         client: client_req.build().unwrap(),
@@ -226,6 +240,8 @@ where
         database: Arc::new(database_service),
         auth_state: Arc::new(auth_state.clone()),
         id_token_signer: Arc::new(id_token_signer),
+        im_events,
+        ws_handle,
     };
     let _ = app_state.init().await;
     let app_state_for_middleware = app_state.clone();
@@ -269,8 +285,7 @@ where
     let sub_public_router = route::get_public_routes();
 
     let api_prefix = &cfg.http.api_prefix;
-    #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
-    let mut app = Router::new()
+    let app = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
         .merge(get_no_prefix_routes())
@@ -307,7 +322,7 @@ where
             }
         })
         .with_state(app_state.clone())
-        .layer(axum::middleware::from_fn(http_log::print_request_response))
+        .layer(axum::middleware::from_fn(print_request_response))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
                 let span = info_span!(
@@ -326,17 +341,57 @@ where
         )
         .fallback(static_handler);
     #[cfg(feature = "openapi")]
-    {
-        use crate::swagger_docs::doc::ApiDoc;
-        use utoipa::OpenApi;
-        use utoipa_swagger_ui::SwaggerUi;
-        app = app.merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", ApiDoc::openapi()));
-    }
+    let app = app.merge(openapi_router());
 
     axum::serve(listener, app)
         .with_graceful_shutdown(signal)
         .await
         .unwrap_or_else(|e| error!("Application error: {e}"));
+}
+
+// Based on live777/http-log's print_request_response, with local behavior changes:
+// https://github.com/binbat/live777/blob/a1ba82c179196b0d0648de7d9541d58b6cd225bb/libs/http-log/src/lib.rs#L12-L54
+async fn print_request_response(req: Request<Body>, next: middleware::Next) -> impl IntoResponse {
+    let start = std::time::Instant::now();
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+
+    // Do not buffer/rebuild bodies; keep uploads, streams, WebSocket upgrades,
+    // and sensitive bodies out of the logging path.
+    let res = next.run(req).await;
+    let status = res.status();
+    let duration = start.elapsed();
+
+    // WebSocket success is 101 Switching Protocols, not 2xx.
+    if status.is_informational() || status.is_success() {
+        if duration.as_millis() > 500 {
+            warn!(
+                "[{} {}] [{}] {}ms",
+                method,
+                uri,
+                status.as_u16(),
+                duration.as_millis()
+            );
+        } else {
+            info!(
+                "[{} {}] [{}] {}ms",
+                method,
+                uri,
+                status.as_u16(),
+                duration.as_millis()
+            );
+        }
+    } else {
+        error!(
+            "[{} {}] [{}] {}ms",
+            method,
+            uri,
+            status.as_u16(),
+            duration.as_millis()
+        );
+    }
+
+    res
 }
 
 #[cfg(feature = "webui")]
@@ -368,6 +423,47 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
+#[cfg(feature = "openapi")]
+fn openapi_router() -> Router {
+    Router::new()
+        .route("/api-doc/openapi.json", get(openapi_json_handler))
+        .route("/docs", get(openapi_docs_handler))
+        .route("/docs/", get(openapi_docs_handler))
+}
+
+#[cfg(feature = "openapi")]
+async fn openapi_json_handler() -> Json<utoipa::openapi::OpenApi> {
+    use crate::swagger_docs::doc::ApiDoc;
+    use utoipa::OpenApi;
+
+    Json(ApiDoc::openapi())
+}
+
+#[cfg(feature = "openapi")]
+async fn openapi_docs_handler() -> Html<&'static str> {
+    Html(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: '/api-doc/openapi.json',
+      dom_id: '#swagger-ui'
+    });
+  </script>
+</body>
+</html>"#,
+    )
+}
+
 /// 鉴权成功后回调：将用户信息注入
 async fn access_callback(
     claim: Claims<IdType>,
@@ -393,6 +489,8 @@ pub struct AppState {
     database: Arc<DatabaseService>,
     auth_state: Arc<AuthState>,
     id_token_signer: Arc<IdTokenSigner>,
+    im_events: ImEvents,
+    ws_handle: WsHandle,
 }
 pub type IdType = i32;
 

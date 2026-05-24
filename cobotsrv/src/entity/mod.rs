@@ -9,11 +9,17 @@ pub mod oauth_client;
 pub mod oauth_consent;
 pub mod oauth_scope;
 pub mod oauth_token;
+
+pub mod conversation;
+pub mod conversation_member;
+pub mod group;
+pub mod message;
 pub mod recording;
 pub mod refresh_token;
 pub mod role;
 pub mod user;
 pub mod user_authority;
+pub mod user_conversation;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
 #[derive(Deserialize, Serialize, Clone)]

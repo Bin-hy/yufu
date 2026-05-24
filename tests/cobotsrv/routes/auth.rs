@@ -1,4 +1,3 @@
-use cobotsrv::config::Config;
 use cobotsrv::error::AppError;
 use reqwest::Client;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -17,8 +16,7 @@ async fn test_register() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;
@@ -52,8 +50,7 @@ async fn test_login() -> Result<(), AppError> {
     let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
     let addr = listener.local_addr()?;
 
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
+    let cfg = build_test_config(db_url.clone());
     tokio::spawn(cobotsrv::serve(cfg.clone(), listener, shutdown_signal()));
 
     let api_prefix = cfg.http.api_prefix;

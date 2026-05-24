@@ -22,6 +22,8 @@ pub struct Config {
     // database config
     #[serde(default)]
     pub database: Database,
+    #[serde(default)]
+    pub storage: Storage,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -142,6 +144,20 @@ impl Default for Database {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Storage {
+    #[serde(default = "default_storage_root_dir")]
+    pub root_dir: String,
+}
+
+impl Default for Storage {
+    fn default() -> Self {
+        Self {
+            root_dir: default_storage_root_dir(),
+        }
+    }
+}
+
 fn default_db_url() -> String {
     env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/postgres".to_string())
@@ -153,6 +169,10 @@ fn default_db_max_connections() -> u32 {
 
 fn default_db_connect_timeout() -> u64 {
     30
+}
+
+fn default_storage_root_dir() -> String {
+    "storage".to_string()
 }
 
 fn default_http_listen() -> SocketAddr {

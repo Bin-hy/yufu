@@ -7,6 +7,7 @@ mod m20251016_140822_create_authority_role_table;
 mod m20251022_152723_create_recording_table;
 mod m20251114_154712_create_user_authority;
 mod m20251119_194133_create_refresh_token;
+mod m20260318_000001_create_im_core_tables;
 mod m20260331_000001_create_oauth_client;
 mod m20260331_000002_create_oauth_scope;
 mod m20260331_000003_create_oauth_token;
@@ -32,6 +33,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260331_000003_create_oauth_token::Migration),
             Box::new(m20260331_000004_create_oauth_authorization_code::Migration),
             Box::new(m20260401_000001_create_oauth_consent::Migration),
+            Box::new(m20260318_000001_create_im_core_tables::Migration),
             Box::new(m20260411_000001_rebuild_oauth_client_with_owner::Migration),
         ];
         // Seeds run after all schema migrations

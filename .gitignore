@@ -68,6 +68,8 @@ node_modules
 **/dist-ssr
 **/*.local
 
+# IM上传的文件
+storage/*
 # Configuration
 cobotsrv.toml
 cobotlet.toml
