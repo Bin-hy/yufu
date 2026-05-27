@@ -57,9 +57,20 @@ desktop.ini
 # OIDC RSA private keys (any environment)
 conf/oidc_rsa_private*.pem
 
-# cobotweb build output (baked into cobotusr binary via rust-embed when --features webui)
+# cobotweb build output (baked into binaries via rust-embed when --features webui)
+# Keep directories alive with .gitkeep so CI builds (--all-features) don't fail on
+# missing rust-embed folders.
 assets/*
+!assets/cobotlet/
+!assets/cobotrix/
+!assets/cobotsrv/
 !assets/cobotusr/
+assets/cobotlet/*
+!assets/cobotlet/.gitkeep
+assets/cobotrix/*
+!assets/cobotrix/.gitkeep
+assets/cobotsrv/*
+!assets/cobotsrv/.gitkeep
 assets/cobotusr/*
 !assets/cobotusr/.gitkeep
 node_modules
