@@ -10,13 +10,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Capability {
     pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default = "default_method")]
     pub method: String,
     pub path: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
-    pub schema: Option<serde_json::Value>,
+    #[serde(default, alias = "schema")]
+    pub input_schema: Option<serde_json::Value>,
 }
 
 fn default_method() -> String {
@@ -166,6 +168,21 @@ impl DeviceStore {
         }
     }
 
+    /// Replace a device's capabilities in place and re-index. Returns the updated
+    /// device, or `None` if the device ID is not found.
+    pub fn update_capabilities(&self, id: &str, caps: Vec<Capability>) -> Result<Option<Device>> {
+        let Some(mut entry) = self.devices.get_mut(id) else {
+            return Ok(None);
+        };
+        self.unindex_capabilities(&*entry);
+        entry.capabilities = caps;
+        let device = entry.clone();
+        drop(entry);
+        self.index_capabilities(&device);
+        self.persist(&device)?;
+        Ok(Some(device))
+    }
+
     pub fn find_by_capability(&self, name: &str) -> Vec<Device> {
         let Some(set) = self.capability_index.get(name) else {
             return Vec::new();
@@ -211,10 +228,11 @@ mod tests {
                 .iter()
                 .map(|name| Capability {
                     name: (*name).to_string(),
+                    description: None,
                     method: "POST".to_string(),
                     path: format!("/{name}"),
                     tags: vec![],
-                    schema: None,
+                    input_schema: None,
                 })
                 .collect(),
             last_heartbeat: now,
@@ -299,5 +317,59 @@ mod tests {
         s.remove("d1").unwrap();
         assert!(s.find_by_capability("move").is_empty());
         assert!(s.get("d1").is_none());
+    }
+
+    #[test]
+    fn update_capabilities_replaces_and_reindexes() {
+        let (s, _g) = store();
+        s.register(sample("d1", &["move", "grip"])).unwrap();
+
+        let new_caps = vec![Capability {
+            name: "camera".to_string(),
+            description: None,
+            method: "POST".to_string(),
+            path: "/camera".to_string(),
+            tags: vec![],
+            input_schema: None,
+        }];
+        let updated = s.update_capabilities("d1", new_caps).unwrap().unwrap();
+
+        // New capability is queryable.
+        assert_eq!(updated.capabilities.len(), 1);
+        assert_eq!(updated.capabilities[0].name, "camera");
+        assert_eq!(s.find_by_capability("camera").len(), 1);
+
+        // Old capabilities removed from index.
+        assert!(s.find_by_capability("move").is_empty());
+        assert!(s.find_by_capability("grip").is_empty());
+    }
+
+    #[test]
+    fn update_capabilities_nonexistent_returns_none() {
+        let (s, _g) = store();
+        let result = s.update_capabilities("no-such-device", vec![]).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn update_capabilities_persists_across_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cobotlet.redb");
+        {
+            let s = DeviceStore::open(&path).unwrap();
+            s.register(sample("d1", &["move"])).unwrap();
+            let caps = vec![Capability {
+                name: "grip".to_string(),
+                description: None,
+                method: "POST".to_string(),
+                path: "/grip".to_string(),
+                tags: vec![],
+                input_schema: None,
+            }];
+            s.update_capabilities("d1", caps).unwrap();
+        }
+        let s2 = DeviceStore::open(&path).unwrap();
+        assert!(s2.find_by_capability("move").is_empty());
+        assert_eq!(s2.find_by_capability("grip").len(), 1);
     }
 }

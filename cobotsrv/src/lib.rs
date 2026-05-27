@@ -165,11 +165,11 @@ where
         let conn = Arc::new(database.connection.clone());
         match mqtt::spawn(&mqtt_cfg, conn, cfg.task.result_cache_ttl_secs).await {
             Ok(rt) => {
-                info!(url = %mqtt_cfg.url, "cobotrix mqtt connected");
+                info!(url = %mqtt_cfg.url, "cobotsrv mqtt connected");
                 Some(rt.handle)
             }
             Err(e) => {
-                tracing::warn!(error = %e, "cobotrix mqtt connect failed; tasks API will return errors");
+                tracing::warn!(error = %e, "cobotsrv mqtt connect failed; tasks API will return errors");
                 None
             }
         }
@@ -185,22 +185,22 @@ where
         mqtt: mqtt_handle,
     };
 
-    // JWT verification (Phase 1): pull cobotsrv's public key from JWKS, verify RS256.
-    // Hard-fail at startup if the JWKS is unreachable — running an unauthenticated cobotrix
+    // JWT verification (Phase 1): pull cobotusr's public key from JWKS, verify RS256.
+    // Hard-fail at startup if the JWKS is unreachable — running an unauthenticated cobotsrv
     // is worse than refusing to start.
     let jwks = Arc::new(
         JwksClient::new(&cfg.auth.jwks_url, Some(cfg.auth.expected_audience.clone()))
             .await
-            .expect("failed to fetch cobotsrv JWKS at startup"),
+            .expect("failed to fetch cobotusr JWKS at startup"),
     );
     jwks.spawn_refresher(cfg.auth.jwks_refresh_secs);
 
-    // Sync required permissions to cobotsrv so the admin can assign them.
+    // Sync required permissions to cobotusr so the admin can assign them.
     sync_permissions(&cfg).await;
 
     // PDP-based permission enforcement. When `auth.require_permissions = true`
     // (the default), EnforceClient is injected so `require_perm!` calls
-    // cobotsrv's `/api/v1/enforce` at request time (cached, TTL 10 s).
+    // cobotusr's `/api/v1/enforce` at request time (cached, TTL 10 s).
     // When false the middleware layer is omitted entirely and `require_perm!`
     // falls back to JWT-embedded permissions (or allows all if absent).
     async fn enforce_injector(
@@ -214,7 +214,7 @@ where
 
     let protected = if cfg.auth.require_permissions {
         let enforce_client: Arc<dyn auth::PermissionChecker> = Arc::new(
-            enforce::EnforceClient::new(cfg.auth.cobotsrv_base_url(), 10),
+            enforce::EnforceClient::new(cfg.auth.cobotusr_base_url(), 10),
         );
         get_protected_routes()
             .layer(middleware::from_fn_with_state(
@@ -314,8 +314,8 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
-/// Sync required permissions to cobotsrv at startup.
-/// POSTs to cobotsrv's `/api/v1/application/sync-permissions` with
+/// Sync required permissions to cobotusr at startup.
+/// POSTs to cobotusr's `/api/v1/application/sync-permissions` with
 /// client_id + client_secret (idempotent upsert).
 async fn sync_permissions(cfg: &Config) {
     let perms = &cfg.permissions;
@@ -323,7 +323,7 @@ async fn sync_permissions(cfg: &Config) {
         return;
     }
 
-    let cobotsrv_base = cfg.auth.cobotsrv_base_url();
+    let cobotsrv_base = cfg.auth.cobotusr_base_url();
 
     let client = reqwest::Client::new();
 
@@ -347,13 +347,13 @@ async fn sync_permissions(cfg: &Config) {
         .await
     {
         Ok(r) if r.status().is_success() => {
-            tracing::info!("{} permissions synced to cobotsrv", perms.len());
+            tracing::info!("{} permissions synced to cobotusr", perms.len());
         }
         Ok(r) => {
-            tracing::warn!(status = %r.status(), "permission sync: cobotsrv returned error");
+            tracing::warn!(status = %r.status(), "permission sync: cobotusr returned error");
         }
         Err(e) => {
-            tracing::warn!(error = %e, "permission sync: failed to reach cobotsrv");
+            tracing::warn!(error = %e, "permission sync: failed to reach cobotusr");
         }
     }
 }

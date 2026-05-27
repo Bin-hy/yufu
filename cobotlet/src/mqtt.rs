@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use rumqttc::{AsyncClient, Event, Incoming, LastWill, MqttOptions, Packet, Publish, QoS};
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use crate::config::Mqtt as MqttConfig;
@@ -147,9 +146,6 @@ pub async fn spawn(
         topic_root: Arc::new(topic_root.clone()),
     });
 
-    // The eventloop needs &mut self, so wrap in Mutex for the spawned task.
-    let _ = Mutex::new(()); // no-op; eventloop is owned by the task below.
-
     let task_sink = sink.clone();
     let task_store = store;
     let task_client = http_client;
@@ -205,10 +201,9 @@ async fn handle_publish(
             warn!(topic, error = %e, "decode task payload failed");
             let result = TaskResult {
                 id: task_id,
+                is_error: true,
+                content: vec![crate::dispatcher::ContentBlock { r#type: "text".into(), text: format!("decode task: {e}") }],
                 status: 0,
-                headers: Default::default(),
-                body: None,
-                error: Some(format!("decode task: {e}")),
             };
             sink.publish_task_result(&result);
             return;

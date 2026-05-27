@@ -1,6 +1,6 @@
 use chrono::{NaiveDateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, DbErr, EntityTrait,
+    ActiveModelTrait, ActiveValue, ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait,
     QueryFilter, QueryOrder, Set,
 };
 
@@ -102,6 +102,45 @@ impl DeviceService {
             .await
     }
 
+    /// List devices with optional server-side filters for alias and online status.
+    /// The `capability` filter is applied in memory after the DB query because
+    /// the capabilities column is unindexed JSON.
+    pub async fn list_filtered(
+        db: &DatabaseConnection,
+        alias: Option<&str>,
+        online: Option<bool>,
+        capability: Option<&str>,
+    ) -> Result<Vec<device::Model>, DbErr> {
+        let mut cond = Condition::all();
+        if let Some(a) = alias {
+            cond = cond.add(device::Column::CobotletAlias.eq(a));
+        }
+        if let Some(o) = online {
+            cond = cond.add(device::Column::Online.eq(o));
+        }
+        let mut rows = device::Entity::find()
+            .filter(cond)
+            .order_by_desc(device::Column::UpdateTime)
+            .all(db)
+            .await?;
+        if let Some(cap) = capability {
+            rows.retain(|d| Self::matches_capability(&d.capabilities, cap));
+        }
+        Ok(rows)
+    }
+
+    /// Pure in-memory capability filter used by `list_filtered`. Extracted so it
+    /// can be unit-tested without a database connection.
+    pub(crate) fn matches_capability(capabilities: &serde_json::Value, name: &str) -> bool {
+        capabilities
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .any(|c| c.get("name").and_then(|n| n.as_str()) == Some(name))
+            })
+            .unwrap_or(false)
+    }
+
     pub async fn list_by_alias(
         db: &DatabaseConnection,
         cobotlet_alias: &str,
@@ -111,5 +150,48 @@ impl DeviceService {
             .order_by_desc(device::Column::UpdateTime)
             .all(db)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn matches_capability_found() {
+        let caps = json!([
+            { "name": "move", "method": "POST", "path": "/move" },
+            { "name": "grip", "method": "POST", "path": "/grip" }
+        ]);
+        assert!(DeviceService::matches_capability(&caps, "move"));
+        assert!(DeviceService::matches_capability(&caps, "grip"));
+    }
+
+    #[test]
+    fn matches_capability_not_found() {
+        let caps = json!([{ "name": "move", "method": "POST", "path": "/move" }]);
+        assert!(!DeviceService::matches_capability(&caps, "camera"));
+    }
+
+    #[test]
+    fn matches_capability_empty_array() {
+        let caps = json!([]);
+        assert!(!DeviceService::matches_capability(&caps, "move"));
+    }
+
+    #[test]
+    fn matches_capability_non_array_json() {
+        // Malformed capabilities column should not panic.
+        let caps = json!(null);
+        assert!(!DeviceService::matches_capability(&caps, "move"));
+        let caps = json!("not-an-array");
+        assert!(!DeviceService::matches_capability(&caps, "move"));
+    }
+
+    #[test]
+    fn matches_capability_partial_name_does_not_match() {
+        let caps = json!([{ "name": "movement", "method": "POST", "path": "/movement" }]);
+        assert!(!DeviceService::matches_capability(&caps, "move"));
     }
 }

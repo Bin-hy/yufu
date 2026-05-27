@@ -10,35 +10,61 @@ use crate::store::{Capability, DeviceStore};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Task {
     pub id: String,
-    pub capability_name: String,
+    /// MCP-style tool name. Accepts legacy `capability_name` for backward compat.
+    #[serde(alias = "capability_name")]
+    pub name: String,
     #[serde(default)]
     pub device_id: Option<String>,
-    #[serde(default)]
+    /// MCP-style tool input. Accepts legacy `body` for backward compat.
+    #[serde(default, alias = "body")]
+    pub input: Option<serde_json::Value>,
+    /// Pass-through HTTP headers for the device service call (implementation detail).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub headers: HashMap<String, String>,
     #[serde(default)]
-    pub body: Option<serde_json::Value>,
-    #[serde(default)]
     pub timeout_ms: Option<u64>,
+}
+
+/// MCP-style content block. Currently only "text" type is produced.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ContentBlock {
+    pub r#type: String,
+    pub text: String,
+}
+
+impl ContentBlock {
+    fn text(s: impl Into<String>) -> Self {
+        Self { r#type: "text".into(), text: s.into() }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskResult {
     pub id: String,
+    /// MCP-style error flag: true when the tool call failed.
+    pub is_error: bool,
+    /// MCP-style content blocks carrying the response payload.
+    pub content: Vec<ContentBlock>,
+    /// HTTP status code from the device service. 0 for dispatch-time errors.
     pub status: u16,
-    pub headers: HashMap<String, String>,
-    pub body: Option<serde_json::Value>,
-    #[serde(default)]
-    pub error: Option<String>,
 }
 
 impl TaskResult {
     fn err(id: String, msg: impl Into<String>) -> Self {
         Self {
             id,
+            is_error: true,
+            content: vec![ContentBlock::text(msg)],
             status: 0,
-            headers: HashMap::new(),
-            body: None,
-            error: Some(msg.into()),
+        }
+    }
+
+    /// Returns the first content block text if this result represents an error.
+    pub fn error_message(&self) -> Option<&str> {
+        if self.is_error {
+            self.content.first().map(|c| c.text.as_str())
+        } else {
+            None
         }
     }
 }
@@ -55,38 +81,24 @@ pub async fn dispatch(
             Some(_) => return TaskResult::err(task.id, format!("device {id} is offline")),
             None => return TaskResult::err(task.id, format!("device {id} not found")),
         },
-        None => store.find_by_capability(&task.capability_name),
+        None => store.find_by_capability(&task.name),
     };
 
     let Some(device) = candidates.into_iter().next() else {
         return TaskResult::err(
             task.id,
-            format!("no online device for capability {}", task.capability_name),
+            format!("no online device for capability '{}'", task.name),
         );
     };
 
-    let Some(cap) = device
-        .capabilities
-        .iter()
-        .find(|c| c.name == task.capability_name)
-    else {
+    let Some(cap) = device.capabilities.iter().find(|c| c.name == task.name) else {
         return TaskResult::err(
             task.id,
-            format!(
-                "device {} does not declare capability {}",
-                device.id, task.capability_name
-            ),
+            format!("device '{}' does not declare capability '{}'", device.id, task.name),
         );
     };
 
-    forward(
-        http_client,
-        &device.service_url,
-        cap,
-        &task,
-        default_timeout_ms,
-    )
-    .await
+    forward(http_client, &device.service_url, cap, &task, default_timeout_ms).await
 }
 
 async fn forward(
@@ -118,49 +130,35 @@ async fn forward(
                 headers.insert(name, value);
             }
             _ => {
-                return TaskResult::err(task.id.clone(), format!("invalid header {k}"));
+                return TaskResult::err(task.id.clone(), format!("invalid header '{k}'"));
             }
         }
     }
 
     let timeout = Duration::from_millis(task.timeout_ms.unwrap_or(default_timeout_ms));
 
-    let mut req = http_client
-        .request(method, &url)
-        .headers(headers)
-        .timeout(timeout);
-    if let Some(body) = &task.body {
-        req = req.json(body);
+    let mut req = http_client.request(method, &url).headers(headers).timeout(timeout);
+    if let Some(input) = &task.input {
+        req = req.json(input);
     }
 
     match req.send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
-            let mut out_headers = HashMap::new();
-            for (name, value) in resp.headers() {
-                if let Ok(s) = value.to_str() {
-                    out_headers.insert(name.to_string(), s.to_string());
+            let content = match resp.bytes().await {
+                Ok(bytes) if bytes.is_empty() => vec![],
+                Ok(bytes) => {
+                    let text = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                        Ok(v) => v.to_string(),
+                        Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
+                    };
+                    vec![ContentBlock::text(text)]
                 }
-            }
-            let body = match resp.bytes().await {
-                Ok(bytes) if bytes.is_empty() => None,
-                Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                    Ok(v) => Some(v),
-                    Err(_) => Some(serde_json::Value::String(
-                        String::from_utf8_lossy(&bytes).into_owned(),
-                    )),
-                },
                 Err(e) => {
                     return TaskResult::err(task.id.clone(), format!("read body failed: {e}"));
                 }
             };
-            TaskResult {
-                id: task.id.clone(),
-                status,
-                headers: out_headers,
-                body,
-                error: None,
-            }
+            TaskResult { id: task.id.clone(), is_error: status >= 400, content, status }
         }
         Err(e) => TaskResult::err(task.id.clone(), format!("forward failed: {e}")),
     }
@@ -181,11 +179,22 @@ mod tests {
     fn task(cap: &str) -> Task {
         Task {
             id: "t1".into(),
-            capability_name: cap.into(),
+            name: cap.into(),
             device_id: None,
             headers: HashMap::new(),
-            body: None,
+            input: None,
             timeout_ms: Some(500),
+        }
+    }
+
+    fn cap(name: &str) -> Capability {
+        Capability {
+            name: name.into(),
+            description: None,
+            method: "POST".into(),
+            path: format!("/{name}"),
+            tags: vec![],
+            input_schema: None,
         }
     }
 
@@ -194,7 +203,8 @@ mod tests {
         let (s, _g) = store();
         let client = reqwest::Client::new();
         let r = dispatch(&s, &client, 5000, task("move")).await;
-        assert!(r.error.unwrap().contains("no online device"));
+        assert!(r.is_error);
+        assert!(r.error_message().unwrap().contains("no online device"));
     }
 
     #[tokio::test]
@@ -204,51 +214,39 @@ mod tests {
         let mut t = task("move");
         t.device_id = Some("missing".into());
         let r = dispatch(&s, &client, 5000, t).await;
-        assert!(r.error.unwrap().contains("not found"));
+        assert!(r.is_error);
+        assert!(r.error_message().unwrap().contains("not found"));
     }
 
     #[tokio::test]
     async fn offline_device_rejected() {
         let (s, _g) = store();
         let now = Utc::now();
-        let mut d = Device {
+        let d = Device {
             id: "d1".into(),
             service_url: "http://127.0.0.1:1".into(),
-            capabilities: vec![Capability {
-                name: "move".into(),
-                method: "POST".into(),
-                path: "/move".into(),
-                tags: vec![],
-                schema: None,
-            }],
+            capabilities: vec![cap("move")],
             last_heartbeat: now,
             registered_at: now,
             online: false,
         };
-        d.online = false;
         s.register(d).unwrap();
         let client = reqwest::Client::new();
         let mut t = task("move");
         t.device_id = Some("d1".into());
         let r = dispatch(&s, &client, 5000, t).await;
-        assert!(r.error.unwrap().contains("offline"));
+        assert!(r.is_error);
+        assert!(r.error_message().unwrap().contains("offline"));
     }
 
     #[tokio::test]
     async fn forward_failure_surfaces_in_result() {
-        // No device service bound on port 1; the request will fail to connect.
         let (s, _g) = store();
         let now = Utc::now();
         s.register(Device {
             id: "d1".into(),
             service_url: "http://127.0.0.1:1".into(),
-            capabilities: vec![Capability {
-                name: "move".into(),
-                method: "POST".into(),
-                path: "/move".into(),
-                tags: vec![],
-                schema: None,
-            }],
+            capabilities: vec![cap("move")],
             last_heartbeat: now,
             registered_at: now,
             online: true,
@@ -256,7 +254,8 @@ mod tests {
         .unwrap();
         let client = reqwest::Client::new();
         let r = dispatch(&s, &client, 200, task("move")).await;
-        assert!(r.error.is_some());
+        assert!(r.is_error);
+        assert!(r.error_message().is_some());
         assert_eq!(r.id, "t1");
     }
 }

@@ -41,7 +41,7 @@ resource_type = "remote"
 [mqtt]
 url = "mqtt://127.0.0.1:1883"
 client_id = "cobotsrv"
-topic_prefix = "cobotsrv"
+topic_prefix = "cobotrix"
 keep_alive_secs = 30
 
 [task]

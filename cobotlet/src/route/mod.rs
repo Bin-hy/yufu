@@ -7,6 +7,7 @@ use crate::store::DeviceStore;
 mod device;
 mod hello;
 mod task;
+mod tool;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -21,4 +22,5 @@ pub fn routes() -> axum::Router<AppState> {
         .merge(hello::route())
         .merge(device::route())
         .merge(task::route())
+        .merge(tool::route())
 }

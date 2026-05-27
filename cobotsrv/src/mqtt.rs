@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,32 +15,42 @@ use crate::service::device::{DeviceService, UpsertDevice};
 
 const PUBLISH_CHANNEL_CAPACITY: usize = 64;
 
-/// Mirror of `cobotlet::dispatcher::Task` (kept independent so cobotrix does
+/// Mirror of `cobotlet::dispatcher::Task` (kept independent so cobotsrv does
 /// not depend on cobotlet at compile time).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
-    pub capability_name: String,
+    /// MCP-style tool name. Accepts legacy `capability_name` for backward compat.
+    #[serde(alias = "capability_name")]
+    pub name: String,
     #[serde(default)]
     pub device_id: Option<String>,
-    #[serde(default)]
-    pub headers: HashMap<String, String>,
-    #[serde(default)]
-    pub body: Option<serde_json::Value>,
+    /// MCP-style tool input. Accepts legacy `body` for backward compat.
+    #[serde(default, alias = "body")]
+    pub input: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub headers: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
 
+/// MCP-style content block.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentBlock {
+    pub r#type: String,
+    pub text: String,
+}
+
+/// Mirror of `cobotlet::dispatcher::TaskResult`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskResult {
     pub id: String,
+    /// MCP-style error flag.
+    pub is_error: bool,
+    /// MCP-style content blocks carrying the response payload.
+    pub content: Vec<ContentBlock>,
+    /// HTTP status code from the device service. 0 for dispatch-time errors.
     pub status: u16,
-    #[serde(default)]
-    pub headers: HashMap<String, String>,
-    #[serde(default)]
-    pub body: Option<serde_json::Value>,
-    #[serde(default)]
-    pub error: Option<String>,
 }
 
 /// Per-cobotlet device online payload as sent by cobotlet.
@@ -62,13 +71,37 @@ struct HeartbeatPayload {
     pub ts: DateTime<Utc>,
 }
 
+/// Snapshot of a known cobotlet's online state.
+#[derive(Debug, Clone, Serialize)]
+pub struct CobotletStatus {
+    pub alias: String,
+    /// None when the cobotlet has never been seen online via MQTT.
+    pub online: bool,
+    pub last_seen: Option<chrono::DateTime<Utc>>,
+}
+
+/// Result of polling an async task.
+pub enum TaskPollResult {
+    /// Result is ready.
+    Ready(TaskResult),
+    /// Task was submitted and is still being processed.
+    Pending,
+    /// Unknown task ID (never submitted or already evicted beyond cache window).
+    NotFound,
+}
+
 #[derive(Clone)]
 pub struct MqttHandle {
     client: AsyncClient,
     topic_prefix: Arc<String>,
+    /// Waiting oneshot channels for synchronous (wait=true) submissions.
     pending: Arc<DashMap<String, oneshot::Sender<TaskResult>>>,
+    /// Tracks async (wait=false) submitted task IDs until result arrives or TTL.
+    pending_async: Arc<DashMap<String, Instant>>,
     cache: Arc<DashMap<String, (TaskResult, Instant)>>,
     cache_ttl: Duration,
+    /// Cobotlet alias → last-online timestamp (None = offline via LWT).
+    cobotlets: Arc<DashMap<String, Option<DateTime<Utc>>>>,
 }
 
 impl MqttHandle {
@@ -76,6 +109,7 @@ impl MqttHandle {
         format!("{}/cobotlets/{alias}/tasks/{task_id}", self.topic_prefix)
     }
 
+    /// Submit a task and block until the result arrives or `timeout` elapses.
     pub async fn submit(&self, alias: &str, task: Task, timeout: Duration) -> Result<TaskResult> {
         let task_id = task.id.clone();
         let payload = serde_json::to_vec(&task).context("serialize task")?;
@@ -98,27 +132,50 @@ impl MqttHandle {
             Ok(Err(_)) => Err(anyhow!("task channel closed before result")),
             Err(_) => {
                 self.pending.remove(&task_id);
-                Err(anyhow!("task timed out after {:?}", timeout))
+                Err(anyhow!("timeout"))
             }
         }
     }
 
+    /// Submit a task without waiting for a result. The task ID can be polled
+    /// via [`poll_result`] to check completion.
     pub async fn submit_async(&self, alias: &str, task: Task) -> Result<()> {
+        let task_id = task.id.clone();
         let payload = serde_json::to_vec(&task).context("serialize task")?;
         let topic = self.task_topic(alias, &task.id);
-        self.client
+        self.pending_async.insert(task_id.clone(), Instant::now());
+        if let Err(e) = self
+            .client
             .publish(&topic, QoS::AtLeastOnce, false, payload)
             .await
-            .map_err(|e| anyhow!("publish task failed: {e}"))?;
+        {
+            self.pending_async.remove(&task_id);
+            return Err(anyhow!("publish task failed: {e}"));
+        }
         Ok(())
     }
 
-    pub fn take_result(&self, task_id: &str) -> Option<TaskResult> {
-        self.cache.remove(task_id).map(|(_, (r, _))| r)
+    /// Returns a snapshot of all cobotlets seen via MQTT.
+    pub fn cobotlet_status(&self) -> Vec<CobotletStatus> {
+        self.cobotlets
+            .iter()
+            .map(|e| CobotletStatus {
+                alias: e.key().clone(),
+                online: e.value().is_some(),
+                last_seen: *e.value(),
+            })
+            .collect()
     }
 
-    pub fn peek_result(&self, task_id: &str) -> Option<TaskResult> {
-        self.cache.get(task_id).map(|e| e.value().0.clone())
+    /// Poll the state of any submitted task (sync or async).
+    pub fn poll_result(&self, task_id: &str) -> TaskPollResult {
+        if let Some(entry) = self.cache.get(task_id) {
+            TaskPollResult::Ready(entry.value().0.clone())
+        } else if self.pending.contains_key(task_id) || self.pending_async.contains_key(task_id) {
+            TaskPollResult::Pending
+        } else {
+            TaskPollResult::NotFound
+        }
     }
 }
 
@@ -146,6 +203,7 @@ pub async fn spawn(
 
     let device_sub = format!("{}/cobotlets/+/devices/+/+", cfg.topic_prefix);
     let results_sub = format!("{}/cobotlets/+/results/+", cfg.topic_prefix);
+    let cobotlet_sub = format!("{}/cobotlets/+/online", cfg.topic_prefix);
     client
         .subscribe(&device_sub, QoS::AtLeastOnce)
         .await
@@ -154,14 +212,20 @@ pub async fn spawn(
         .subscribe(&results_sub, QoS::AtLeastOnce)
         .await
         .with_context(|| format!("subscribe {results_sub}"))?;
-    info!(device_sub, results_sub, "cobotrix mqtt subscribed");
+    client
+        .subscribe(&cobotlet_sub, QoS::AtLeastOnce)
+        .await
+        .with_context(|| format!("subscribe {cobotlet_sub}"))?;
+    info!(device_sub, results_sub, cobotlet_sub, "cobotsrv mqtt subscribed");
 
     let handle = Arc::new(MqttHandle {
         client,
         topic_prefix: Arc::new(cfg.topic_prefix.clone()),
         pending: Arc::new(DashMap::new()),
+        pending_async: Arc::new(DashMap::new()),
         cache: Arc::new(DashMap::new()),
         cache_ttl: Duration::from_secs(cache_ttl_secs.max(10)),
+        cobotlets: Arc::new(DashMap::new()),
     });
 
     let task_handle = handle.clone();
@@ -182,7 +246,7 @@ pub async fn spawn(
         }
     });
 
-    // Periodic cache eviction.
+    // Periodic cache + pending_async eviction.
     let evict_handle = handle.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
@@ -190,9 +254,9 @@ pub async fn spawn(
         loop {
             tick.tick().await;
             let now = Instant::now();
-            evict_handle
-                .cache
-                .retain(|_, (_, t)| now.duration_since(*t) < evict_handle.cache_ttl);
+            let ttl = evict_handle.cache_ttl;
+            evict_handle.cache.retain(|_, (_, t)| now.duration_since(*t) < ttl);
+            evict_handle.pending_async.retain(|_, t| now.duration_since(*t) < ttl);
         }
     });
 
@@ -207,6 +271,9 @@ enum Topic<'a> {
     },
     Result {
         task_id: &'a str,
+    },
+    CobotletStatus {
+        alias: &'a str,
     },
 }
 
@@ -223,11 +290,7 @@ fn parse_topic<'a>(prefix: &str, topic: &'a str) -> Option<Topic<'a>> {
             if parts.next().is_some() {
                 return None;
             }
-            Some(Topic::DeviceEvent {
-                alias,
-                device_id,
-                kind,
-            })
+            Some(Topic::DeviceEvent { alias, device_id, kind })
         }
         "results" => {
             let task_id = parts.next()?;
@@ -235,6 +298,12 @@ fn parse_topic<'a>(prefix: &str, topic: &'a str) -> Option<Topic<'a>> {
                 return None;
             }
             Some(Topic::Result { task_id })
+        }
+        "online" => {
+            if parts.next().is_some() {
+                return None;
+            }
+            Some(Topic::CobotletStatus { alias })
         }
         _ => None,
     }
@@ -253,16 +322,26 @@ async fn handle_publish(
     };
 
     match parsed {
-        Topic::DeviceEvent {
-            alias,
-            device_id,
-            kind,
-        } => {
+        Topic::DeviceEvent { alias, device_id, kind } => {
             handle_device_event(db, alias, device_id, kind, &publish.payload).await;
         }
         Topic::Result { task_id } => {
             handle_task_result(handle, task_id, &publish.payload);
         }
+        Topic::CobotletStatus { alias } => {
+            handle_cobotlet_status(handle, alias, &publish.payload);
+        }
+    }
+}
+
+fn handle_cobotlet_status(handle: &Arc<MqttHandle>, alias: &str, payload: &[u8]) {
+    if payload.is_empty() {
+        // LWT or explicit offline clear — mark offline.
+        handle.cobotlets.insert(alias.to_string(), None);
+        info!(alias, "cobotlet offline");
+    } else {
+        handle.cobotlets.insert(alias.to_string(), Some(Utc::now()));
+        info!(alias, "cobotlet online");
     }
 }
 
@@ -336,6 +415,7 @@ fn handle_task_result(handle: &Arc<MqttHandle>, task_id: &str, payload: &[u8]) {
             return;
         }
     };
+    handle.pending_async.remove(task_id);
     handle
         .cache
         .insert(task_id.to_string(), (result.clone(), Instant::now()));
@@ -352,11 +432,7 @@ mod tests {
     fn parses_device_event_topic() {
         let t = parse_topic("cobotrix", "cobotrix/cobotlets/c1/devices/d42/online").unwrap();
         match t {
-            Topic::DeviceEvent {
-                alias,
-                device_id,
-                kind,
-            } => {
+            Topic::DeviceEvent { alias, device_id, kind } => {
                 assert_eq!(alias, "c1");
                 assert_eq!(device_id, "d42");
                 assert_eq!(kind, "online");
@@ -370,6 +446,15 @@ mod tests {
         let t = parse_topic("cobotrix", "cobotrix/cobotlets/c1/results/abc").unwrap();
         match t {
             Topic::Result { task_id } => assert_eq!(task_id, "abc"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parses_cobotlet_status_topic() {
+        let t = parse_topic("cobotrix", "cobotrix/cobotlets/c1/online").unwrap();
+        match t {
+            Topic::CobotletStatus { alias } => assert_eq!(alias, "c1"),
             _ => panic!("wrong variant"),
         }
     }

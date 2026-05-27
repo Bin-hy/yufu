@@ -1,6 +1,8 @@
+use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use sea_orm::{DbErr, SqlErr};
+use serde_json::json;
 
 #[derive(Debug)]
 pub enum AppError {
@@ -40,30 +42,23 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        match self {
-            AppError::NoAvailableDevice => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "no available device".to_string(),
-            )
-                .into_response(),
-            AppError::RequestProxyError => {
-                (StatusCode::BAD_REQUEST, "request error".to_string()).into_response()
+        let (status, msg) = match self {
+            AppError::NoAvailableDevice => {
+                (StatusCode::SERVICE_UNAVAILABLE, "no available device".to_string())
             }
-            AppError::NotFound(err) => (StatusCode::NOT_FOUND, err).into_response(),
-            AppError::AlreadyExists(err) => (StatusCode::CONFLICT, err).into_response(),
-            AppError::InternalServerError(err) => {
-                tracing::error!(?err, "internal server error");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "internal server error".to_string(),
-                )
-                    .into_response()
+            AppError::RequestProxyError => (StatusCode::BAD_REQUEST, "request error".to_string()),
+            AppError::NotFound(e) => (StatusCode::NOT_FOUND, e),
+            AppError::AlreadyExists(e) => (StatusCode::CONFLICT, e),
+            AppError::InternalServerError(e) => {
+                tracing::error!(?e, "internal server error");
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_string())
             }
-            AppError::Throw(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
-            AppError::Unauthorized(err) => (StatusCode::UNAUTHORIZED, err).into_response(),
-            AppError::BadRequest(err) => (StatusCode::BAD_REQUEST, err.to_string()).into_response(),
-            AppError::Forbidden(err) => (StatusCode::FORBIDDEN, err.to_string()).into_response(),
-        }
+            AppError::Throw(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
+            AppError::Unauthorized(e) => (StatusCode::UNAUTHORIZED, e),
+            AppError::BadRequest(e) => (StatusCode::BAD_REQUEST, e),
+            AppError::Forbidden(e) => (StatusCode::FORBIDDEN, e),
+        };
+        (status, Json(json!({"error": msg}))).into_response()
     }
 }
 

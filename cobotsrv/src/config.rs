@@ -26,8 +26,8 @@ pub struct Config {
     #[serde(default)]
     pub nodes: Vec<Node>,
 
-    /// Permissions that cobotrix requires. At startup cobotrix syncs these to
-    /// cobotsrv so the admin can assign them to roles without manual creation.
+    /// Permissions that cobotsrv requires. At startup cobotsrv syncs these to
+    /// cobotusr so the admin can assign them to roles without manual creation.
     /// Each entry: `{ name, action, resource_type?, resource_pattern? }`
     #[serde(default)]
     pub permissions: Vec<PermissionSpec>,
@@ -158,7 +158,7 @@ pub struct Http {
     #[serde(default)]
     pub public: String,
     /// Allowed CORS origins. Default: `["*"]`.
-    /// Set to specific origins if cobotrix is directly exposed.
+    /// Set to specific origins if cobotsrv is directly exposed.
     #[serde(default = "default_cors_origins")]
     pub cors_origins: Vec<String>,
 }
@@ -209,41 +209,41 @@ fn default_log_level() -> String {
     })
 }
 
-/// JWT verification settings. cobotrix is an OIDC client of cobotsrv: it pulls
-/// cobotsrv's public key from the JWKS endpoint at startup and uses it to verify
+/// JWT verification settings. cobotsrv is an OIDC client of cobotusr: it pulls
+/// cobotusr's public key from the JWKS endpoint at startup and uses it to verify
 /// every incoming Bearer token. No shared secret — Phase 1 (RS256) of the auth
 /// roadmap.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Auth {
-    /// OIDC client_id registered at cobotsrv. Used for client_credentials grant
-    /// when syncing permissions at startup. Default: `"cobotrix"`.
+    /// OIDC client_id registered at cobotusr. Used for client_credentials grant
+    /// when syncing permissions at startup. Default: `"cobotsrv"`.
     #[serde(default = "default_client_id")]
     pub client_id: String,
-    /// OIDC client_secret matching cobotsrv's bootstrap client config.
+    /// OIDC client_secret matching cobotusr's bootstrap client config.
     /// Required for client_credentials grant.
     #[serde(default)]
     pub client_secret: String,
-    /// JWKS endpoint URL. Default: `{cobotsrv_base}/.well-known/jwks.json`.
+    /// JWKS endpoint URL. Default: `{cobotusr_base}/.well-known/jwks.json`.
     #[serde(default = "default_jwks_url")]
     pub jwks_url: String,
     /// If set, only tokens with `aud` matching this value are accepted.
-    /// Defaults to `"cobotrix"` — cobotrix only accepts tokens issued for itself.
+    /// Defaults to `"cobotsrv"` — cobotsrv only accepts tokens issued for itself.
     #[serde(default = "default_expected_audience")]
     pub expected_audience: String,
     /// JWKS background refresh interval in seconds (default: 5 min).
     #[serde(default = "default_jwks_refresh_secs")]
     pub jwks_refresh_secs: u64,
     /// When true, route-level `require_perm!` layers are applied on protected routes.
-    /// Default true — cobotrix enforces permissions based on token claims.
+    /// Default true — cobotsrv enforces permissions based on token claims.
     #[serde(default = "default_require_permissions")]
     pub require_permissions: bool,
 }
 
 impl Auth {
-    /// Derive cobotsrv's base URL from the JWKS URL by stripping the
+    /// Derive cobotusr's base URL from the JWKS URL by stripping the
     /// `/.well-known/jwks.json` suffix. Used by `EnforceClient` to call
-    /// cobotsrv's PDP enforce endpoint.
-    pub fn cobotsrv_base_url(&self) -> String {
+    /// cobotusr's PDP enforce endpoint.
+    pub fn cobotusr_base_url(&self) -> String {
         self.jwks_url
             .trim_end_matches("/.well-known/jwks.json")
             .to_string()
@@ -269,11 +269,11 @@ fn default_jwks_url() -> String {
 }
 
 fn default_client_id() -> String {
-    "cobotrix".to_string()
+    "cobotsrv".to_string()
 }
 
 fn default_expected_audience() -> String {
-    "cobotrix".to_string()
+    "cobotsrv".to_string()
 }
 
 fn default_require_permissions() -> bool {
