@@ -15,6 +15,9 @@ use tracing::{error, info, info_span};
 use crate::config::Config;
 use crate::entity::role::RoleEnum;
 use crate::entity::user;
+use crate::modules::im::service::{
+    ConnectionManager, event_channel, spawn_event_service,
+};
 use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
@@ -32,6 +35,7 @@ pub mod config;
 pub mod entity;
 pub mod error;
 mod migration;
+pub mod modules;
 pub mod rbac;
 mod recording_middleware;
 mod result;
@@ -104,6 +108,16 @@ where
         }
     };
 
+    // IM: websocket connection manager and event channel (before database_service move)
+    let im_db_conn = database_service.connection.clone();
+    let ws_handle = std::sync::Arc::new(ConnectionManager::new());
+    let (im_events, im_event_receiver) = event_channel();
+    let _im_event_service = spawn_event_service(
+        im_db_conn,
+        ws_handle.clone(),
+        im_event_receiver,
+    );
+
     let database = Arc::new(database_service);
     let id_token_signer = Arc::new(id_token_signer);
 
@@ -112,6 +126,8 @@ where
         database: database.clone(),
         refresh_token_manager: refresh_token_manager.clone(),
         id_token_signer: id_token_signer.clone(),
+        im_events,
+        ws_handle,
     };
     let _ = app_state.init().await;
 
@@ -294,6 +310,8 @@ pub struct AppState {
     refresh_token_manager: TokenManager,
     /// RS256 signer for cross-service access tokens (also exposed via JWKS).
     id_token_signer: Arc<IdTokenSigner>,
+    pub im_events: crate::modules::im::service::ImEvents,
+    pub ws_handle: crate::modules::im::service::WsHandle,
 }
 pub type IdType = i32;
 

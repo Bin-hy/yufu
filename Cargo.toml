@@ -43,12 +43,14 @@ auth = {path = "libs/auth" }
 net4mqtt = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
 signal = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
 http-log = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
-
+futures = "0.3"
 axum = "0.8"
 tower = "0.5"
 tower-http = "0.6"
 rust-embed = "8.7"
 mime_guess = "2.0"
+mime = "0.3"
+infer = "0.19"
 
 anyhow = "1.0"
 clap = "4.5"
@@ -95,6 +97,8 @@ signal = { workspace = true }
 portpicker = "0.1.1"
 futures = { version = "0.3", default-features = false }
 reqwest = { workspace = true, features = ["socks", "json"] }
+serde_json = { workspace = true }
+tokio-tungstenite = "0.28"
 
 [features]
 default = ["net4mqtt"]

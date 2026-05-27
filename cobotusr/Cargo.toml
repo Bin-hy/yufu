@@ -10,13 +10,16 @@ authors.workspace = true
 crate-type = ["lib"]
 
 [dependencies]
-mime_guess = { workspace = true, optional = true }
+mime_guess = { workspace = true }
+mime = { workspace = true }
+infer = { workspace = true }
+futures = { workspace = true }
 net4mqtt = { workspace = true, optional = true }
 auth = { workspace = true }
 http-log = { workspace = true }
 signal = { workspace = true }
 
-axum = { workspace = true, features = ["multipart", "tracing"] }
+axum = { workspace = true, features = ["multipart", "tracing", "ws"] }
 rust-embed = { workspace = true, features = ["axum-ex"], optional = true }
 anyhow = { workspace = true, features = ["backtrace"] }
 clap = { workspace = true, features = ["derive"] }
@@ -25,7 +28,7 @@ http-body = { workspace = true }
 reqwest = { workspace = true, features = ["socks"] }
 serde = { workspace = true, features = ["serde_derive"] }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["signal"] }
+tokio = { workspace = true, features = ["signal","full"] }
 tower = {workspace = true}
 tower-http = { workspace = true, features = ["trace", "cors"] }
 tracing = { workspace = true }
@@ -65,6 +68,6 @@ axum-extra = { version = "0.10.3", features = ["typed-header"] }
 
 
 [features]
-webui = ["dep:rust-embed", "dep:mime_guess"]
+webui = ["dep:rust-embed"]
 openapi= ["dep:utoipa","dep:utoipa-swagger-ui", "dep:utoipa-axum"]
 net4mqtt = ["dep:net4mqtt"]

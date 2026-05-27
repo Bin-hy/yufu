@@ -14,6 +14,8 @@ pub struct Config {
     pub log: Log,
     #[serde(default)]
     pub database: Database,
+    #[serde(default)]
+    pub storage: Storage,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -252,4 +254,26 @@ impl Default for Oidc {
 
 fn default_oidc_email_domain() -> String {
     "cobotrix.local".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Storage Configuration (for IM uploads)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Storage {
+    #[serde(default = "default_storage_root_dir")]
+    pub root_dir: String,
+}
+
+impl Default for Storage {
+    fn default() -> Self {
+        Self {
+            root_dir: default_storage_root_dir(),
+        }
+    }
+}
+
+fn default_storage_root_dir() -> String {
+    "storage".to_string()
 }
