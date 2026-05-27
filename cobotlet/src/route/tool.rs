@@ -33,12 +33,14 @@ pub(crate) async fn list_tools(State(state): State<AppState>) -> Json<ToolListRe
     let mut seen: HashMap<String, ToolDescriptor> = HashMap::new();
     for device in state.store.list() {
         for cap in &device.capabilities {
-            let entry = seen.entry(cap.name.clone()).or_insert_with(|| ToolDescriptor {
-                name: cap.name.clone(),
-                description: cap.description.clone(),
-                input_schema: cap.input_schema.clone(),
-                providers: Vec::new(),
-            });
+            let entry = seen
+                .entry(cap.name.clone())
+                .or_insert_with(|| ToolDescriptor {
+                    name: cap.name.clone(),
+                    description: cap.description.clone(),
+                    input_schema: cap.input_schema.clone(),
+                    providers: Vec::new(),
+                });
             entry.providers.push(ToolProvider {
                 device_id: device.id.clone(),
                 online: device.online,
@@ -100,10 +102,7 @@ mod tests {
     }
 
     async fn call(app: Router, path: &str) -> (StatusCode, serde_json::Value) {
-        let req = Request::builder()
-            .uri(path)
-            .body(Body::empty())
-            .unwrap();
+        let req = Request::builder().uri(path).body(Body::empty()).unwrap();
         let resp = app.oneshot(req).await.unwrap();
         let status = resp.status();
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
@@ -125,19 +124,26 @@ mod tests {
     #[tokio::test]
     async fn list_tools_shows_all_devices_including_offline() {
         let (state, _dir) = make_state();
-        state.store.register(device("d-online", &["move"], true)).unwrap();
-        state.store.register(device("d-offline", &["grip"], false)).unwrap();
+        state
+            .store
+            .register(device("d-online", &["move"], true))
+            .unwrap();
+        state
+            .store
+            .register(device("d-offline", &["grip"], false))
+            .unwrap();
 
         let app = Router::new().merge(route()).with_state(state);
         let (status, json) = call(app, "/tools").await;
         assert_eq!(status, StatusCode::OK);
 
         let tools = json["tools"].as_array().unwrap();
-        let names: Vec<&str> = tools.iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"move"), "online device tool must appear");
-        assert!(names.contains(&"grip"), "offline device tool must also appear");
+        assert!(
+            names.contains(&"grip"),
+            "offline device tool must also appear"
+        );
     }
 
     #[tokio::test]
@@ -145,7 +151,10 @@ mod tests {
         let (state, _dir) = make_state();
         // Two devices both offer "move".
         state.store.register(device("d1", &["move"], true)).unwrap();
-        state.store.register(device("d2", &["move", "grip"], false)).unwrap();
+        state
+            .store
+            .register(device("d2", &["move", "grip"], false))
+            .unwrap();
 
         let app = Router::new().merge(route()).with_state(state);
         let (status, json) = call(app, "/tools").await;
@@ -159,7 +168,8 @@ mod tests {
         let providers = move_tool["providers"].as_array().unwrap();
         assert_eq!(providers.len(), 2, "both devices must appear as providers");
 
-        let online_flags: Vec<bool> = providers.iter()
+        let online_flags: Vec<bool> = providers
+            .iter()
             .map(|p| p["online"].as_bool().unwrap())
             .collect();
         assert!(online_flags.contains(&true));
@@ -169,11 +179,17 @@ mod tests {
     #[tokio::test]
     async fn list_tools_sorted_alphabetically() {
         let (state, _dir) = make_state();
-        state.store.register(device("d1", &["zoom", "auto", "move"], true)).unwrap();
+        state
+            .store
+            .register(device("d1", &["zoom", "auto", "move"], true))
+            .unwrap();
 
         let app = Router::new().merge(route()).with_state(state);
         let (_, json) = call(app, "/tools").await;
-        let names: Vec<&str> = json["tools"].as_array().unwrap().iter()
+        let names: Vec<&str> = json["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
         let mut sorted = names.clone();

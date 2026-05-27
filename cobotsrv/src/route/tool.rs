@@ -16,8 +16,14 @@ use auth::require_perm;
 
 pub fn route() -> Router<AppState> {
     Router::new()
-        .route("/tools", get(list_tools).layer(require_perm!("device:read")))
-        .route("/tools/{name}", get(get_tool).layer(require_perm!("device:read")))
+        .route(
+            "/tools",
+            get(list_tools).layer(require_perm!("device:read")),
+        )
+        .route(
+            "/tools/{name}",
+            get(get_tool).layer(require_perm!("device:read")),
+        )
 }
 
 #[derive(Debug, Serialize)]
@@ -50,14 +56,16 @@ async fn list_tools(State(state): State<AppState>) -> Result<Json<ToolListRespon
         let caps: Vec<Capability> =
             serde_json::from_value(device.capabilities.clone()).unwrap_or_default();
         for cap in caps {
-            let entry = seen.entry(cap.name.clone()).or_insert_with(|| ToolDescriptor {
-                name: cap.name.clone(),
-                method: cap.method.clone(),
-                path: cap.path.clone(),
-                tags: cap.tags.clone(),
-                schema: cap.schema.clone(),
-                providers: Vec::new(),
-            });
+            let entry = seen
+                .entry(cap.name.clone())
+                .or_insert_with(|| ToolDescriptor {
+                    name: cap.name.clone(),
+                    method: cap.method.clone(),
+                    path: cap.path.clone(),
+                    tags: cap.tags.clone(),
+                    schema: cap.schema.clone(),
+                    providers: Vec::new(),
+                });
             entry.providers.push(ToolProvider {
                 cobotlet_alias: device.cobotlet_alias.clone(),
                 device_id: device.device_id.clone(),
@@ -74,13 +82,8 @@ async fn get_tool(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<ToolDescriptor>> {
-    let devices = DeviceService::list_filtered(
-        &state.database.connection,
-        None,
-        None,
-        Some(&name),
-    )
-    .await?;
+    let devices =
+        DeviceService::list_filtered(&state.database.connection, None, None, Some(&name)).await?;
 
     if devices.is_empty() {
         return Err(AppError::not_found(format!("tool '{name}' not found")));

@@ -33,7 +33,10 @@ impl IntoResponse for AppError {
             AppError::Throw(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
             AppError::InternalServerError(e) => {
                 tracing::error!(?e, "internal server error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
             }
         };
         (status, Json(json!({"error": msg}))).into_response()

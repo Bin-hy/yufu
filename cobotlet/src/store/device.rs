@@ -174,7 +174,7 @@ impl DeviceStore {
         let Some(mut entry) = self.devices.get_mut(id) else {
             return Ok(None);
         };
-        self.unindex_capabilities(&*entry);
+        self.unindex_capabilities(&entry);
         entry.capabilities = caps;
         let device = entry.clone();
         drop(entry);

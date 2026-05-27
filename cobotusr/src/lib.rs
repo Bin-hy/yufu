@@ -15,9 +15,7 @@ use tracing::{error, info, info_span};
 use crate::config::Config;
 use crate::entity::role::RoleEnum;
 use crate::entity::user;
-use crate::modules::im::service::{
-    ConnectionManager, event_channel, spawn_event_service,
-};
+use crate::modules::im::service::{ConnectionManager, event_channel, spawn_event_service};
 use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
@@ -112,11 +110,7 @@ where
     let im_db_conn = database_service.connection.clone();
     let ws_handle = std::sync::Arc::new(ConnectionManager::new());
     let (im_events, im_event_receiver) = event_channel();
-    let _im_event_service = spawn_event_service(
-        im_db_conn,
-        ws_handle.clone(),
-        im_event_receiver,
-    );
+    let _im_event_service = spawn_event_service(im_db_conn, ws_handle.clone(), im_event_receiver);
 
     let database = Arc::new(database_service);
     let id_token_signer = Arc::new(id_token_signer);

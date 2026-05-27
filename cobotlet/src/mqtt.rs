@@ -202,7 +202,10 @@ async fn handle_publish(
             let result = TaskResult {
                 id: task_id,
                 is_error: true,
-                content: vec![crate::dispatcher::ContentBlock { r#type: "text".into(), text: format!("decode task: {e}") }],
+                content: vec![crate::dispatcher::ContentBlock {
+                    r#type: "text".into(),
+                    text: format!("decode task: {e}"),
+                }],
                 status: 0,
             };
             sink.publish_task_result(&result);

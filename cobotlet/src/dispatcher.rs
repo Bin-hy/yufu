@@ -34,7 +34,10 @@ pub struct ContentBlock {
 
 impl ContentBlock {
     fn text(s: impl Into<String>) -> Self {
-        Self { r#type: "text".into(), text: s.into() }
+        Self {
+            r#type: "text".into(),
+            text: s.into(),
+        }
     }
 }
 
@@ -94,11 +97,21 @@ pub async fn dispatch(
     let Some(cap) = device.capabilities.iter().find(|c| c.name == task.name) else {
         return TaskResult::err(
             task.id,
-            format!("device '{}' does not declare capability '{}'", device.id, task.name),
+            format!(
+                "device '{}' does not declare capability '{}'",
+                device.id, task.name
+            ),
         );
     };
 
-    forward(http_client, &device.service_url, cap, &task, default_timeout_ms).await
+    forward(
+        http_client,
+        &device.service_url,
+        cap,
+        &task,
+        default_timeout_ms,
+    )
+    .await
 }
 
 async fn forward(
@@ -137,7 +150,10 @@ async fn forward(
 
     let timeout = Duration::from_millis(task.timeout_ms.unwrap_or(default_timeout_ms));
 
-    let mut req = http_client.request(method, &url).headers(headers).timeout(timeout);
+    let mut req = http_client
+        .request(method, &url)
+        .headers(headers)
+        .timeout(timeout);
     if let Some(input) = &task.input {
         req = req.json(input);
     }
@@ -158,7 +174,12 @@ async fn forward(
                     return TaskResult::err(task.id.clone(), format!("read body failed: {e}"));
                 }
             };
-            TaskResult { id: task.id.clone(), is_error: status >= 400, content, status }
+            TaskResult {
+                id: task.id.clone(),
+                is_error: status >= 400,
+                content,
+                status,
+            }
         }
         Err(e) => TaskResult::err(task.id.clone(), format!("forward failed: {e}")),
     }

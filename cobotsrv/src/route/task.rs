@@ -119,7 +119,9 @@ async fn poll(
         .as_ref()
         .ok_or_else(|| AppError::throw("mqtt is not configured"))?;
     match mqtt.poll_result(&task_id) {
-        TaskPollResult::Ready(r) => Ok((StatusCode::OK, Json(serde_json::to_value(r).unwrap())).into_response()),
+        TaskPollResult::Ready(r) => {
+            Ok((StatusCode::OK, Json(serde_json::to_value(r).unwrap())).into_response())
+        }
         TaskPollResult::Pending => Ok((
             StatusCode::ACCEPTED,
             Json(serde_json::json!({ "status": "pending", "task_id": task_id })),

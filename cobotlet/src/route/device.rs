@@ -83,24 +83,24 @@ async fn heartbeat(
             } else {
                 state.events.publish_heartbeat(&device.id);
             }
-            Ok(Json(HeartbeatResponse { online: true, restored: was_offline }))
+            Ok(Json(HeartbeatResponse {
+                online: true,
+                restored: was_offline,
+            }))
         }
         None => Err(AppError::not_found(format!("device '{id}' not found"))),
     }
 }
 
-async fn list(
-    State(state): State<AppState>,
-    Query(q): Query<ListQuery>,
-) -> Json<Vec<Device>> {
+async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>) -> Json<Vec<Device>> {
     let devices = state.store.list();
     let filtered = devices
         .into_iter()
-        .filter(|d| q.online.map_or(true, |o| d.online == o))
+        .filter(|d| q.online.is_none_or(|o| d.online == o))
         .filter(|d| {
             q.capability
                 .as_ref()
-                .map_or(true, |cap| d.capabilities.iter().any(|c| &c.name == cap))
+                .is_none_or(|cap| d.capabilities.iter().any(|c| &c.name == cap))
         })
         .collect();
     Json(filtered)
@@ -207,7 +207,9 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let caps = json["capabilities"].as_array().unwrap();
         assert_eq!(caps.len(), 1);
@@ -239,14 +241,17 @@ mod tests {
         registered_device(&state, "online-dev", &["move"]);
         // Register an offline device directly.
         let now = Utc::now();
-        state.store.register(Device {
-            id: "offline-dev".to_string(),
-            service_url: "http://offline:9000".to_string(),
-            capabilities: vec![],
-            last_heartbeat: now,
-            registered_at: now,
-            online: false,
-        }).unwrap();
+        state
+            .store
+            .register(Device {
+                id: "offline-dev".to_string(),
+                service_url: "http://offline:9000".to_string(),
+                capabilities: vec![],
+                last_heartbeat: now,
+                registered_at: now,
+                online: false,
+            })
+            .unwrap();
 
         let app = Router::new().merge(route()).with_state(state);
         let req = Request::builder()
@@ -255,7 +260,9 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let devices = json.as_array().unwrap();
         assert_eq!(devices.len(), 1);
@@ -274,7 +281,9 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let devices = json.as_array().unwrap();
         assert_eq!(devices.len(), 1);

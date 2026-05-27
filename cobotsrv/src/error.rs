@@ -43,15 +43,19 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, msg) = match self {
-            AppError::NoAvailableDevice => {
-                (StatusCode::SERVICE_UNAVAILABLE, "no available device".to_string())
-            }
+            AppError::NoAvailableDevice => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no available device".to_string(),
+            ),
             AppError::RequestProxyError => (StatusCode::BAD_REQUEST, "request error".to_string()),
             AppError::NotFound(e) => (StatusCode::NOT_FOUND, e),
             AppError::AlreadyExists(e) => (StatusCode::CONFLICT, e),
             AppError::InternalServerError(e) => {
                 tracing::error!(?e, "internal server error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
             }
             AppError::Throw(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
             AppError::Unauthorized(e) => (StatusCode::UNAUTHORIZED, e),

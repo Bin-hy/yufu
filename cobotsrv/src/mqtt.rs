@@ -216,7 +216,10 @@ pub async fn spawn(
         .subscribe(&cobotlet_sub, QoS::AtLeastOnce)
         .await
         .with_context(|| format!("subscribe {cobotlet_sub}"))?;
-    info!(device_sub, results_sub, cobotlet_sub, "cobotsrv mqtt subscribed");
+    info!(
+        device_sub,
+        results_sub, cobotlet_sub, "cobotsrv mqtt subscribed"
+    );
 
     let handle = Arc::new(MqttHandle {
         client,
@@ -255,8 +258,12 @@ pub async fn spawn(
             tick.tick().await;
             let now = Instant::now();
             let ttl = evict_handle.cache_ttl;
-            evict_handle.cache.retain(|_, (_, t)| now.duration_since(*t) < ttl);
-            evict_handle.pending_async.retain(|_, t| now.duration_since(*t) < ttl);
+            evict_handle
+                .cache
+                .retain(|_, (_, t)| now.duration_since(*t) < ttl);
+            evict_handle
+                .pending_async
+                .retain(|_, t| now.duration_since(*t) < ttl);
         }
     });
 
@@ -290,7 +297,11 @@ fn parse_topic<'a>(prefix: &str, topic: &'a str) -> Option<Topic<'a>> {
             if parts.next().is_some() {
                 return None;
             }
-            Some(Topic::DeviceEvent { alias, device_id, kind })
+            Some(Topic::DeviceEvent {
+                alias,
+                device_id,
+                kind,
+            })
         }
         "results" => {
             let task_id = parts.next()?;
@@ -322,7 +333,11 @@ async fn handle_publish(
     };
 
     match parsed {
-        Topic::DeviceEvent { alias, device_id, kind } => {
+        Topic::DeviceEvent {
+            alias,
+            device_id,
+            kind,
+        } => {
             handle_device_event(db, alias, device_id, kind, &publish.payload).await;
         }
         Topic::Result { task_id } => {
@@ -432,7 +447,11 @@ mod tests {
     fn parses_device_event_topic() {
         let t = parse_topic("cobotrix", "cobotrix/cobotlets/c1/devices/d42/online").unwrap();
         match t {
-            Topic::DeviceEvent { alias, device_id, kind } => {
+            Topic::DeviceEvent {
+                alias,
+                device_id,
+                kind,
+            } => {
                 assert_eq!(alias, "c1");
                 assert_eq!(device_id, "d42");
                 assert_eq!(kind, "online");

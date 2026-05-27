@@ -6,8 +6,7 @@ use crate::result::Result;
 use auth::require_perm;
 
 pub fn route() -> Router<AppState> {
-    Router::new()
-        .route("/cobotlets", get(list).layer(require_perm!("device:read")))
+    Router::new().route("/cobotlets", get(list).layer(require_perm!("device:read")))
 }
 
 #[derive(Debug, Serialize)]
@@ -22,17 +21,16 @@ pub struct CobotletVO {
 
 async fn list(State(state): State<AppState>) -> Result<Json<Vec<CobotletVO>>> {
     // Build the set of MQTT-observed statuses (if MQTT is configured).
-    let mqtt_status: std::collections::HashMap<String, crate::mqtt::CobotletStatus> =
-        state
-            .mqtt
-            .as_ref()
-            .map(|m| {
-                m.cobotlet_status()
-                    .into_iter()
-                    .map(|s| (s.alias.clone(), s))
-                    .collect()
-            })
-            .unwrap_or_default();
+    let mqtt_status: std::collections::HashMap<String, crate::mqtt::CobotletStatus> = state
+        .mqtt
+        .as_ref()
+        .map(|m| {
+            m.cobotlet_status()
+                .into_iter()
+                .map(|s| (s.alias.clone(), s))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let cobotlets: Vec<CobotletVO> = state
         .config
@@ -45,7 +43,8 @@ async fn list(State(state): State<AppState>) -> Result<Json<Vec<CobotletVO>>> {
                 url: node.url.clone(),
                 online: status.map(|s| s.online).unwrap_or(false),
                 last_seen: status.and_then(|s| {
-                    s.last_seen.map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                    s.last_seen
+                        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
                 }),
             }
         })
