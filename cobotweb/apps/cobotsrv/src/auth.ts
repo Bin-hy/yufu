@@ -176,9 +176,24 @@ export async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+/** Revoke a token server-side via RFC 7009. Failures are silent — we always clear locally. */
+async function revokeToken(token: string, hint: 'refresh_token' | 'access_token'): Promise<void> {
+  try {
+    await fetch(`${COBOTSRV_BASE}/oidc/revoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token, token_type_hint: hint }),
+    })
+  } catch {
+    // network error — still clear locally below
+  }
+}
+
 export async function logout(): Promise<void> {
+  const rt = getRefreshToken()
+  if (rt) await revokeToken(rt, 'refresh_token')
   clearAuth()
-  await redirectToLogin()
+  window.location.href = '/logout'
 }
 
 // ── UserInfo (OIDC /userinfo endpoint) ──

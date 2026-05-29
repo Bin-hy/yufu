@@ -18,8 +18,20 @@ export interface LocalTaskResult {
   error?: string | null
 }
 
+export interface CobotletInfo {
+  alias: string
+}
+
+export function getHello() {
+  return request<CobotletInfo>({ url: '/hello', method: 'GET' })
+}
+
 export function listDevices() {
   return request<LocalDevice[]>({ url: '/devices', method: 'GET' })
+}
+
+export function deleteDevice(id: string) {
+  return request<void>({ url: `/devices/${encodeURIComponent(id)}`, method: 'DELETE' })
 }
 
 export function dispatchTask(payload: {

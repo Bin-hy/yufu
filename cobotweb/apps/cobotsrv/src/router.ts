@@ -9,6 +9,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false },
   },
   {
+    path: '/logout',
+    name: 'logout',
+    component: () => import('./pages/logout.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
     path: '/',
     redirect: '/dashboard',
   },

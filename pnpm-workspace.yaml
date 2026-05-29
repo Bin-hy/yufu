@@ -1,4 +1,5 @@
 packages:
-  - "cobotweb"
+  - "cobotweb/apps/*"
+  - "cobotweb/packages/*"
 allowBuilds:
   esbuild: true

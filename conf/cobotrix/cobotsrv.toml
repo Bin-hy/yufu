@@ -9,9 +9,16 @@ listen = "127.0.0.1:4001"
 level = "info"
 
 [database]
-url = "postgres://postgres:postgres@localhost:5432/cobotsrv"
+url = "postgres://postgres:postgres@localhost:5431/cobotsrv"
 max_connections = 10
 connect_timeout = 30
+
+# MQTT 连接（设备发现 + 任务调度），对应 compose.yaml 中的 emqx 服务
+# [mqtt]
+# url = "mqtt://localhost:1883"
+# client_id = "cobotsrv"
+# topic_prefix = "cobotrix"
+# keep_alive_secs = 30
 
 # cobotsrv 作为 cobotusr 的 OIDC client，用 client_credentials 调用 PDP。
 # client_secret 须与 conf/cobotrix/cobotusr.toml [oidc.bootstrap_clients].client_secret 一致。

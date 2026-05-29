@@ -26,7 +26,7 @@ use auth::token_manager::{IdTokenSigner, TokenManager};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
-#[folder = "../assets/cobotsrv/"]
+#[folder = "../assets/cobotusr/"]
 struct Assets;
 
 pub mod config;

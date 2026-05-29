@@ -1,7 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Send, CheckCircle, XCircle, Clock, History } from '@lucide/vue'
 import { listDevices, submitTaskSync, submitTaskAsync, getTaskResult } from '../api'
 import type { DeviceVO, TaskResult } from '@cobotweb/shared'
+
+// ── Types ──
+interface HistoryEntry {
+  taskId: string
+  cobotletAlias: string
+  deviceId: string
+  capabilityName: string
+  result: TaskResult | null
+  error: string | null
+  submittedAt: Date
+}
 
 // ── State ──
 const devices = ref<DeviceVO[]>([])
@@ -11,12 +23,17 @@ const capabilityName = ref('')
 const bodyText = ref('{}')
 const taskId = ref(`t-${Date.now()}`)
 const timeoutMs = ref(5000)
-const waitMode = ref(true) // sync by default
+const waitMode = ref(true)
 const submitting = ref(false)
 const result = ref<TaskResult | null>(null)
 const error = ref<string | null>(null)
-const pollTaskId = ref('')
-const polling = ref(false)
+const taskHistory = ref<HistoryEntry[]>([])
+
+// async polling state
+const asyncTaskId = ref('')
+const asyncPolling = ref(false)
+const asyncPollAttempts = ref(0)
+let asyncPollTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── Derived ──
 const selectedDevice = computed(() =>
@@ -24,16 +41,21 @@ const selectedDevice = computed(() =>
     (d) => d.cobotlet_alias === cobotletAlias.value && d.device_id === deviceId.value,
   ),
 )
-
 const onlineDevices = computed(() => devices.value.filter((d) => d.online))
-
 const cobotletAliases = computed(() =>
   [...new Set(onlineDevices.value.map((d) => d.cobotlet_alias))].sort(),
 )
-
 const devicesForCobotlet = computed(() =>
   onlineDevices.value.filter((d) => d.cobotlet_alias === cobotletAlias.value),
 )
+const resultStatusColor = computed(() => {
+  if (error.value) return 'text-destructive'
+  if (!result.value) return ''
+  const s = result.value.status
+  if (s >= 200 && s < 300) return 'text-green-600'
+  if (s >= 400) return 'text-destructive'
+  return 'text-amber-500'
+})
 
 // ── Init ──
 onMounted(async () => {
@@ -50,21 +72,26 @@ onMounted(async () => {
   }
 })
 
+onUnmounted(() => {
+  if (asyncPollTimer) clearTimeout(asyncPollTimer)
+})
+
 // ── Methods ──
 function onCobotletChange() {
   const first = devicesForCobotlet.value[0]
-  if (first) {
-    deviceId.value = first.device_id
-    capabilityName.value = first.capabilities?.[0]?.name ?? ''
-  } else {
-    deviceId.value = ''
-    capabilityName.value = ''
-  }
+  deviceId.value = first?.device_id ?? ''
+  capabilityName.value = first?.capabilities?.[0]?.name ?? ''
+}
+
+function generateTaskId() {
+  taskId.value = `t-${Date.now()}`
 }
 
 async function submit() {
   error.value = null
   result.value = null
+  asyncTaskId.value = ''
+
   let body: unknown
   try {
     body = bodyText.value.trim() ? JSON.parse(bodyText.value) : undefined
@@ -74,102 +101,138 @@ async function submit() {
   }
 
   submitting.value = true
+  const payload = {
+    cobotlet_alias: cobotletAlias.value,
+    capability_name: capabilityName.value,
+    device_id: deviceId.value || undefined,
+    task_id: taskId.value || undefined,
+    body,
+    timeout_ms: timeoutMs.value,
+  }
+
   try {
     if (waitMode.value) {
-      result.value = await submitTaskSync({
-        cobotlet_alias: cobotletAlias.value,
-        capability_name: capabilityName.value,
-        device_id: deviceId.value || undefined,
-        task_id: taskId.value || undefined,
-        body,
-        timeout_ms: timeoutMs.value,
-      })
+      result.value = await submitTaskSync(payload)
+      addHistory(result.value, null)
     } else {
-      const res = await submitTaskAsync({
-        cobotlet_alias: cobotletAlias.value,
-        capability_name: capabilityName.value,
-        device_id: deviceId.value || undefined,
-        task_id: taskId.value || undefined,
-        body,
-        timeout_ms: timeoutMs.value,
-      })
-      pollTaskId.value = res.task_id
+      const res = await submitTaskAsync(payload)
+      asyncTaskId.value = res.task_id
+      startAutoPoll(res.task_id)
     }
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e)
+    addHistory(null, error.value)
   } finally {
     submitting.value = false
+    generateTaskId()
   }
 }
 
-async function pollResult() {
-  if (!pollTaskId.value) return
-  polling.value = true
-  error.value = null
+function addHistory(res: TaskResult | null, err: string | null) {
+  taskHistory.value.unshift({
+    taskId: taskId.value,
+    cobotletAlias: cobotletAlias.value,
+    deviceId: deviceId.value,
+    capabilityName: capabilityName.value,
+    result: res,
+    error: err,
+    submittedAt: new Date(),
+  })
+  if (taskHistory.value.length > 20) taskHistory.value.pop()
+}
+
+function startAutoPoll(tid: string) {
+  asyncPolling.value = true
+  asyncPollAttempts.value = 0
+  schedulePoll(tid)
+}
+
+function schedulePoll(tid: string) {
+  asyncPollTimer = setTimeout(() => void doPoll(tid), 2000)
+}
+
+async function doPoll(tid: string) {
+  asyncPollAttempts.value++
   try {
-    result.value = await getTaskResult(pollTaskId.value)
+    const r = await getTaskResult(tid)
+    result.value = r
+    asyncPolling.value = false
+    addHistory(r, null)
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    polling.value = false
+    if (asyncPollAttempts.value < 30) {
+      schedulePoll(tid)
+    } else {
+      asyncPolling.value = false
+      error.value = `轮询超时（${asyncPollAttempts.value} 次）: ${e instanceof Error ? e.message : String(e)}`
+      addHistory(null, error.value)
+    }
   }
+}
+
+function restoreHistory(entry: HistoryEntry) {
+  cobotletAlias.value = entry.cobotletAlias
+  deviceId.value = entry.deviceId
+  capabilityName.value = entry.capabilityName
+  result.value = entry.result
+  error.value = entry.error
+  asyncTaskId.value = ''
+}
+
+function historyStatus(entry: HistoryEntry): { ok: boolean | null } {
+  if (entry.error) return { ok: false }
+  if (!entry.result) return { ok: null }
+  return { ok: entry.result.status >= 200 && entry.result.status < 300 }
+}
+
+function formatTime(d: Date): string {
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 </script>
 
 <template>
   <div class="space-y-4">
     <h2 class="text-lg font-semibold">任务派发</h2>
-    <p class="text-sm text-muted-foreground">
-      向指定 cobotlet 上的设备派发任务，通过 MQTT 下发到端侧执行。
-    </p>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <!-- Form -->
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <!-- ── Form ── -->
       <div class="rounded-lg border border-border bg-card p-4 space-y-3">
+        <!-- cobotlet -->
         <div>
-          <label class="block text-sm mb-1">cobotlet</label>
+          <label class="block text-xs text-muted-foreground mb-1">Cobotlet</label>
           <select
             v-model="cobotletAlias"
             class="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             @change="onCobotletChange"
           >
-            <option value="">（选择一个 cobotlet）</option>
-            <option v-for="alias in cobotletAliases" :key="alias" :value="alias">
-              {{ alias }}
-            </option>
+            <option value="">— 选择 cobotlet —</option>
+            <option v-for="alias in cobotletAliases" :key="alias" :value="alias">{{ alias }}</option>
           </select>
         </div>
 
+        <!-- device -->
         <div>
-          <label class="block text-sm mb-1">设备</label>
+          <label class="block text-xs text-muted-foreground mb-1">设备</label>
           <select
             v-model="deviceId"
             class="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
-            <option value="">（按能力自动选择）</option>
-            <option
-              v-for="d in devicesForCobotlet"
-              :key="d.device_id"
-              :value="d.device_id"
-            >
+            <option value="">— 按能力自动选择 —</option>
+            <option v-for="d in devicesForCobotlet" :key="d.device_id" :value="d.device_id">
               {{ d.device_id }} ({{ d.capabilities?.length ?? 0 }} 个能力)
             </option>
           </select>
         </div>
 
+        <!-- capability -->
         <div>
-          <label class="block text-sm mb-1">能力</label>
+          <label class="block text-xs text-muted-foreground mb-1">能力</label>
           <select
             v-if="selectedDevice?.capabilities?.length"
             v-model="capabilityName"
             class="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
-            <option
-              v-for="c in selectedDevice.capabilities"
-              :key="c.name"
-              :value="c.name"
-            >
-              {{ c.name }} ({{ c.method }} {{ c.path }})
+            <option v-for="c in selectedDevice.capabilities" :key="c.name" :value="c.name">
+              {{ c.name }} — {{ c.method }} {{ c.path }}
             </option>
           </select>
           <input
@@ -180,16 +243,17 @@ async function pollResult() {
           />
         </div>
 
+        <!-- task id + timeout -->
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-sm mb-1">Task ID</label>
+            <label class="block text-xs text-muted-foreground mb-1">Task ID</label>
             <input
               v-model="taskId"
               class="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
           <div>
-            <label class="block text-sm mb-1">超时 (ms)</label>
+            <label class="block text-xs text-muted-foreground mb-1">超时 (ms)</label>
             <input
               v-model.number="timeoutMs"
               type="number"
@@ -198,57 +262,97 @@ async function pollResult() {
           </div>
         </div>
 
+        <!-- body -->
         <div>
-          <label class="block text-sm mb-1">Body (JSON)</label>
+          <label class="block text-xs text-muted-foreground mb-1">Body (JSON)</label>
           <textarea
             v-model="bodyText"
-            rows="6"
-            class="w-full rounded-md border border-border bg-transparent px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+            rows="5"
+            class="w-full rounded-md border border-border bg-transparent px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring resize-y"
           />
         </div>
 
+        <!-- sync toggle + submit -->
         <div class="flex items-center gap-4">
-          <label class="flex items-center gap-2 text-sm">
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
             <input v-model="waitMode" type="checkbox" class="rounded" />
             同步等待结果
           </label>
         </div>
 
         <button
-          :disabled="submitting || !cobotletAlias || !capabilityName"
-          class="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          :disabled="submitting || asyncPolling || !cobotletAlias || !capabilityName"
+          class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
           @click="submit"
         >
-          {{ submitting ? '派发中…' : '派发任务' }}
+          <Send class="w-3.5 h-3.5" />
+          {{ submitting ? '派发中…' : asyncPolling ? '等待结果…' : '派发任务' }}
         </button>
 
-        <!-- Polling -->
-        <div v-if="pollTaskId && !waitMode" class="space-y-2 pt-2 border-t border-border">
-          <p class="text-xs text-muted-foreground">
-            异步任务 ID: <code class="font-mono">{{ pollTaskId }}</code>
-          </p>
-          <button
-            :disabled="polling"
-            class="inline-flex items-center justify-center rounded-md border border-border bg-transparent px-3 py-1 text-xs hover:bg-muted"
-            @click="pollResult"
-          >
-            {{ polling ? '查询中…' : '查询结果' }}
-          </button>
+        <!-- async polling status -->
+        <div v-if="asyncPolling" class="flex items-center gap-2 text-xs text-muted-foreground pt-1">
+          <Clock class="w-3.5 h-3.5 animate-pulse" />
+          轮询中（第 {{ asyncPollAttempts }} 次）… Task ID:
+          <code class="font-mono">{{ asyncTaskId }}</code>
         </div>
       </div>
 
-      <!-- Result -->
-      <div class="rounded-lg border border-border bg-card p-4">
-        <h2 class="text-lg font-semibold mb-2">结果</h2>
-        <pre
-          v-if="error"
-          class="rounded bg-destructive/10 text-destructive p-3 text-xs whitespace-pre-wrap"
-        >{{ error }}</pre>
-        <pre
-          v-else-if="result"
-          class="rounded bg-muted p-3 text-xs whitespace-pre-wrap overflow-auto max-h-[28rem]"
-        >{{ JSON.stringify(result, null, 2) }}</pre>
-        <p v-else class="text-sm text-muted-foreground">尚未派发任务。</p>
+      <!-- ── Right panel ── -->
+      <div class="flex flex-col gap-4">
+        <!-- result -->
+        <div class="rounded-lg border border-border bg-card p-4 flex-1">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-medium">结果</h3>
+            <span v-if="result" class="text-xs font-mono" :class="resultStatusColor">
+              HTTP {{ result.status }}
+            </span>
+          </div>
+
+          <pre
+            v-if="error"
+            class="rounded bg-destructive/10 text-destructive p-3 text-xs whitespace-pre-wrap"
+          >{{ error }}</pre>
+          <pre
+            v-else-if="result"
+            class="rounded bg-muted p-3 text-xs whitespace-pre-wrap overflow-auto max-h-64"
+          >{{ JSON.stringify(result, null, 2) }}</pre>
+          <p v-else class="text-sm text-muted-foreground">尚未派发任务。</p>
+        </div>
+
+        <!-- history -->
+        <div class="rounded-lg border border-border bg-card p-4">
+          <div class="flex items-center gap-2 mb-2">
+            <History class="w-4 h-4 text-muted-foreground" />
+            <h3 class="text-sm font-medium">历史记录</h3>
+            <span class="text-xs text-muted-foreground">(本次会话)</span>
+          </div>
+
+          <div v-if="taskHistory.length === 0" class="text-xs text-muted-foreground">
+            暂无历史记录
+          </div>
+
+          <ul v-else class="space-y-1 max-h-48 overflow-auto">
+            <li
+              v-for="entry in taskHistory"
+              :key="`${entry.taskId}-${entry.submittedAt.getTime()}`"
+              class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer text-xs"
+              @click="restoreHistory(entry)"
+            >
+              <component
+                :is="historyStatus(entry).ok === null ? Clock : historyStatus(entry).ok ? CheckCircle : XCircle"
+                class="w-3.5 h-3.5 shrink-0"
+                :class="{
+                  'text-green-500': historyStatus(entry).ok === true,
+                  'text-destructive': historyStatus(entry).ok === false,
+                  'text-muted-foreground': historyStatus(entry).ok === null,
+                }"
+              />
+              <span class="font-mono truncate flex-1">{{ entry.capabilityName }}</span>
+              <span class="text-muted-foreground shrink-0">{{ entry.cobotletAlias }}</span>
+              <span class="text-muted-foreground shrink-0">{{ formatTime(entry.submittedAt) }}</span>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   </div>

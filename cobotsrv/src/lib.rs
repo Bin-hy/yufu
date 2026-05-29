@@ -22,7 +22,7 @@ use crate::store::{Node, NodeKind, Storage};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
-#[folder = "../assets/cobotrix/"]
+#[folder = "../assets/cobotsrv/"]
 struct Assets;
 
 pub mod config;
