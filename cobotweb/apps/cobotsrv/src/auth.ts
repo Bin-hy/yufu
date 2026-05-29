@@ -99,6 +99,32 @@ export async function redirectToLogin(currentPath?: string): Promise<void> {
   window.location.assign(`${COBOTSRV_BASE}/oidc/authorize?${params}`)
 }
 
+/**
+ * Redirect to the IdP login form directly (bypasses /oidc/authorize so the
+ * user always sees the username/password screen even when an IdP session cookie
+ * is still active). Used by the logout page's "重新登录" button.
+ */
+export async function redirectToLoginForm(currentPath?: string): Promise<void> {
+  const verifier = randomBase64Url(32)
+  const state = randomBase64Url(16)
+  const challenge = base64UrlEncode(await sha256(verifier))
+
+  sessionStorage.setItem(STORAGE_KEYS.pkceVerifier, verifier)
+  sessionStorage.setItem(STORAGE_KEYS.oauthState, state)
+  if (currentPath) sessionStorage.setItem(STORAGE_KEYS.postLoginPath, currentPath)
+
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope: SCOPE,
+    state,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+  })
+  window.location.assign(`${COBOTSRV_BASE}/oidc/login?${params}`)
+}
+
 /// Exchange the `code` returned to /oauth/callback for tokens. Returns the
 /// path the user was originally trying to reach (or `/dashboard`).
 export async function handleCallback(code: string, state: string): Promise<string> {

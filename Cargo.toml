@@ -28,8 +28,12 @@ path = "src/cobotsrv.rs"
 name = "cobotrix"
 path = "src/cobotrix.rs"
 
+[[bin]]
+name = "cobotset"
+path = "src/cobotset.rs"
+
 [workspace]
-members = [".", "cobotlet", "cobotusr", "cobotsrv", "libs/auth"]
+members = [".", "cobotlet", "cobotset", "cobotusr", "cobotsrv", "libs/auth"]
 
 [workspace.package]
 version = "0.0.0"
@@ -79,7 +83,7 @@ tokio = { workspace = true, features = ["fs"] }
 net4mqtt = { workspace = true, features = ["test-utils"] }
 tracing = { workspace = true }
 serde = { workspace = true }
-anyhow ={ workspace = true }
+anyhow = { workspace = true }
 uuid =  { workspace = true }
 auth = { workspace = true }
 
@@ -89,6 +93,7 @@ testcontainers = {version = "0.25.0", features = ["blocking"]}
 testcontainers-modules = { version = "0.13.0", features = ["postgres"] }
 
 cobotlet = { path = "cobotlet" }
+cobotset = { path = "cobotset" }
 cobotusr = { path = "cobotusr" }
 cobotsrv = { path = "cobotsrv" }
 signal = { workspace = true }

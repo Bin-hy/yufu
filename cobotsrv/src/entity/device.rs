@@ -23,13 +23,15 @@ pub struct Model {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Capability {
     pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default = "default_method")]
     pub method: String,
     pub path: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
-    pub schema: Option<serde_json::Value>,
+    #[serde(default, alias = "schema")]
+    pub input_schema: Option<serde_json::Value>,
 }
 
 fn default_method() -> String {

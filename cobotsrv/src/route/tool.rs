@@ -36,11 +36,13 @@ pub struct ToolProvider {
 #[derive(Debug, Serialize)]
 pub struct ToolDescriptor {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub method: String,
     pub path: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    pub schema: Option<serde_json::Value>,
+    pub input_schema: Option<serde_json::Value>,
     pub providers: Vec<ToolProvider>,
 }
 
@@ -60,10 +62,11 @@ async fn list_tools(State(state): State<AppState>) -> Result<Json<ToolListRespon
                 .entry(cap.name.clone())
                 .or_insert_with(|| ToolDescriptor {
                     name: cap.name.clone(),
+                    description: cap.description.clone(),
                     method: cap.method.clone(),
                     path: cap.path.clone(),
                     tags: cap.tags.clone(),
-                    schema: cap.schema.clone(),
+                    input_schema: cap.input_schema.clone(),
                     providers: Vec::new(),
                 });
             entry.providers.push(ToolProvider {
@@ -100,10 +103,11 @@ async fn get_tool(
             }
             let d = descriptor.get_or_insert_with(|| ToolDescriptor {
                 name: cap.name.clone(),
+                description: cap.description.clone(),
                 method: cap.method.clone(),
                 path: cap.path.clone(),
                 tags: cap.tags.clone(),
-                schema: cap.schema.clone(),
+                input_schema: cap.input_schema.clone(),
                 providers: Vec::new(),
             });
             d.providers.push(ToolProvider {

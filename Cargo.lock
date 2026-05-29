@@ -802,6 +802,7 @@ dependencies = [
  "auth",
  "clap",
  "cobotlet",
+ "cobotset",
  "cobotsrv",
  "cobotusr",
  "futures",
@@ -819,6 +820,18 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "cobotset"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

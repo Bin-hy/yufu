@@ -1,9 +1,31 @@
+export interface JsonSchemaProperty {
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'
+  description?: string
+  minimum?: number
+  maximum?: number
+  minLength?: number
+  maxLength?: number
+  enum?: unknown[]
+  default?: unknown
+  items?: JsonSchemaProperty
+  properties?: Record<string, JsonSchemaProperty>
+  required?: string[]
+}
+
+export interface JsonSchema {
+  type: 'object'
+  description?: string
+  properties?: Record<string, JsonSchemaProperty>
+  required?: string[]
+}
+
 export interface Capability {
   name: string
   method: string
   path: string
+  description?: string | null
   tags: string[]
-  schema?: unknown | null
+  input_schema?: JsonSchema | null
 }
 
 export interface DeviceVO {
