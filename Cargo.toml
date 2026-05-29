@@ -25,6 +25,14 @@ name = "cobotsrv"
 path = "src/cobotsrv.rs"
 
 [[bin]]
+name = "cobotmap"
+path = "src/cobotmap.rs"
+
+[[bin]]
+name = "cobotmap-verify"
+path = "src/cobotmap_verify.rs"
+
+[[bin]]
 name = "cobotrix"
 path = "src/cobotrix.rs"
 
@@ -33,7 +41,16 @@ name = "cobotset"
 path = "src/cobotset.rs"
 
 [workspace]
-members = [".", "cobotlet", "cobotset", "cobotusr", "cobotsrv", "libs/auth"]
+members = [
+    ".",
+    "cobotlet",
+    "cobotsrv",
+    "cobotusr",
+    "cobotset",
+    "cobotsrv",
+    "cobotmap",
+    "libs/auth",
+]
 
 [workspace.package]
 version = "0.0.0"
@@ -74,12 +91,12 @@ utoipa-swagger-ui = {version = "9.0", features = ["axum"]}
 uuid = {version = "1.18.1", features = ["v4"]}
 
 redb = "4"
-rumqttc = "0.24"
+rumqttc = "0.25"
 dashmap = "6"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 net4mqtt = { workspace = true, features = ["test-utils"] }
 tracing = { workspace = true }
 serde = { workspace = true }
@@ -87,7 +104,7 @@ anyhow = { workspace = true }
 uuid =  { workspace = true }
 auth = { workspace = true }
 
-toml = "0.9"
+toml = "1.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 testcontainers = {version = "0.25.0", features = ["blocking"]}
 testcontainers-modules = { version = "0.13.0", features = ["postgres"] }
@@ -96,6 +113,7 @@ cobotlet = { path = "cobotlet" }
 cobotset = { path = "cobotset" }
 cobotusr = { path = "cobotusr" }
 cobotsrv = { path = "cobotsrv" }
+cobotmap = { path = "cobotmap" }
 signal = { workspace = true }
 
 [dev-dependencies]

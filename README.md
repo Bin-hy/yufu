@@ -30,6 +30,14 @@ cp conf/cobotsrv.example.toml cobotsrv.toml   # 默认配置文件（已被 .git
 cp cobotweb/.env.example cobotweb/.env.local
 ```
 
+首次运行地图代理服务前，先从模板派生本地配置文件：
+
+```bash
+cp conf/cobotmap.example.toml conf/cobotmap.toml
+```
+
+地图代理服务见 `cobotmap/README.md`。
+
 安全提示：
 
 - `conf/oidc_rsa_private.pem` 无需手动创建：`cobotsrv` 首次启动时若不存在会自动生成 2048-bit RSA 密钥并落盘，后续启动复用；该文件已被 `.gitignore` 忽略，**切勿提交**。

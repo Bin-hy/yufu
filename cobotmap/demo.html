@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Google Maps Proxy Demo</title>
+  <style>
+    html,
+    body,
+    #map {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script>
+    function initMap() {
+      const center = { lat: 25.2736, lng: 110.29 };
+      const map = new google.maps.Map(document.getElementById("map"), {
+        center,
+        zoom: 11
+      });
+
+      new google.maps.Marker({
+        position: center,
+        map,
+        title: "Guilin"
+      });
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          ({ coords: { latitude, longitude } }) => {
+            const position = { lat: latitude, lng: longitude };
+            map.setCenter(position);
+            map.setZoom(15);
+            new google.maps.Marker({
+              position,
+              map,
+              title: "Current location"
+            });
+          },
+          console.debug,
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        );
+      }
+    }
+  </script>
+
+  <script async src="__COBOTMAP_MAPS_SCRIPT__"></script>
+</body>
+</html>
