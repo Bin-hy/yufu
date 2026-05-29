@@ -1,0 +1,51 @@
+# cobotsrv - Device Management Server
+# cobotrix 统一启动器配置目录（conf/cobotrix/），由 `cobotrix -c conf/cobotrix` 加载。
+# 生产环境请修改 client_secret、database url。
+
+[http]
+listen = "127.0.0.1:4001"
+
+[log]
+level = "info"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5431/cobotsrv"
+max_connections = 10
+connect_timeout = 30
+
+# MQTT 连接（设备发现 + 任务调度），对应 compose.yaml 中的 emqx 服务
+# [mqtt]
+# url = "mqtt://localhost:1883"
+# client_id = "cobotsrv"
+# topic_prefix = "cobotrix"
+# keep_alive_secs = 30
+
+# cobotsrv 作为 cobotusr 的 OIDC client，用 client_credentials 调用 PDP。
+# client_secret 须与 conf/cobotrix/cobotusr.toml [oidc.bootstrap_clients].client_secret 一致。
+[auth]
+client_id = "cobotsrv"
+client_secret = "dev-cobotsrv-secret-change-me"
+jwks_url = "http://127.0.0.1:4000/.well-known/jwks.json"
+expected_audience = "cobotsrv"
+require_permissions = true
+
+# cobotsrv 启动时自动将这些权限同步到 cobotusr，管理员在 cobotusr 前端分配给角色即可。
+[[permissions]]
+name = "device:read"
+action = "read"
+resource_type = "device"
+
+[[permissions]]
+name = "task:execute"
+action = "submit"
+resource_type = "task"
+
+[[permissions]]
+name = "task:read"
+action = "read"
+resource_type = "task"
+
+[[permissions]]
+name = "remote:proxy"
+action = "proxy"
+resource_type = "remote"

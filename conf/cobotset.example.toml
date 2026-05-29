@@ -1,0 +1,56 @@
+[cobotlet]
+# URL of the local cobotlet gateway this device registers with.
+url = "http://localhost:3080"
+
+[device]
+# Optional stable ID. Omit to let cobotlet generate a UUID on first registration.
+# id = "robot-arm-001"
+service_url = "http://localhost:9000"
+
+# ── Capabilities ─────────────────────────────────────────────────────────────
+# Each capability maps to one HTTP endpoint on the device service.
+# All parameters are passed as a JSON body (POST by default — MCP convention).
+# input_schema is JSON Schema; it drives the task dispatch form in cobotsrv UI
+# and provides tool definitions for AI agents.
+
+[[device.capabilities]]
+name = "move"
+description = "Move robot arm to absolute position"
+path = "/move"
+method = "POST"
+
+[device.capabilities.input_schema]
+type = "object"
+required = ["x", "y"]
+
+[device.capabilities.input_schema.properties.x]
+type = "number"
+description = "X coordinate in mm"
+minimum = 0
+maximum = 1000
+
+[device.capabilities.input_schema.properties.y]
+type = "number"
+description = "Y coordinate in mm"
+minimum = 0
+maximum = 1000
+
+[[device.capabilities]]
+name = "grip"
+description = "Open or close the gripper"
+path = "/grip"
+
+[device.capabilities.input_schema]
+type = "object"
+required = ["open"]
+
+[device.capabilities.input_schema.properties.open]
+type = "boolean"
+description = "true = open, false = close"
+
+[[device.capabilities]]
+name = "status"
+description = "Query current arm status"
+path = "/status"
+
+# No input_schema needed for capabilities that take no parameters.

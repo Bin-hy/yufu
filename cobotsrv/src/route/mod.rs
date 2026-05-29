@@ -1,43 +1,25 @@
 use crate::AppState;
-use crate::modules::im;
 use axum::Router;
 
-pub mod auth;
-pub mod authority;
+pub mod cobotlet;
+pub mod device;
 pub mod hello;
-pub mod oidc;
-pub mod oidc_admin;
-pub mod rbac;
-pub mod recording;
 pub mod remote;
-pub mod role;
-pub mod user;
-pub mod user_authority;
+pub mod task;
+pub mod tool;
 
-pub fn get_auth_routes() -> Router<AppState> {
-    // handle route merge
+/// Routes that require a valid JWT (verified by cobotrix itself).
+/// Apply `auth::access_middleware` on top of this router.
+pub fn get_protected_routes() -> Router<AppState> {
     Router::new()
-        .merge(user::get_auth_routes())
-        .merge(auth::get_auth_routes())
-        .merge(role::get_auth_routes())
-        .merge(authority::get_auth_routes())
-        .merge(recording::get_auth_routes())
-        .merge(user_authority::get_auth_routes())
-        .merge(oidc::get_auth_routes())
-        .merge(oidc_admin::get_auth_routes())
-        .nest("/im", im::router::init_im_router())
-}
-
-pub fn get_public_routes() -> Router<AppState> {
-    Router::new()
-        .merge(user::get_public_routes())
-        .merge(auth::get_public_routes())
-        .merge(rbac::get_public_routes())
-}
-
-pub fn get_no_prefix_routes() -> Router<AppState> {
-    Router::new()
-        .merge(hello::route())
+        .merge(device::get_routes())
+        .merge(task::get_routes())
         .merge(remote::route())
-        .merge(oidc::get_public_routes())
+        .merge(cobotlet::route())
+        .merge(tool::route())
+}
+
+/// Routes that are always public (health/debug only).
+pub fn get_public_routes() -> Router<AppState> {
+    hello::route()
 }

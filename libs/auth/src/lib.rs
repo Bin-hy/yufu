@@ -67,10 +67,15 @@
 //! ```
 pub mod claims;
 mod claims_extractor;
+pub mod jwks;
 pub mod token_manager;
 
+use crate::jwks::JwksClient;
 use crate::token_manager::{TokenError, TokenManager};
 use axum::extract::State;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::claims::Claims;
 use axum::body::Body;
@@ -395,4 +400,187 @@ where
         )
             .into_response(),
     }
+}
+
+/// JWT verification middleware using a [`JwksClient`] (RS256, public-key only).
+///
+/// Use this in services that consume tokens issued by another service (e.g.
+/// cobotrix consuming cobotsrv-issued tokens). Validated [`crate::claims::AccessTokenClaims`]
+/// is inserted into request extensions so handlers can extract it.
+pub async fn access_middleware_rs256(
+    State(jwks): State<Arc<JwksClient>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let token = match request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        Some(t) => t.trim(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Missing or invalid Authorization header",
+            )
+                .into_response();
+        }
+    };
+
+    match jwks.verify(token) {
+        Ok(claims) => {
+            request.extensions_mut().insert(claims);
+            next.run(request).await
+        }
+        Err(TokenError::Expired) => {
+            (StatusCode::UNAUTHORIZED, "Token expired, please re-login").into_response()
+        }
+        Err(TokenError::InvalidSignature) => {
+            (StatusCode::UNAUTHORIZED, "Invalid token signature").into_response()
+        }
+        Err(TokenError::InvalidToken) => {
+            (StatusCode::UNAUTHORIZED, "Malformed token").into_response()
+        }
+        Err(e) => (
+            StatusCode::UNAUTHORIZED,
+            format!("Token validation failed: {:?}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// JWT verification middleware using the **local** [`crate::token_manager::IdTokenSigner`]
+/// (RS256, signer holds the private key, no JWKS roundtrip).
+///
+/// Use this in the IdP itself (e.g. cobotsrv) to verify tokens it just issued.
+/// External services should use [`access_middleware_rs256`] with a [`JwksClient`].
+///
+/// Validated [`crate::claims::AccessTokenClaims`] is inserted into request extensions.
+/// `aud` is NOT enforced here — apply per-route audience checks if needed.
+pub async fn access_middleware_local_rs256(
+    State(signer): State<Arc<crate::token_manager::IdTokenSigner>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let token = match request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        Some(t) => t.trim(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Missing or invalid Authorization header",
+            )
+                .into_response();
+        }
+    };
+
+    match signer.verify_access_token(token, None) {
+        Ok(claims) => {
+            request.extensions_mut().insert(claims);
+            next.run(request).await
+        }
+        Err(TokenError::Expired) => {
+            (StatusCode::UNAUTHORIZED, "Token expired, please re-login").into_response()
+        }
+        Err(TokenError::InvalidSignature) => {
+            (StatusCode::UNAUTHORIZED, "Invalid token signature").into_response()
+        }
+        Err(TokenError::InvalidToken) => {
+            (StatusCode::UNAUTHORIZED, "Malformed token").into_response()
+        }
+        Err(e) => (
+            StatusCode::UNAUTHORIZED,
+            format!("Token validation failed: {:?}", e),
+        )
+            .into_response(),
+    }
+}
+
+/// Trait for async permission checking, used by the `require_perm!` macro
+/// to support PDP-based enforcement (calling cobotsrv's `/enforce` endpoint)
+/// instead of relying on permissions embedded in the JWT claims.
+///
+/// If a `PermissionChecker` is present in request extensions, `require_perm!`
+/// will use it for an async PDP check. Otherwise it falls back to
+/// `AccessTokenClaims.permissions` (backward compatible with cobotsrv).
+pub trait PermissionChecker: Send + Sync {
+    fn check_permission<'a>(
+        &'a self,
+        subject: &str,
+        permission: &str,
+        auth_header: &str,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+}
+
+/// Macro: create an axum middleware layer that requires a specific permission.
+///
+/// The token MUST already be verified by `access_middleware_rs256` or
+/// `access_middleware_local_rs256` so `AccessTokenClaims` is in request extensions.
+///
+/// **Two modes** (checked in order):
+/// 1. If `Arc<dyn PermissionChecker>` is in request extensions, calls it for an
+///    async PDP check (e.g. cobotrix calling cobotsrv's `/api/v1/enforce`).
+/// 2. Otherwise falls back to checking `AccessTokenClaims.permissions` embedded
+///    in the JWT (backward compatible with cobotsrv).
+///
+/// # Usage
+///
+/// ```ignore
+/// use auth::require_perm;
+///
+/// Router::new()
+///     .route("/devices", get(list).layer(require_perm!("device:read")))
+/// ```
+#[macro_export]
+macro_rules! require_perm {
+    ($perm:expr) => {
+        axum::middleware::from_fn(
+            |mut request: axum::extract::Request, next: axum::middleware::Next| async move {
+                // Mode 1: PDP-based check via PermissionChecker in extensions
+                if let Some(checker) = request
+                    .extensions()
+                    .get::<std::sync::Arc<dyn $crate::PermissionChecker>>()
+                {
+                    let sub = request
+                        .extensions()
+                        .get::<$crate::claims::AccessTokenClaims>()
+                        .map(|c| c.sub.clone())
+                        .unwrap_or_default();
+                    let auth_header = request
+                        .headers()
+                        .get("Authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default();
+                    let allowed = checker.check_permission(&sub, $perm, auth_header).await;
+                    if allowed {
+                        return next.run(request).await;
+                    }
+                    return axum::response::IntoResponse::into_response((
+                        axum::http::StatusCode::FORBIDDEN,
+                        concat!("Missing permission: ", $perm),
+                    ));
+                }
+
+                // Mode 2: fallback to JWT-embedded permissions
+                let allowed = request
+                    .extensions()
+                    .get::<$crate::claims::AccessTokenClaims>()
+                    .map(|c| c.permissions.iter().any(|p| p == $perm))
+                    .unwrap_or(false);
+                if allowed {
+                    next.run(request).await
+                } else {
+                    axum::response::IntoResponse::into_response((
+                        axum::http::StatusCode::FORBIDDEN,
+                        concat!("Missing permission: ", $perm),
+                    ))
+                }
+            },
+        )
+    };
 }

@@ -1,118 +1,125 @@
 use std::future::Future;
+use std::sync::Arc;
 
-use axum::{Router, extract::Request, response::IntoResponse};
+use axum::response::IntoResponse;
 use http::{StatusCode, Uri};
 use tokio::net::TcpListener;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{Level, error, info_span};
+use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
+use tracing::info;
 
-use crate::config::Config;
-use crate::route::{AppState, hello};
+pub mod config;
+pub mod dispatcher;
+pub mod error;
+pub mod events;
+pub mod heartbeat;
+pub mod mqtt;
+pub mod result;
+pub mod route;
+pub mod store;
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
-#[folder = "../cobotweb/"]
+#[folder = "../assets/cobotlet/"]
 struct Assets;
 
-pub mod config;
+use crate::events::NoopSink;
+use crate::route::AppState;
 
-mod error;
-mod result;
-mod route;
+pub async fn serve(
+    cfg: config::Config,
+    listener: TcpListener,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) {
+    let storage_path = cfg
+        .storage
+        .as_ref()
+        .map(|s| s.path.clone())
+        .unwrap_or_else(|| String::from("data/cobotlet.redb"));
 
-pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
-where
-    F: Future<Output = ()> + Send + 'static,
-{
-    let app_state = AppState {
-        config: cfg.clone(),
-    };
-    let app = Router::new()
-        .merge(hello::route())
-        .with_state(app_state.clone())
-        .layer(if cfg.http.cors {
-            CorsLayer::permissive()
-        } else {
-            CorsLayer::new()
-        })
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|request: &Request<_>| {
-                    let span = info_span!(
-                        "http_request",
-                        uri = ?request.uri(),
-                        method = ?request.method(),
-                        span_id = tracing::field::Empty,
-                    );
-                    span.record(
-                        "span_id",
-                        span.id().unwrap_or(tracing::Id::from_u64(42)).into_u64(),
-                    );
-                    span
-                })
-                .on_response(tower_http::trace::DefaultOnResponse::new().level(Level::INFO))
-                .on_failure(tower_http::trace::DefaultOnFailure::new().level(Level::INFO)),
-        )
-        .fallback(static_handler);
+    let store = Arc::new(
+        store::DeviceStore::open(&storage_path)
+            .unwrap_or_else(|e| panic!("failed to open device store at {storage_path}: {e}")),
+    );
+    info!(path = storage_path, "device store opened");
 
-    #[cfg(feature = "net4mqtt")]
-    {
-        if let Some(mut c) = cfg.net4mqtt {
-            c.validate();
-            std::thread::spawn(move || {
-                tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(async move {
-                        loop {
-                            match net4mqtt::proxy::agent(
-                                &c.mqtt_url,
-                                &cfg.http.listen.to_string(),
-                                &c.alias.clone(),
-                                Some(net4mqtt::proxy::VDataConfig {
-                                    online: Some(
-                                        serde_json::json!({
-                                            "alias": c.alias,
-                                        })
-                                        .to_string()
-                                        .bytes()
-                                        .collect(),
-                                    ),
-                                    offline: Some("{}".bytes().collect()),
-                                    ..Default::default()
-                                }),
-                            )
-                            .await
-                            {
-                                Ok(_) => tracing::warn!(
-                                    "net4mqtt service is end, restart net4mqtt service"
-                                ),
-                                Err(e) => error!("mqtt4mqtt error: {:?}", e),
-                            }
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        }
-                    });
-            });
+    let http_client = reqwest::Client::new();
+
+    let events: events::SharedEventSink = match &cfg.mqtt {
+        Some(mqtt_cfg) => {
+            match mqtt::spawn(
+                mqtt_cfg,
+                store.clone(),
+                http_client.clone(),
+                cfg.device.request_timeout_ms,
+            )
+            .await
+            {
+                Ok(rt) => {
+                    info!(alias = mqtt_cfg.alias, "mqtt connected");
+                    rt.sink
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "mqtt connect failed, running standalone");
+                    Arc::new(NoopSink)
+                }
+            }
         }
+        None => Arc::new(NoopSink),
+    };
+
+    if cfg.mqtt.is_some() {
+        heartbeat::spawn_watchdog(
+            store.clone(),
+            events.clone(),
+            cfg.device.watchdog_interval_secs,
+            cfg.device.heartbeat_timeout_secs,
+        );
     }
 
+    let state = AppState {
+        config: cfg,
+        store,
+        http_client,
+        events,
+    };
+
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    let app = route::routes()
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
+        .with_state(state)
+        .fallback(static_handler);
+
+    info!("cobotlet serving");
     axum::serve(listener, app)
-        .with_graceful_shutdown(signal)
+        .with_graceful_shutdown(shutdown)
         .await
-        .unwrap_or_else(|e| error!("Application error: {e}"));
+        .unwrap_or_else(|e| tracing::error!(error = %e, "server error"));
 }
 
 #[cfg(feature = "webui")]
 async fn static_handler(uri: Uri) -> impl IntoResponse {
-    let mut path = uri.path().trim_start_matches('/');
-    if path.is_empty() {
-        path = "index.html";
-    }
-    match Assets::get(path) {
+    let path = uri.path().trim_start_matches('/');
+
+    let file_path = if path.is_empty() { "index.html" } else { path };
+
+    match Assets::get(file_path) {
         Some(content) => {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
             ([(http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        None => match Assets::get("index.html") {
+            Some(index) => {
+                let mime = mime_guess::from_path("index.html").first_or_octet_stream();
+                ([(http::header::CONTENT_TYPE, mime.as_ref())], index.data).into_response()
+            }
+            None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        },
     }
 }
 

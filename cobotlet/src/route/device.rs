@@ -1,0 +1,292 @@
+use axum::{
+    Json, Router,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    routing::{get, patch, post, put},
+};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::AppState;
+use crate::error::AppError;
+use crate::result::Result;
+use crate::store::{Capability, Device};
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterRequest {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub service_url: String,
+    #[serde(default)]
+    pub capabilities: Vec<Capability>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RegisterResponse {
+    pub id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HeartbeatResponse {
+    pub online: bool,
+    /// True when this heartbeat transitioned the device from offline → online.
+    pub restored: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ListQuery {
+    /// If set, filter by online status.
+    pub online: Option<bool>,
+    /// If set, filter to devices that declare this capability name.
+    pub capability: Option<String>,
+}
+
+pub fn route() -> Router<AppState> {
+    Router::new()
+        .route("/devices", post(register).get(list))
+        .route("/devices/{id}", get(get_device).delete(unregister))
+        .route("/devices/{id}/heartbeat", put(heartbeat))
+        .route("/devices/{id}/capabilities", patch(update_capabilities))
+}
+
+async fn register(
+    State(state): State<AppState>,
+    Json(req): Json<RegisterRequest>,
+) -> Result<(StatusCode, Json<RegisterResponse>)> {
+    if req.service_url.is_empty() {
+        return Err(AppError::throw("service_url is required"));
+    }
+    let now = Utc::now();
+    let id = req.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let device = Device {
+        id: id.clone(),
+        service_url: req.service_url,
+        capabilities: req.capabilities,
+        last_heartbeat: now,
+        registered_at: now,
+        online: true,
+    };
+    let device = state.store.register(device)?;
+    state.events.publish_online(&device);
+    Ok((StatusCode::CREATED, Json(RegisterResponse { id })))
+}
+
+async fn heartbeat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<HeartbeatResponse>> {
+    match state.store.heartbeat(&id)? {
+        Some((device, was_offline)) => {
+            if was_offline {
+                state.events.publish_online(&device);
+            } else {
+                state.events.publish_heartbeat(&device.id);
+            }
+            Ok(Json(HeartbeatResponse {
+                online: true,
+                restored: was_offline,
+            }))
+        }
+        None => Err(AppError::not_found(format!("device '{id}' not found"))),
+    }
+}
+
+async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>) -> Json<Vec<Device>> {
+    let devices = state.store.list();
+    let filtered = devices
+        .into_iter()
+        .filter(|d| q.online.is_none_or(|o| d.online == o))
+        .filter(|d| {
+            q.capability
+                .as_ref()
+                .is_none_or(|cap| d.capabilities.iter().any(|c| &c.name == cap))
+        })
+        .collect();
+    Json(filtered)
+}
+
+async fn get_device(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Device>> {
+    match state.store.get(&id) {
+        Some(d) => Ok(Json(d)),
+        None => Err(AppError::not_found(format!("device '{id}' not found"))),
+    }
+}
+
+async fn update_capabilities(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(caps): Json<Vec<Capability>>,
+) -> Result<Json<Device>> {
+    match state.store.update_capabilities(&id, caps)? {
+        Some(device) => {
+            state.events.publish_online(&device);
+            Ok(Json(device))
+        }
+        None => Err(AppError::not_found(format!("device '{id}' not found"))),
+    }
+}
+
+async fn unregister(State(state): State<AppState>, Path(id): Path<String>) -> Result<StatusCode> {
+    match state.store.remove(&id)? {
+        Some(device) => {
+            state.events.publish_offline(&device);
+            Ok(StatusCode::NO_CONTENT)
+        }
+        None => Err(AppError::not_found(format!("device '{id}' not found"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    use axum::Router;
+    use axum::body::Body;
+    use chrono::Utc;
+    use http::{Method, Request, StatusCode};
+    use tower::ServiceExt;
+
+    use crate::events::NoopSink;
+    use crate::route::AppState;
+    use crate::store::{Capability, Device, DeviceStore};
+
+    fn make_state() -> (AppState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(DeviceStore::open(dir.path().join("test.redb")).unwrap());
+        let state = AppState {
+            config: crate::config::Config::default(),
+            store,
+            http_client: reqwest::Client::new(),
+            events: Arc::new(NoopSink),
+        };
+        (state, dir)
+    }
+
+    fn registered_device(state: &AppState, id: &str, caps: &[&str]) -> Device {
+        let now = Utc::now();
+        let device = Device {
+            id: id.to_string(),
+            service_url: "http://robot:9000".to_string(),
+            capabilities: caps
+                .iter()
+                .map(|name| Capability {
+                    name: name.to_string(),
+                    description: None,
+                    method: "POST".to_string(),
+                    path: format!("/{name}"),
+                    tags: vec![],
+                    input_schema: None,
+                })
+                .collect(),
+            last_heartbeat: now,
+            registered_at: now,
+            online: true,
+        };
+        state.store.register(device.clone()).unwrap();
+        device
+    }
+
+    #[tokio::test]
+    async fn patch_capabilities_updates_device() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "d1", &["move"]);
+
+        let app = Router::new().merge(route()).with_state(state.clone());
+        let new_caps = serde_json::json!([
+            { "name": "grip", "path": "/grip", "method": "POST" }
+        ]);
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/capabilities")
+            .header("content-type", "application/json")
+            .body(Body::from(new_caps.to_string()))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let caps = json["capabilities"].as_array().unwrap();
+        assert_eq!(caps.len(), 1);
+        assert_eq!(caps[0]["name"], "grip");
+
+        // Old capability is gone from the index.
+        assert!(state.store.find_by_capability("move").is_empty());
+        assert_eq!(state.store.find_by_capability("grip").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn patch_capabilities_unknown_device_returns_404() {
+        let (state, _dir) = make_state();
+        let app = Router::new().merge(route()).with_state(state);
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/no-such-device/capabilities")
+            .header("content-type", "application/json")
+            .body(Body::from("[]"))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn list_devices_filters_by_online() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "online-dev", &["move"]);
+        // Register an offline device directly.
+        let now = Utc::now();
+        state
+            .store
+            .register(Device {
+                id: "offline-dev".to_string(),
+                service_url: "http://offline:9000".to_string(),
+                capabilities: vec![],
+                last_heartbeat: now,
+                registered_at: now,
+                online: false,
+            })
+            .unwrap();
+
+        let app = Router::new().merge(route()).with_state(state);
+        let req = Request::builder()
+            .uri("/devices?online=true")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let devices = json.as_array().unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0]["id"], "online-dev");
+    }
+
+    #[tokio::test]
+    async fn list_devices_filters_by_capability() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "d-move", &["move"]);
+        registered_device(&state, "d-grip", &["grip"]);
+
+        let app = Router::new().merge(route()).with_state(state);
+        let req = Request::builder()
+            .uri("/devices?capability=move")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let devices = json.as_array().unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0]["id"], "d-move");
+    }
+}

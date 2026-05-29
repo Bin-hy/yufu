@@ -37,14 +37,13 @@ async fn test_http_cluster() {
         Config {
             http: Http {
                 listen: SocketAddr::new(ip, 0),
-                ..Default::default()
             },
             net4mqtt: Some(Net4mqtt {
                 alias: format!("test-cobotlet-{}", i),
-                mqtt_url: format!(
+                mqtt_url: Some(format!(
                     "mqtt://{}/{}?client_id=test-cobotlet-{}",
                     broker_addr, MQTT_TOPIC_PREFIX, i
-                ),
+                )),
             }),
             ..Default::default()
         }
@@ -60,7 +59,8 @@ async fn test_http_cluster() {
 
     let results = futures::future::join_all(rs).await;
 
-    let mut cfg = {
+    // cobotsrv (management center) — handles remote proxy to cobotlets
+    let mut cobotsrv_cfg = {
         use cobotsrv::config::{Config, Http};
         Config {
             http: Http {
@@ -70,13 +70,7 @@ async fn test_http_cluster() {
             ..Default::default()
         }
     };
-    let test_root = format!("target/test-artifacts/{}", uuid::Uuid::new_v4());
-    let rsa_private_key_path = format!("{test_root}/oidc_rsa_private.pem");
-    cfg.oidc.rsa_private_key_path = rsa_private_key_path.clone();
-    cfg.auth.rsa_private_key_path = rsa_private_key_path;
-    cfg.storage.root_dir = format!("{test_root}/storage");
-
-    cfg.nodes.extend(
+    cobotsrv_cfg.nodes.extend(
         results
             .into_iter()
             .map(|(alias, addr)| cobotsrv::config::Node {
@@ -86,9 +80,9 @@ async fn test_http_cluster() {
             }),
     );
 
-    let listener = TcpListener::bind(cfg.http.listen).await.unwrap();
+    let listener = TcpListener::bind(cobotsrv_cfg.http.listen).await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(cobotsrv::serve(cfg, listener, shutdown_signal()));
+    tokio::spawn(cobotsrv::serve(cobotsrv_cfg, listener, shutdown_signal()));
 
     let rs = devices.map(async |cfg| {
         let id = cfg.net4mqtt.unwrap().alias;

@@ -1,5 +1,5 @@
 [package]
-name = "cobotrix"
+name = "cobotrix-root"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,11 +17,23 @@ name = "cobotlet"
 path = "src/cobotlet.rs"
 
 [[bin]]
+name = "cobotusr"
+path = "src/cobotusr.rs"
+
+[[bin]]
 name = "cobotsrv"
 path = "src/cobotsrv.rs"
 
+[[bin]]
+name = "cobotrix"
+path = "src/cobotrix.rs"
+
+[[bin]]
+name = "cobotset"
+path = "src/cobotset.rs"
+
 [workspace]
-members = [".", "cobotlet", "cobotsrv", "libs/auth"]
+members = [".", "cobotlet", "cobotset", "cobotusr", "cobotsrv", "libs/auth"]
 
 [workspace.package]
 version = "0.0.0"
@@ -58,7 +70,12 @@ chrono = "0.4"
 
 utoipa-axum = "0.2"
 utoipa = { version = "5.4", features = ["axum_extras"] }
+utoipa-swagger-ui = {version = "9.0", features = ["axum"]}
 uuid = {version = "1.18.1", features = ["v4"]}
+
+redb = "4"
+rumqttc = "0.24"
+dashmap = "6"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
@@ -66,7 +83,7 @@ tokio = { workspace = true, features = ["fs"] }
 net4mqtt = { workspace = true, features = ["test-utils"] }
 tracing = { workspace = true }
 serde = { workspace = true }
-anyhow ={ workspace = true }
+anyhow = { workspace = true }
 uuid =  { workspace = true }
 auth = { workspace = true }
 
@@ -76,6 +93,8 @@ testcontainers = {version = "0.25.0", features = ["blocking"]}
 testcontainers-modules = { version = "0.13.0", features = ["postgres"] }
 
 cobotlet = { path = "cobotlet" }
+cobotset = { path = "cobotset" }
+cobotusr = { path = "cobotusr" }
 cobotsrv = { path = "cobotsrv" }
 signal = { workspace = true }
 
@@ -88,7 +107,7 @@ tokio-tungstenite = "0.28"
 
 [features]
 default = ["net4mqtt"]
-webui = ["cobotlet/webui", "cobotsrv/webui"]
-net4mqtt = ["cobotlet/net4mqtt", "cobotsrv/net4mqtt"]
-openapi= ["cobotsrv/openapi"]
+webui = ["cobotlet/webui", "cobotusr/webui", "cobotsrv/webui"]
+net4mqtt = ["cobotlet/net4mqtt", "cobotusr/net4mqtt", "cobotsrv/net4mqtt"]
+openapi = ["cobotusr/openapi"]
 

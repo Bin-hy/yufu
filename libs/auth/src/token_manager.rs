@@ -1,4 +1,4 @@
-use crate::claims::{Claims, IdTokenClaims, RefreshClaims};
+use crate::claims::{AccessTokenClaims, Claims, IdTokenClaims, RefreshClaims};
 
 use chrono::{Duration, Utc};
 use jsonwebtoken::errors::ErrorKind;
@@ -7,6 +7,7 @@ use jsonwebtoken::{
     errors::Result as JwtResult,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Token manager for centralized creation and validation of JWT tokens.
 #[derive(Clone)]
@@ -227,6 +228,7 @@ fn compute_at_hash(access_token: Option<&str>) -> Option<String> {
 #[derive(Clone)]
 pub struct IdTokenSigner {
     rsa_encoding_key: Option<EncodingKey>,
+    rsa_decoding_key: Option<DecodingKey>,
     rsa_public_key_der: Option<Vec<u8>>, // for JWKS
     hmac_secret: String,
     pub expire_seconds: i64,
@@ -239,7 +241,7 @@ impl IdTokenSigner {
         let encoding_key = EncodingKey::from_rsa_pem(pem)
             .map_err(|e| format!("Failed to parse RSA private key: {}", e))?;
 
-        // Extract public key DER for JWKS
+        // Extract public key DER for JWKS + a DecodingKey for self-verify
         use rsa::pkcs8::DecodePrivateKey;
         let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(
             std::str::from_utf8(pem).map_err(|e| format!("Invalid UTF-8 in PEM: {}", e))?,
@@ -251,8 +253,18 @@ impl IdTokenSigner {
             .to_pkcs1_der()
             .map_err(|e| format!("Failed to encode public key: {}", e))?;
 
+        use base64::Engine;
+        use rsa::traits::PublicKeyParts;
+        let n_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be());
+        let e_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be());
+        let decoding_key = DecodingKey::from_rsa_components(&n_b64, &e_b64)
+            .map_err(|e| format!("Failed to build RSA decoding key: {}", e))?;
+
         Ok(Self {
             rsa_encoding_key: Some(encoding_key),
+            rsa_decoding_key: Some(decoding_key),
             rsa_public_key_der: Some(pub_der.as_bytes().to_vec()),
             hmac_secret: String::new(),
             expire_seconds,
@@ -264,6 +276,7 @@ impl IdTokenSigner {
     pub fn from_hmac(secret: &str, expire_seconds: i64) -> Self {
         Self {
             rsa_encoding_key: None,
+            rsa_decoding_key: None,
             rsa_public_key_der: None,
             hmac_secret: secret.to_string(),
             expire_seconds,
@@ -314,6 +327,87 @@ impl IdTokenSigner {
                 &claims,
                 &EncodingKey::from_secret(self.hmac_secret.as_bytes()),
             )
+        }
+    }
+
+    /// Sign a standard JWT access token (RFC 7519 claims) with RS256 (or HS256 fallback).
+    ///
+    /// `aud` is the application/client this token is intended for; consumers should verify it.
+    /// `roles` and `permissions` are embedded so downstream services can make coarse-grained
+    /// local decisions without calling the PDP on every request.
+    /// Returns the encoded token. `jti` is generated as a fresh UUID v4.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sign_access_token(
+        &self,
+        sub: &str,
+        iss: &str,
+        aud: &str,
+        scope: &str,
+        ttl_seconds: i64,
+        roles: Vec<String>,
+        permissions: Vec<String>,
+    ) -> JwtResult<String> {
+        let now = Utc::now();
+        let exp = now + Duration::seconds(ttl_seconds);
+        let claims = AccessTokenClaims {
+            iss: iss.to_string(),
+            sub: sub.to_string(),
+            aud: aud.to_string(),
+            iat: now.timestamp() as u64,
+            exp: exp.timestamp() as u64,
+            jti: Uuid::new_v4().to_string(),
+            scope: scope.to_string(),
+            roles,
+            permissions,
+        };
+
+        if let Some(ref rsa_key) = self.rsa_encoding_key {
+            let mut header = Header::new(Algorithm::RS256);
+            header.kid = Some(self.kid.clone());
+            encode(&header, &claims, rsa_key)
+        } else {
+            encode(
+                &Header::default(),
+                &claims,
+                &EncodingKey::from_secret(self.hmac_secret.as_bytes()),
+            )
+        }
+    }
+
+    /// Verify a JWT access token using this signer's own key.
+    ///
+    /// Used by cobotsrv to verify its own tokens locally (no JWKS round-trip).
+    /// Other services should use [`crate::jwks::JwksClient`] instead.
+    /// `expected_aud` — if Some, requires the token's `aud` claim to match exactly.
+    pub fn verify_access_token(
+        &self,
+        token: &str,
+        expected_aud: Option<&str>,
+    ) -> Result<AccessTokenClaims, TokenError> {
+        let mut validation = if self.is_rsa() {
+            Validation::new(Algorithm::RS256)
+        } else {
+            Validation::new(Algorithm::HS256)
+        };
+        match expected_aud {
+            Some(a) => validation.set_audience(&[a]),
+            None => validation.validate_aud = false,
+        }
+
+        let key = if let Some(ref dk) = self.rsa_decoding_key {
+            dk.clone()
+        } else {
+            DecodingKey::from_secret(self.hmac_secret.as_bytes())
+        };
+
+        match decode::<AccessTokenClaims>(token, &key, &validation) {
+            Ok(data) => Ok(data.claims),
+            Err(err) => match *err.kind() {
+                ErrorKind::ExpiredSignature => Err(TokenError::Expired),
+                ErrorKind::InvalidSignature => Err(TokenError::InvalidSignature),
+                ErrorKind::InvalidToken => Err(TokenError::InvalidToken),
+                _ => Err(TokenError::Other(err.to_string())),
+            },
         }
     }
 

@@ -7,23 +7,96 @@ pub struct Config {
     #[serde(default)]
     pub http: Http,
     #[serde(default)]
+    pub log: Log,
+    #[serde(default)]
     pub auth: Auth,
     #[serde(default)]
-    pub oidc: Oidc,
-    #[serde(default)]
-    pub log: Log,
+    pub database: Database,
 
     #[cfg(feature = "net4mqtt")]
     #[serde(default)]
     pub net4mqtt: Option<Net4mqtt>,
 
     #[serde(default)]
+    pub mqtt: Option<Mqtt>,
+
+    #[serde(default)]
+    pub task: Task,
+
+    #[serde(default)]
     pub nodes: Vec<Node>,
-    // database config
+
+    /// Permissions that cobotsrv requires. At startup cobotsrv syncs these to
+    /// cobotusr so the admin can assign them to roles without manual creation.
+    /// Each entry: `{ name, action, resource_type?, resource_pattern? }`
     #[serde(default)]
-    pub database: Database,
+    pub permissions: Vec<PermissionSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PermissionSpec {
+    /// Canonical name, e.g. "device:read", "task:execute"
+    pub name: String,
+    /// Verb / capability, e.g. "read", "submit"
+    pub action: String,
+    /// Object class, e.g. "device", "task". None = action only.
     #[serde(default)]
-    pub storage: Storage,
+    pub resource_type: Option<String>,
+    /// Glob pattern, e.g. "*", "cobotlet-0:*". Default: "*"
+    #[serde(default = "default_resource_pattern")]
+    pub resource_pattern: Option<String>,
+}
+
+fn default_resource_pattern() -> Option<String> {
+    Some("*".to_string())
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Mqtt {
+    pub url: String,
+    #[serde(default = "default_mqtt_client_id")]
+    pub client_id: String,
+    #[serde(default = "default_mqtt_topic_prefix")]
+    pub topic_prefix: String,
+    #[serde(default = "default_mqtt_keep_alive_secs")]
+    pub keep_alive_secs: u64,
+}
+
+fn default_mqtt_client_id() -> String {
+    String::from("cobotrix")
+}
+
+fn default_mqtt_topic_prefix() -> String {
+    String::from("cobotrix")
+}
+
+fn default_mqtt_keep_alive_secs() -> u64 {
+    30
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Task {
+    #[serde(default = "default_task_wait_timeout_ms")]
+    pub wait_timeout_ms: u64,
+    #[serde(default = "default_task_result_cache_ttl_secs")]
+    pub result_cache_ttl_secs: u64,
+}
+
+impl Default for Task {
+    fn default() -> Self {
+        Self {
+            wait_timeout_ms: default_task_wait_timeout_ms(),
+            result_cache_ttl_secs: default_task_result_cache_ttl_secs(),
+        }
+    }
+}
+
+fn default_task_wait_timeout_ms() -> u64 {
+    5000
+}
+
+fn default_task_result_cache_ttl_secs() -> u64 {
+    300
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,107 +157,10 @@ pub struct Http {
     pub listen: SocketAddr,
     #[serde(default)]
     pub public: String,
-    #[serde(default = "default_api_prefix")]
-    pub api_prefix: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Auth {
-    #[serde(default = "default_auth_secret")]
-    pub secret: String,
-    #[serde(default)]
-    pub tokens: Vec<String>,
-    #[serde(default)]
-    pub accounts: Vec<Account>,
-    #[serde(default = "default_auth_expire_seconds")]
-    pub exp_seconds: i64, // set token exp time, unit :seconds, default 2h
-    #[serde(default = "default_refresh_expire_seconds")]
-    pub refresh_exp_seconds: i64,
-    #[serde(default = "default_origins")]
-    pub origins: Vec<String>,
-    #[serde(default = "default_super_admin")]
-    pub super_admin: Account,
-    /// Path to RSA private key PEM file for OIDC ID Token signing.
-    /// Defaults to `conf/oidc_rsa_private.pem`. If the file does not exist, auto-generates.
-    #[serde(default = "default_rsa_private_key_path")]
-    pub rsa_private_key_path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Account {
-    #[serde(default)]
-    pub username: String,
-    #[serde(default)]
-    pub password: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Log {
-    #[serde(default = "default_log_level")]
-    pub level: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Database {
-    #[serde(default = "default_db_url")]
-    pub url: String,
-    #[serde(default = "default_db_max_connections")]
-    pub max_connections: u32,
-    #[serde(default = "default_db_connect_timeout")]
-    pub connect_timeout: u64,
-}
-
-impl Default for Database {
-    fn default() -> Self {
-        Self {
-            url: default_db_url(),
-            max_connections: default_db_max_connections(),
-            connect_timeout: default_db_connect_timeout(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Storage {
-    #[serde(default = "default_storage_root_dir")]
-    pub root_dir: String,
-}
-
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            root_dir: default_storage_root_dir(),
-        }
-    }
-}
-
-fn default_db_url() -> String {
-    env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/postgres".to_string())
-}
-
-fn default_db_max_connections() -> u32 {
-    10
-}
-
-fn default_db_connect_timeout() -> u64 {
-    30
-}
-
-fn default_storage_root_dir() -> String {
-    "storage".to_string()
-}
-
-fn default_http_listen() -> SocketAddr {
-    SocketAddr::from_str(&format!(
-        "0.0.0.0:{}",
-        env::var("PORT").unwrap_or(String::from("4000"))
-    ))
-    .expect("invalid listen address")
-}
-
-fn default_api_prefix() -> String {
-    "/api/v1".to_string()
+    /// Allowed CORS origins. Default: `["*"]`.
+    /// Set to specific origins if cobotsrv is directly exposed.
+    #[serde(default = "default_cors_origins")]
+    pub cors_origins: Vec<String>,
 }
 
 impl Default for Http {
@@ -192,9 +168,27 @@ impl Default for Http {
         Self {
             listen: default_http_listen(),
             public: Default::default(),
-            api_prefix: default_api_prefix(),
+            cors_origins: default_cors_origins(),
         }
     }
+}
+
+fn default_http_listen() -> SocketAddr {
+    SocketAddr::from_str(&format!(
+        "0.0.0.0:{}",
+        env::var("PORT").unwrap_or(String::from("4001"))
+    ))
+    .expect("invalid listen address")
+}
+
+fn default_cors_origins() -> Vec<String> {
+    vec!["*".to_string()]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Log {
+    #[serde(default = "default_log_level")]
+    pub level: String,
 }
 
 impl Default for Log {
@@ -215,78 +209,110 @@ fn default_log_level() -> String {
     })
 }
 
-fn default_auth_secret() -> String {
-    env::var("AUTH_SECRET")
-        .unwrap_or_else(|_| "qwertyuiop.asdfghjkl.zxcvbnm.1234567890-=".to_string())
+/// JWT verification settings. cobotsrv is an OIDC client of cobotusr: it pulls
+/// cobotusr's public key from the JWKS endpoint at startup and uses it to verify
+/// every incoming Bearer token. No shared secret — Phase 1 (RS256) of the auth
+/// roadmap.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Auth {
+    /// OIDC client_id registered at cobotusr. Used for client_credentials grant
+    /// when syncing permissions at startup. Default: `"cobotsrv"`.
+    #[serde(default = "default_client_id")]
+    pub client_id: String,
+    /// OIDC client_secret matching cobotusr's bootstrap client config.
+    /// Required for client_credentials grant.
+    #[serde(default)]
+    pub client_secret: String,
+    /// JWKS endpoint URL. Default: `{cobotusr_base}/.well-known/jwks.json`.
+    #[serde(default = "default_jwks_url")]
+    pub jwks_url: String,
+    /// If set, only tokens with `aud` matching this value are accepted.
+    /// Defaults to `"cobotsrv"` — cobotsrv only accepts tokens issued for itself.
+    #[serde(default = "default_expected_audience")]
+    pub expected_audience: String,
+    /// JWKS background refresh interval in seconds (default: 5 min).
+    #[serde(default = "default_jwks_refresh_secs")]
+    pub jwks_refresh_secs: u64,
+    /// When true, route-level `require_perm!` layers are applied on protected routes.
+    /// Default true — cobotsrv enforces permissions based on token claims.
+    #[serde(default = "default_require_permissions")]
+    pub require_permissions: bool,
 }
 
-fn default_auth_expire_seconds() -> i64 {
-    7200
-}
-
-fn default_refresh_expire_seconds() -> i64 {
-    7 * 24 * 3600
-}
-
-fn default_super_admin() -> Account {
-    Account {
-        username: "sadmin".to_string(),
-        password: "sadmin".to_string(),
+impl Auth {
+    /// Derive cobotusr's base URL from the JWKS URL by stripping the
+    /// `/.well-known/jwks.json` suffix. Used by `EnforceClient` to call
+    /// cobotusr's PDP enforce endpoint.
+    pub fn cobotusr_base_url(&self) -> String {
+        self.jwks_url
+            .trim_end_matches("/.well-known/jwks.json")
+            .to_string()
     }
 }
 
-fn default_origins() -> Vec<String> {
-    vec!["http://localhost:5173".to_string()]
-}
-
-fn default_rsa_private_key_path() -> String {
-    "conf/oidc_rsa_private.local.pem".to_string()
-}
-
-// ---------------------------------------------------------------------------
-// OIDC Configuration
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Oidc {
-    /// Public-facing issuer URL for OIDC discovery document.
-    /// If empty, derived from `http.listen` with wildcard addresses replaced by localhost.
-    /// Example: "https://auth.example.com"
-    #[serde(default)]
-    pub issuer: String,
-
-    /// Path to RSA private key PEM file for ID Token signing (RS256).
-    /// If the file does not exist, a 2048-bit key pair will be auto-generated.
-    #[serde(default = "default_rsa_private_key_path")]
-    pub rsa_private_key_path: String,
-
-    /// Access token lifetime in seconds (default: uses auth.exp_seconds for backward compat).
-    /// If set, overrides auth.exp_seconds for OIDC tokens specifically.
-    #[serde(default)]
-    pub access_token_expire_seconds: Option<i64>,
-
-    /// Refresh token lifetime in seconds (default: uses auth.refresh_exp_seconds for backward compat).
-    #[serde(default)]
-    pub refresh_token_expire_seconds: Option<i64>,
-
-    /// Default email domain used when a user has no email set.
-    /// UserInfo will return "{username}@{email_domain}".
-    #[serde(default = "default_oidc_email_domain")]
-    pub email_domain: String,
-}
-
-impl Default for Oidc {
+impl Default for Auth {
     fn default() -> Self {
         Self {
-            issuer: String::new(),
-            rsa_private_key_path: default_rsa_private_key_path(),
-            access_token_expire_seconds: None,
-            refresh_token_expire_seconds: None,
-            email_domain: default_oidc_email_domain(),
+            client_id: default_client_id(),
+            client_secret: String::new(),
+            jwks_url: default_jwks_url(),
+            expected_audience: default_expected_audience(),
+            jwks_refresh_secs: default_jwks_refresh_secs(),
+            require_permissions: default_require_permissions(),
         }
     }
 }
 
-fn default_oidc_email_domain() -> String {
-    "cobotrix.local".to_string()
+fn default_jwks_url() -> String {
+    env::var("COBOTSRV_JWKS_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:4000/.well-known/jwks.json".to_string())
+}
+
+fn default_client_id() -> String {
+    "cobotsrv".to_string()
+}
+
+fn default_expected_audience() -> String {
+    "cobotsrv".to_string()
+}
+
+fn default_require_permissions() -> bool {
+    true
+}
+
+fn default_jwks_refresh_secs() -> u64 {
+    300
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Database {
+    #[serde(default = "default_db_url")]
+    pub url: String,
+    #[serde(default = "default_db_max_connections")]
+    pub max_connections: u32,
+    #[serde(default = "default_db_connect_timeout")]
+    pub connect_timeout: u64,
+}
+
+impl Default for Database {
+    fn default() -> Self {
+        Self {
+            url: default_db_url(),
+            max_connections: default_db_max_connections(),
+            connect_timeout: default_db_connect_timeout(),
+        }
+    }
+}
+
+fn default_db_url() -> String {
+    env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/postgres".to_string())
+}
+
+fn default_db_max_connections() -> u32 {
+    10
+}
+
+fn default_db_connect_timeout() -> u64 {
+    30
 }

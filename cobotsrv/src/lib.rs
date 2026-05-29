@@ -1,34 +1,24 @@
-use axum::body::Body;
-use axum::extract::State;
-#[cfg(feature = "openapi")]
-use axum::{Json, response::Html, routing::get};
-use axum::{Router, extract::Request, middleware, response::IntoResponse};
+use auth::access_middleware_rs256;
+use auth::jwks::JwksClient;
+use axum::Router;
+use axum::extract::Request;
+use axum::middleware;
+use axum::response::IntoResponse;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderValue, Method, StatusCode, Uri};
 use reqwest::Client;
-use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::sync::Arc;
 use std::{future::Future, time::Duration};
 use tokio::net::TcpListener;
 
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{error, info, info_span, warn};
+use tracing::{error, info, info_span};
 
 use crate::config::Config;
-use crate::entity::role::RoleEnum;
-use crate::entity::user;
-use crate::modules::im::service::{
-    ConnectionManager, ImEvents, WsHandle, event_channel, spawn_event_service,
-};
-use crate::rbac::authority_check_middleware_rbac_abac;
-use crate::route::get_no_prefix_routes;
-use crate::service::authority::Service;
+use crate::route::{get_protected_routes, get_public_routes};
 use crate::service::database::DatabaseService;
 use crate::store::{Node, NodeKind, Storage};
-use auth::claims::Claims;
-use auth::token_manager::IdTokenSigner;
-use auth::{AuthState, access_middleware_with_callback};
 
 #[cfg(feature = "webui")]
 #[derive(rust_embed::RustEmbed)]
@@ -36,24 +26,24 @@ use auth::{AuthState, access_middleware_with_callback};
 struct Assets;
 
 pub mod config;
+pub mod enforce;
 pub mod entity;
 pub mod error;
 mod migration;
-pub mod modules;
-pub mod rbac;
-mod recording_middleware;
+pub mod mqtt;
 mod result;
 pub mod route;
-mod seed;
 pub mod service;
 mod store;
-mod swagger_docs;
 
 pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    info!("Server listening on {}", listener.local_addr().unwrap());
+    info!(
+        "CoBotrix management center listening on {}",
+        listener.local_addr().unwrap()
+    );
     let client_req = Client::builder();
     let client_mem = Client::builder()
         .connect_timeout(Duration::from_millis(500))
@@ -62,7 +52,6 @@ where
     #[cfg(feature = "net4mqtt")]
     let (client_req, client_mem) = if let Some(proxy) = match cfg.net4mqtt.clone() {
         Some(c) => {
-            // References: https://github.com/seanmonstar/reqwest/issues/899
             let target = reqwest::Url::parse(&format!("socks5h://{}", c.listen)).unwrap();
             Some(reqwest::Proxy::custom(move |url| match url.host_str() {
                 Some(host) => {
@@ -99,6 +88,7 @@ where
     migration::Migrator::up(&database_service.connection, None)
         .await
         .unwrap();
+
     #[cfg(feature = "net4mqtt")]
     {
         if let Some(mut c) = cfg.net4mqtt.clone() {
@@ -169,128 +159,84 @@ where
         }
     }
 
-    // Middleware and AppState
-    let auth_state = AuthState {
-        token_manager: auth::token_manager::TokenManager::new(
-            &cfg.auth.secret,
-            cfg.auth.exp_seconds,
-        ),
-        refresh_token_manager: auth::token_manager::TokenManager::new(
-            &cfg.auth.secret,
-            cfg.auth.refresh_exp_seconds,
-        ),
-    };
+    let database = Arc::new(database_service);
 
-    // Initialize IdTokenSigner: load RSA key from file or auto-generate
-    let id_token_signer = {
-        // Prefer oidc.rsa_private_key_path, fall back to auth.rsa_private_key_path
-        let key_path = if !cfg.oidc.rsa_private_key_path.is_empty() {
-            cfg.oidc.rsa_private_key_path.clone()
-        } else {
-            cfg.auth.rsa_private_key_path.clone()
-        };
-        let token_exp = cfg
-            .oidc
-            .access_token_expire_seconds
-            .unwrap_or(cfg.auth.exp_seconds);
-        match tokio::fs::read(&key_path).await {
-            Ok(pem) => {
-                info!("Loaded RSA private key from {}", key_path);
-                IdTokenSigner::from_rsa_pem(&pem, token_exp)
-                    .expect("Failed to parse RSA private key")
+    let mqtt_handle = if let Some(mqtt_cfg) = cfg.mqtt.clone() {
+        let conn = Arc::new(database.connection.clone());
+        match mqtt::spawn(&mqtt_cfg, conn, cfg.task.result_cache_ttl_secs).await {
+            Ok(rt) => {
+                info!(url = %mqtt_cfg.url, "cobotsrv mqtt connected");
+                Some(rt.handle)
             }
-            Err(_) => {
-                info!(
-                    "RSA key not found at {}, generating new key pair...",
-                    key_path
-                );
-                use rsa::pkcs8::EncodePrivateKey;
-                let mut rng = rand::rngs::OsRng;
-                let private_key =
-                    rsa::RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate RSA key");
-                let pem_str = private_key
-                    .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-                    .expect("Failed to encode RSA key to PEM");
-                // Save to file for persistence
-                if let Some(parent) = std::path::Path::new(&key_path).parent() {
-                    let _ = tokio::fs::create_dir_all(parent).await;
-                }
-                tokio::fs::write(&key_path, pem_str.as_bytes())
-                    .await
-                    .expect("Failed to write RSA key file");
-                info!("Generated and saved RSA key to {}", key_path);
-                IdTokenSigner::from_rsa_pem(pem_str.as_bytes(), token_exp)
-                    .expect("Failed to parse generated RSA key")
+            Err(e) => {
+                tracing::warn!(error = %e, "cobotsrv mqtt connect failed; tasks API will return errors");
+                None
             }
         }
+    } else {
+        None
     };
-
-    let ws_handle = Arc::new(ConnectionManager::new());
-    let (im_events, im_event_receiver) = event_channel();
-    let _im_event_service = spawn_event_service(
-        database_service.connection.clone(),
-        ws_handle.clone(),
-        im_event_receiver,
-    );
 
     let app_state = AppState {
         config: cfg.clone(),
         client: client_req.build().unwrap(),
         storage: store,
-        database: Arc::new(database_service),
-        auth_state: Arc::new(auth_state.clone()),
-        id_token_signer: Arc::new(id_token_signer),
-        im_events,
-        ws_handle,
+        database: database.clone(),
+        mqtt: mqtt_handle,
     };
-    let _ = app_state.init().await;
-    let app_state_for_middleware = app_state.clone();
-    // routes need auth
-    let sub_auth_router = route::get_auth_routes()
-        .layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            recording_middleware::recording_operation_middleware,
+
+    // JWT verification (Phase 1): pull cobotusr's public key from JWKS, verify RS256.
+    // Hard-fail at startup if the JWKS is unreachable — running an unauthenticated cobotsrv
+    // is worse than refusing to start.
+    let jwks = Arc::new(
+        JwksClient::new(&cfg.auth.jwks_url, Some(cfg.auth.expected_audience.clone()))
+            .await
+            .expect("failed to fetch cobotusr JWKS at startup"),
+    );
+    jwks.spawn_refresher(cfg.auth.jwks_refresh_secs);
+
+    // Sync required permissions to cobotusr so the admin can assign them.
+    sync_permissions(&cfg).await;
+
+    // PDP-based permission enforcement. When `auth.require_permissions = true`
+    // (the default), EnforceClient is injected so `require_perm!` calls
+    // cobotusr's `/api/v1/enforce` at request time (cached, TTL 10 s).
+    // When false the middleware layer is omitted entirely and `require_perm!`
+    // falls back to JWT-embedded permissions (or allows all if absent).
+    async fn enforce_injector(
+        enforce: axum::extract::State<Arc<dyn auth::PermissionChecker>>,
+        mut request: Request,
+        next: middleware::Next,
+    ) -> impl IntoResponse {
+        request.extensions_mut().insert(enforce.0.clone());
+        next.run(request).await
+    }
+
+    let protected = if cfg.auth.require_permissions {
+        let enforce_client: Arc<dyn auth::PermissionChecker> = Arc::new(
+            enforce::EnforceClient::new(cfg.auth.cobotusr_base_url(), 10),
+        );
+        get_protected_routes()
+            .layer(middleware::from_fn_with_state(
+                enforce_client,
+                enforce_injector,
+            ))
+            .layer(middleware::from_fn_with_state(
+                jwks.clone(),
+                access_middleware_rs256,
+            ))
+    } else {
+        get_protected_routes().layer(middleware::from_fn_with_state(
+            jwks.clone(),
+            access_middleware_rs256,
         ))
-        .layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            authority_check_middleware_rbac_abac,
-        ))
-        .layer(middleware::from_fn_with_state(
-            auth_state.clone(),
-            move |State(auth_state): State<AuthState>, req, next| {
-                let auth_state = auth_state.clone();
-                let app_state = app_state_for_middleware.clone(); // Arc clone
+    };
 
-                async move {
-                    access_middleware_with_callback(
-                        State(auth_state),
-                        req,
-                        next,
-                        move |claims, req| {
-                            let claims = claims.clone();
-                            let app_state = app_state.clone();
-                            async move {
-                                // 调用 access_callback 获取 Request 所有权
-                                let req = access_callback(claims, req, app_state).await?;
-                                Ok::<Request<Body>, (StatusCode, String)>(req)
-                            }
-                        },
-                    )
-                    .await
-                }
-            },
-        )); // 靠下的拦截器先执行
-
-    // routes don't need auth,public routes
-    let sub_public_router = route::get_public_routes();
-
-    let api_prefix = &cfg.http.api_prefix;
     let app = Router::new()
-        .nest(api_prefix, sub_auth_router)
-        .nest(api_prefix, sub_public_router)
-        .merge(get_no_prefix_routes())
+        .merge(protected)
+        .merge(get_public_routes())
         .layer({
-            let origins: Vec<String> = app_state.clone().config.auth.origins;
+            let origins: Vec<String> = app_state.config.http.cors_origins.clone();
             let has_wildcard = origins.iter().any(|o| o == "*");
             let cors_layer = CorsLayer::new()
                 .allow_credentials(true)
@@ -304,12 +250,8 @@ where
                 ]);
 
             if has_wildcard {
-                // Mirror the request Origin header back (credentials-compatible wildcard).
-                // `Access-Control-Allow-Origin: *` is forbidden when credentials are used,
-                // so we echo the actual Origin instead.
                 cors_layer.allow_origin(tower_http::cors::AllowOrigin::mirror_request())
             } else {
-                // Use predicate to match request Origin against allowed origins list
                 cors_layer.allow_origin(tower_http::cors::AllowOrigin::predicate(
                     move |origin: &HeaderValue, _request_head: &http::request::Parts| {
                         if let Ok(origin_str) = origin.to_str() {
@@ -322,7 +264,7 @@ where
             }
         })
         .with_state(app_state.clone())
-        .layer(axum::middleware::from_fn(print_request_response))
+        .layer(axum::middleware::from_fn(http_log::print_request_response))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
                 let span = info_span!(
@@ -340,8 +282,6 @@ where
             }),
         )
         .fallback(static_handler);
-    #[cfg(feature = "openapi")]
-    let app = app.merge(openapi_router());
 
     axum::serve(listener, app)
         .with_graceful_shutdown(signal)
@@ -349,55 +289,9 @@ where
         .unwrap_or_else(|e| error!("Application error: {e}"));
 }
 
-// Based on live777/http-log's print_request_response, with local behavior changes:
-// https://github.com/binbat/live777/blob/a1ba82c179196b0d0648de7d9541d58b6cd225bb/libs/http-log/src/lib.rs#L12-L54
-async fn print_request_response(req: Request<Body>, next: middleware::Next) -> impl IntoResponse {
-    let start = std::time::Instant::now();
-    let method = req.method().clone();
-    let uri = req.uri().clone();
-
-    // Do not buffer/rebuild bodies; keep uploads, streams, WebSocket upgrades,
-    // and sensitive bodies out of the logging path.
-    let res = next.run(req).await;
-    let status = res.status();
-    let duration = start.elapsed();
-
-    // WebSocket success is 101 Switching Protocols, not 2xx.
-    if status.is_informational() || status.is_success() {
-        if duration.as_millis() > 500 {
-            warn!(
-                "[{} {}] [{}] {}ms",
-                method,
-                uri,
-                status.as_u16(),
-                duration.as_millis()
-            );
-        } else {
-            info!(
-                "[{} {}] [{}] {}ms",
-                method,
-                uri,
-                status.as_u16(),
-                duration.as_millis()
-            );
-        }
-    } else {
-        error!(
-            "[{} {}] [{}] {}ms",
-            method,
-            uri,
-            status.as_u16(),
-            duration.as_millis()
-        );
-    }
-
-    res
-}
-
 #[cfg(feature = "webui")]
 async fn static_handler(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
-
     let file_path = if path.is_empty() { "index.html" } else { path };
 
     match Assets::get(file_path) {
@@ -405,16 +299,13 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
             let mime = mime_guess::from_path(file_path).first_or_octet_stream();
             ([(http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
-        None => {
-            // fallback to index.html
-            match Assets::get("index.html") {
-                Some(index) => {
-                    let mime = mime_guess::from_path("index.html").first_or_octet_stream();
-                    ([(http::header::CONTENT_TYPE, mime.as_ref())], index.data).into_response()
-                }
-                None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        None => match Assets::get("index.html") {
+            Some(index) => {
+                let mime = mime_guess::from_path("index.html").first_or_octet_stream();
+                ([(http::header::CONTENT_TYPE, mime.as_ref())], index.data).into_response()
             }
-        }
+            None => (StatusCode::NOT_FOUND, "not found").into_response(),
+        },
     }
 }
 
@@ -423,140 +314,57 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
-#[cfg(feature = "openapi")]
-fn openapi_router() -> Router {
-    Router::new()
-        .route("/api-doc/openapi.json", get(openapi_json_handler))
-        .route("/docs", get(openapi_docs_handler))
-        .route("/docs/", get(openapi_docs_handler))
-}
+/// Sync required permissions to cobotusr at startup.
+/// POSTs to cobotusr's `/api/v1/application/sync-permissions` with
+/// client_id + client_secret (idempotent upsert).
+async fn sync_permissions(cfg: &Config) {
+    let perms = &cfg.permissions;
+    if perms.is_empty() {
+        return;
+    }
 
-#[cfg(feature = "openapi")]
-async fn openapi_json_handler() -> Json<utoipa::openapi::OpenApi> {
-    use crate::swagger_docs::doc::ApiDoc;
-    use utoipa::OpenApi;
+    let cobotsrv_base = cfg.auth.cobotusr_base_url();
 
-    Json(ApiDoc::openapi())
-}
+    let client = reqwest::Client::new();
 
-#[cfg(feature = "openapi")]
-async fn openapi_docs_handler() -> Html<&'static str> {
-    Html(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>API Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
-</head>
-<body>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script>
-    window.ui = SwaggerUIBundle({
-      url: '/api-doc/openapi.json',
-      dom_id: '#swagger-ui'
+    let body = serde_json::json!({
+        "client_id": cfg.auth.client_id,
+        "client_secret": cfg.auth.client_secret,
+        "permissions": perms.iter().map(|p| serde_json::json!({
+            "name": p.name,
+            "action": p.action,
+            "resource_type": p.resource_type,
+            "resource_pattern": p.resource_pattern,
+        })).collect::<Vec<_>>(),
     });
-  </script>
-</body>
-</html>"#,
-    )
-}
-
-/// 鉴权成功后回调：将用户信息注入
-async fn access_callback(
-    claim: Claims<IdType>,
-    mut req: Request<Body>, // 拥有 Request 所有权
-    app_state: AppState,
-) -> Result<Request<Body>, (StatusCode, String)> {
-    let db = &app_state.database.connection;
-
-    let user = user::Entity::find_by_id(claim.id)
-        .one(db)
+    match client
+        .post(format!(
+            "{}/api/v1/application/sync-permissions",
+            cobotsrv_base
+        ))
+        .json(&body)
+        .send()
         .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "No user id".to_string()))?
-        .ok_or((StatusCode::UNAUTHORIZED, "User not found".to_string()))?;
-    req.extensions_mut().insert(user);
-
-    Ok(req)
+    {
+        Ok(r) if r.status().is_success() => {
+            tracing::info!("{} permissions synced to cobotusr", perms.len());
+        }
+        Ok(r) => {
+            tracing::warn!(status = %r.status(), "permission sync: cobotusr returned error");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "permission sync: failed to reach cobotusr");
+        }
+    }
 }
+
 #[derive(Clone)]
 pub struct AppState {
     config: Config,
     client: Client,
     storage: Storage,
     database: Arc<DatabaseService>,
-    auth_state: Arc<AuthState>,
-    id_token_signer: Arc<IdTokenSigner>,
-    im_events: ImEvents,
-    ws_handle: WsHandle,
+    pub mqtt: Option<Arc<crate::mqtt::MqttHandle>>,
 }
+
 pub type IdType = i32;
-
-impl AppState {
-    pub async fn init(&self) -> result::Result<()> {
-        self.ensure_sadmin_authorities().await?;
-        self.init_sadmin_from_config().await?;
-        Ok(())
-    }
-
-    /// OIDC access token expiry: oidc.access_token_expire_seconds > auth.exp_seconds
-    pub fn oidc_access_token_exp(&self) -> i64 {
-        self.config
-            .oidc
-            .access_token_expire_seconds
-            .unwrap_or(self.config.auth.exp_seconds)
-    }
-
-    /// OIDC refresh token expiry: oidc.refresh_token_expire_seconds > auth.refresh_exp_seconds
-    pub fn oidc_refresh_token_exp(&self) -> i64 {
-        self.config
-            .oidc
-            .refresh_token_expire_seconds
-            .unwrap_or(self.config.auth.refresh_exp_seconds)
-    }
-
-    // 初始化超级管理员权限
-    async fn ensure_sadmin_authorities(&self) -> result::Result<()> {
-        Service::ensure_sadmin_authorities(&self.database.connection).await?;
-        Ok(())
-    }
-
-    // 初始化用户
-    async fn init_sadmin_from_config(&self) -> Result<(), DbErr> {
-        use crate::entity::user::ActiveModel as User;
-
-        let db = &self.database.connection;
-        let config = self.config.clone();
-        let super_admin_account = config.auth.super_admin.clone();
-        let sadmin_user = super_admin_account.username;
-        let sadmin_password = bcrypt::hash(super_admin_account.password, bcrypt::DEFAULT_COST)
-            .map_err(|e| DbErr::Custom(format!("Password hash failed: {}", e)))?;
-
-        // 检查是否已存在
-        if user::Entity::find()
-            .filter(user::Column::Username.eq(&sadmin_user))
-            .one(db)
-            .await?
-            .is_none()
-        {
-            User {
-                id: ActiveValue::NotSet,
-                username: Set(sadmin_user),
-                password: Set(Some(sadmin_password)),
-                nickname: Set(Some("sadmin".to_string())),
-                role_id: Set(RoleEnum::Superadmin.default_id()),
-                description: Set(Some("The System Admin.".to_string())),
-                create_time: Set(chrono::Utc::now().naive_utc()),
-                update_time: Set(chrono::Utc::now().naive_utc()),
-            }
-            .insert(db)
-            .await?;
-            info!("Initial the super admin account has created successfully!");
-        } else {
-            info!("Initial the super admin account has created before.");
-        }
-        Ok(())
-    }
-}

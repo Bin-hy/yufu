@@ -1,90 +1,136 @@
-use std::{env, net::SocketAddr, str::FromStr};
+use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-pub struct Config {
-    #[serde(default)]
-    pub http: Http,
-    #[serde(default)]
-    pub auth: Auth,
-    #[serde(default)]
-    pub log: Log,
-
-    #[cfg(feature = "net4mqtt")]
-    #[serde(default)]
-    pub net4mqtt: Option<Net4mqtt>,
+fn default_listen() -> SocketAddr {
+    SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 3080))
 }
 
-#[cfg(feature = "net4mqtt")]
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-pub struct Net4mqtt {
-    #[serde(default)]
-    pub mqtt_url: String,
-    #[serde(default)]
-    pub alias: String,
+fn default_log_level() -> String {
+    String::from("info")
 }
 
-#[cfg(feature = "net4mqtt")]
-impl Net4mqtt {
-    pub fn validate(&mut self) {
-        self.mqtt_url = self.mqtt_url.replace("{alias}", &self.alias)
-    }
+fn default_heartbeat_timeout_secs() -> u64 {
+    30
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Http {
-    #[serde(default = "default_http_listen")]
-    pub listen: SocketAddr,
-    #[serde(default)]
-    pub cors: bool,
+fn default_request_timeout_ms() -> u64 {
+    5000
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Auth {
-    #[serde(default)]
-    pub secret: String,
-    #[serde(default)]
-    pub tokens: Vec<String>,
+fn default_watchdog_interval_secs() -> u64 {
+    5
+}
+
+fn default_keep_alive_secs() -> u64 {
+    30
+}
+
+fn default_topic_prefix() -> String {
+    String::from("cobotrix")
+}
+
+fn default_client_id() -> String {
+    String::from("{alias}")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Log {
-    #[serde(default = "default_log_level")]
-    pub level: String,
-}
-
-fn default_http_listen() -> SocketAddr {
-    SocketAddr::from_str(&format!(
-        "0.0.0.0:{}",
-        env::var("PORT").unwrap_or(String::from("3000"))
-    ))
-    .expect("invalid listen address")
+pub struct Http {
+    #[serde(default = "default_listen")]
+    pub listen: SocketAddr,
 }
 
 impl Default for Http {
     fn default() -> Self {
         Self {
-            listen: default_http_listen(),
-            cors: Default::default(),
+            listen: default_listen(),
         }
     }
 }
 
-impl Default for Log {
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Log {
+    #[serde(default = "default_log_level")]
+    pub level: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Storage {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Device {
+    #[serde(default = "default_heartbeat_timeout_secs")]
+    pub heartbeat_timeout_secs: u64,
+    #[serde(default = "default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+    #[serde(default = "default_watchdog_interval_secs")]
+    pub watchdog_interval_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mqtt {
+    pub url: String,
+    pub alias: String,
+    #[serde(default = "default_client_id")]
+    pub client_id: String,
+    #[serde(default = "default_topic_prefix")]
+    pub topic_prefix: String,
+    #[serde(default = "default_keep_alive_secs")]
+    pub keep_alive_secs: u64,
+}
+
+impl Mqtt {
+    pub fn resolved_client_id(&self) -> String {
+        self.client_id.replace("{alias}", &self.alias)
+    }
+
+    pub fn topic_root(&self) -> String {
+        format!("{}/cobotlets/{}", self.topic_prefix, self.alias)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Net4mqtt {
+    pub alias: String,
+    #[serde(default)]
+    pub mqtt_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    #[serde(default)]
+    pub http: Http,
+    #[serde(default)]
+    pub log: Log,
+    #[serde(default)]
+    pub storage: Option<Storage>,
+    #[serde(default)]
+    pub device: Device,
+    #[serde(default)]
+    pub mqtt: Option<Mqtt>,
+    #[serde(default)]
+    pub net4mqtt: Option<Net4mqtt>,
+}
+
+impl Default for Config {
     fn default() -> Self {
         Self {
-            level: default_log_level(),
+            http: Http {
+                listen: default_listen(),
+            },
+            log: Log {
+                level: default_log_level(),
+            },
+            storage: None,
+            device: Device {
+                heartbeat_timeout_secs: default_heartbeat_timeout_secs(),
+                request_timeout_ms: default_request_timeout_ms(),
+                watchdog_interval_secs: default_watchdog_interval_secs(),
+            },
+            mqtt: None,
+            net4mqtt: None,
         }
     }
-}
-
-fn default_log_level() -> String {
-    env::var("LOG_LEVEL").unwrap_or_else(|_| {
-        if cfg!(debug_assertions) {
-            "debug".to_string()
-        } else {
-            "info".to_string()
-        }
-    })
 }

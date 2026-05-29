@@ -2,14 +2,14 @@
   "name": "cobotrix",
   "private": true,
   "version": "1.0.0",
-  "description": "cobotrix web config",
+  "description": "cobotrix monorepo (Rust workspace + cobotweb pnpm workspace)",
   "scripts": {
-    "dev:cobotweb" : "pnpm --filter cobotweb dev",
-    "build:cobotweb": "pnpm --filter cobotweb build",
-    "build": "pnpm -r build",
-    "dev": "pnpm -r dev"
-  },
-  "workspaces": [
-    "cobotweb"
-  ]
+    "dev:cobotsrv": "pnpm --filter @cobotweb/cobotsrv dev",
+    "dev:cobotlet": "pnpm --filter @cobotweb/cobotlet dev",
+    "build:cobotsrv": "pnpm --filter @cobotweb/cobotsrv build",
+    "build:cobotlet": "pnpm --filter @cobotweb/cobotlet build",
+    "dev:cobotrix": "pnpm --filter @cobotweb/cobotrix dev",
+    "build:cobotrix": "pnpm --filter @cobotweb/cobotrix build",
+    "build": "pnpm -r --filter './cobotweb/apps/*' build"
+  }
 }
