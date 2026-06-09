@@ -122,6 +122,14 @@ futures = { version = "0.3", default-features = false }
 reqwest = { workspace = true, features = ["socks", "json"] }
 serde_json = { workspace = true }
 tokio-tungstenite = "0.28"
+# cobotsrv MCP integration test helpers
+axum = { workspace = true }
+rsa = { version = "0.9", features = ["pem"] }
+jsonwebtoken = "9.3"
+base64 = "0.22"
+rand = "0.8"
+chrono = { workspace = true }
+sea-orm = { version = "2.0.0-rc.2", features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 
 [features]
 default = ["net4mqtt"]

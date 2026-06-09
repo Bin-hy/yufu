@@ -17,6 +17,7 @@ pub fn get_protected_routes() -> Router<AppState> {
         .merge(remote::route())
         .merge(cobotlet::route())
         .merge(tool::route())
+        .merge(crate::mcp::route::route())
 }
 
 /// Routes that are always public (health/debug only).

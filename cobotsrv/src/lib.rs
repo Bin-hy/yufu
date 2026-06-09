@@ -29,6 +29,7 @@ pub mod config;
 pub mod enforce;
 pub mod entity;
 pub mod error;
+pub mod mcp;
 mod migration;
 pub mod mqtt;
 mod result;
@@ -198,6 +199,27 @@ where
     // Sync required permissions to cobotusr so the admin can assign them.
     sync_permissions(&cfg).await;
 
+    // http_log wrapper: skip body buffering for SSE (text/event-stream) responses,
+    // which never end and would block http_log's collect().await indefinitely.
+    async fn http_log_non_sse(
+        req: Request,
+        next: middleware::Next,
+    ) -> axum::response::Response {
+        let is_sse = req
+            .headers()
+            .get(http::header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.contains("text/event-stream"))
+            .unwrap_or(false);
+        if is_sse {
+            next.run(req).await
+        } else {
+            http_log::print_request_response(req, next)
+                .await
+                .into_response()
+        }
+    }
+
     // PDP-based permission enforcement. When `auth.require_permissions = true`
     // (the default), EnforceClient is injected so `require_perm!` calls
     // cobotusr's `/api/v1/enforce` at request time (cached, TTL 10 s).
@@ -264,7 +286,7 @@ where
             }
         })
         .with_state(app_state.clone())
-        .layer(axum::middleware::from_fn(http_log::print_request_response))
+        .layer(axum::middleware::from_fn(http_log_non_sse))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
                 let span = info_span!(
