@@ -201,10 +201,7 @@ where
 
     // http_log wrapper: skip body buffering for SSE (text/event-stream) responses,
     // which never end and would block http_log's collect().await indefinitely.
-    async fn http_log_non_sse(
-        req: Request,
-        next: middleware::Next,
-    ) -> axum::response::Response {
+    async fn http_log_non_sse(req: Request, next: middleware::Next) -> axum::response::Response {
         let is_sse = req
             .headers()
             .get(http::header::ACCEPT)

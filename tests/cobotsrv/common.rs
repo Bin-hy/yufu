@@ -7,7 +7,7 @@ use rsa::RsaPrivateKey;
 use rsa::pkcs8::EncodePrivateKey;
 use rsa::traits::PublicKeyParts;
 use sea_orm::{Database, DatabaseConnection};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
@@ -68,7 +68,10 @@ pub async fn start() -> CobotsrvTestCtx {
         .with_env_var("POSTGRES_DB", db_name.clone());
     let container = image.start().await.expect("postgres start failed");
     let pg_port = container.get_host_port_ipv4(5432.tcp()).await.unwrap();
-    let db_url = format!("postgres://postgres:postgres@localhost:{}/{}", pg_port, db_name);
+    let db_url = format!(
+        "postgres://postgres:postgres@localhost:{}/{}",
+        pg_port, db_name
+    );
 
     // ── 2. RSA key pair ──────────────────────────────────────────────────────
     let mut rng = rand::rngs::OsRng;
@@ -148,7 +151,9 @@ async fn start_jwks_server(jwks: Value) -> (std::net::SocketAddr, oneshot::Sende
 
     tokio::spawn(async move {
         axum::serve(listener, app)
-            .with_graceful_shutdown(async { let _ = rx.await; })
+            .with_graceful_shutdown(async {
+                let _ = rx.await;
+            })
             .await
             .ok();
     });

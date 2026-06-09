@@ -1,5 +1,5 @@
-use axum::{Json, Router, extract::State, routing::get};
 use auth::require_perm;
+use axum::{Json, Router, extract::State, routing::get};
 use serde_json::Value;
 
 use crate::AppState;

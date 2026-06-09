@@ -9,10 +9,9 @@ use crate::mqtt::Task;
 use crate::service::device::DeviceService;
 
 use super::protocol::{
-    CallToolParams, CallToolResult, InitializeParams, InitializeResult, JsonRpcRequest,
-    JsonRpcResponse, ListToolsResult, McpTool, PROTOCOL_VERSION, ServerCapabilities,
-    ToolsCapability, error_codes,
-    Implementation,
+    CallToolParams, CallToolResult, Implementation, InitializeParams, InitializeResult,
+    JsonRpcRequest, JsonRpcResponse, ListToolsResult, McpTool, PROTOCOL_VERSION,
+    ServerCapabilities, ToolsCapability, error_codes,
 };
 
 pub async fn dispatch(state: &AppState, req: JsonRpcRequest) -> JsonRpcResponse {
@@ -40,10 +39,11 @@ fn handle_initialize(
     id: Option<serde_json::Value>,
     params: Option<serde_json::Value>,
 ) -> JsonRpcResponse {
-    let init_params = params
-        .and_then(|p| serde_json::from_value::<InitializeParams>(p).ok());
+    let init_params = params.and_then(|p| serde_json::from_value::<InitializeParams>(p).ok());
 
-    if let Some(ref p) = init_params && p.protocol_version != PROTOCOL_VERSION {
+    if let Some(ref p) = init_params
+        && p.protocol_version != PROTOCOL_VERSION
+    {
         tracing::warn!(
             client_version = %p.protocol_version,
             server_version = PROTOCOL_VERSION,
@@ -105,7 +105,13 @@ async fn handle_tools_list(state: &AppState, id: Option<serde_json::Value>) -> J
     let mut tools: Vec<McpTool> = seen.into_values().collect();
     tools.sort_by(|a, b| a.name.cmp(&b.name));
 
-    JsonRpcResponse::ok(id, ListToolsResult { tools, next_cursor: None })
+    JsonRpcResponse::ok(
+        id,
+        ListToolsResult {
+            tools,
+            next_cursor: None,
+        },
+    )
 }
 
 async fn handle_tools_call(
@@ -203,7 +209,11 @@ async fn handle_tools_call(
     );
 
     match mqtt
-        .submit(&device.cobotlet_alias, task, Duration::from_millis(timeout_ms))
+        .submit(
+            &device.cobotlet_alias,
+            task,
+            Duration::from_millis(timeout_ms),
+        )
         .await
     {
         Ok(result) => {

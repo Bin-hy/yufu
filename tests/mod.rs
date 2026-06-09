@@ -1,2 +1,2 @@
-mod cobotusr;
 mod cobotsrv;
+mod cobotusr;

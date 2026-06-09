@@ -74,7 +74,10 @@ async fn mcp_tools_list_empty() {
     assert_eq!(status, StatusCode::OK);
     assert!(body.get("error").is_none(), "unexpected error: {body}");
     let tools = body["result"]["tools"].as_array().unwrap();
-    assert!(tools.is_empty(), "expected empty tools list, got: {tools:?}");
+    assert!(
+        tools.is_empty(),
+        "expected empty tools list, got: {tools:?}"
+    );
 }
 
 // ── 5. tools/list 有在线设备 → McpTool[] with inputSchema ────────────────────
@@ -98,7 +101,10 @@ async fn mcp_tools_list_with_online_device() {
     // MCP spec: inputSchema must be an object
     assert_eq!(tool["inputSchema"]["type"], "object");
     // Confirm field name is camelCase "inputSchema", not snake_case
-    assert!(tool.get("input_schema").is_none(), "should use inputSchema not input_schema");
+    assert!(
+        tool.get("input_schema").is_none(),
+        "should use inputSchema not input_schema"
+    );
 }
 
 // ── 6. tools/list 离线设备不暴露 ──────────────────────────────────────────────
@@ -137,7 +143,10 @@ async fn mcp_tools_call_tool_not_found() {
 
     assert_eq!(status, StatusCode::OK);
     // tools/call "not found" is a tool-level error (isError:true), not a protocol error
-    assert!(body.get("error").is_none(), "should be tool-level error: {body}");
+    assert!(
+        body.get("error").is_none(),
+        "should be tool-level error: {body}"
+    );
     assert_eq!(body["result"]["isError"], true);
     let text = body["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
