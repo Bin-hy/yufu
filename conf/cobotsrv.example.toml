@@ -68,3 +68,16 @@ result_cache_ttl_secs = 300
 # alias = "static-device-0"
 # token = ""
 # url = "http://127.0.0.1:3000"
+
+# MCP Server 配置（Model Context Protocol — AI Agent 调用设备能力）
+[mcp]
+# tools/call 最大等待时间 (ms)，默认 30s
+call_timeout_ms = 30000
+
+# MCP 权限（启动时同步至 cobotusr，管理员分配给 AI Agent 角色）
+# 需要 mcp:access 权限才能连接 MCP Server (POST/GET /mcp)
+[[permissions]]
+name = "mcp:access"
+action = "access"
+resource_type = "mcp"
+resource_pattern = "*"

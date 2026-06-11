@@ -49,6 +49,7 @@ mime_guess = { workspace = true, optional = true }
 rust-embed = { workspace = true, features = ["axum-ex"], optional = true }
 
 async-trait = "0.1.89"
+futures = { workspace = true }
 
 [features]
 webui = ["dep:rust-embed", "dep:mime_guess"]

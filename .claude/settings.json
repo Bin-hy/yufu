@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/.claude/skills/cobotrix-arch/**)",
+      "Bash(rm -rf /Users/binhy/Binhy-Projects/cobotrix/.claude/skills/cobotrix-arch)",
+      "Edit(~/.claude/skills/rust-workspace-arch/**)",
+      "Bash(grep -iE '\\\\.\\(toml|example|template|json|yaml|yml\\)$|cobotset|cobotlet|capabilit')",
+      "Bash(/Users/binhy/.local/share/uv/python/cpython-3.13-macos-aarch64-none/bin/python3.13 -c ' *)"
+    ],
+    "additionalDirectories": [
+      "/Users/binhy/Binhy-Projects/cobotrix/.claude/skills/cobotrix-arch"
+    ]
+  }
+}

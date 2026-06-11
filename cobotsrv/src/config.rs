@@ -31,6 +31,29 @@ pub struct Config {
     /// Each entry: `{ name, action, resource_type?, resource_pattern? }`
     #[serde(default)]
     pub permissions: Vec<PermissionSpec>,
+
+    /// MCP Server configuration.
+    #[serde(default)]
+    pub mcp: Mcp,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Mcp {
+    /// Maximum time (ms) to wait for a tools/call result from cobotlet via MQTT.
+    #[serde(default = "default_mcp_call_timeout_ms")]
+    pub call_timeout_ms: u64,
+}
+
+impl Default for Mcp {
+    fn default() -> Self {
+        Self {
+            call_timeout_ms: default_mcp_call_timeout_ms(),
+        }
+    }
+}
+
+fn default_mcp_call_timeout_ms() -> u64 {
+    30_000
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
