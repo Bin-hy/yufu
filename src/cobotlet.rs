@@ -42,8 +42,8 @@ async fn main() -> Result<()> {
     };
 
     log::set(format!(
-        "cobotrix={},cobotlet={},net4mqtt={},http_log={}",
-        log_level, log_level, log_level, log_level
+        "cobotrix={},cobotlet={},net4mqtt={},cobotnet={},easytier={},http_log={}",
+        log_level, log_level, log_level, log_level, log_level, log_level
     ));
     warn!("set log level: [{}]", log_level);
     debug!("config : {:?}", cfg);

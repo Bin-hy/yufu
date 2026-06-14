@@ -89,3 +89,9 @@ node_modules
 # redb
 data/uploads/
 data/
+# Configuration
+cobotsrv.toml
+cobotlet.toml
+cobotnil
+/conf/cobolet.toml
+/conf/cobotusr.toml

@@ -47,7 +47,7 @@ members = [
     "cobotsrv",
     "cobotusr",
     "cobotset",
-    "cobotsrv",
+    "cobotnet",
     "cobotmap",
     "libs/auth",
 ]
@@ -60,6 +60,7 @@ authors = ["BinBat Ltd <hey@binbat.com>"]
 repository = "https://github.com/binbat/live777"
 
 [workspace.dependencies]
+cobotnet = { path = "cobotnet" }
 auth = {path = "libs/auth" }
 net4mqtt = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
 signal = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
@@ -136,4 +137,16 @@ default = ["net4mqtt"]
 webui = ["cobotlet/webui", "cobotusr/webui", "cobotsrv/webui"]
 net4mqtt = ["cobotlet/net4mqtt", "cobotusr/net4mqtt", "cobotsrv/net4mqtt"]
 openapi = ["cobotusr/openapi"]
+easytier = ["cobotlet/easytier", "cobotsrv/easytier"]
 
+[profile.dev]
+# 默认是 2（完整调试信息）。改为 1（仅保留行号），可以减少 50%~80% 的体积
+debug = 1 
+
+# 让编译器单独存放调试信息，而不是全部塞进链接器，减轻 ld 的并发压力
+split-debuginfo = "unpacked" 
+
+[profile.test]
+# 同理，应用到测试 profile 中
+debug = 1
+split-debuginfo = "unpacked"

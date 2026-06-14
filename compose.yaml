@@ -19,7 +19,7 @@ services:
         container_name: postgres_cobotusr
         restart: always
         ports:
-            - "${POSTGRES_USR_PORT:-5432}:5432"
+            - "${POSTGRES_USR_PORT:-5433}:5432"
         environment:
             POSTGRES_USER: ${POSTGRES_USR_USER:-postgres}
             POSTGRES_PASSWORD: ${POSTGRES_USR_PASSWORD:-postgres}

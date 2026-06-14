@@ -21,6 +21,21 @@ jobs:
         steps:
             - name: Checkout source code
               uses: actions/checkout@v6
+            - name: Install protoc
+              uses: arduino/setup-protoc@v3
+              # 【新增】专为 Windows 系统下载 Npcap SDK，并配置链接器环境变量
+            - name: Install Npcap SDK (Only for Windows)
+              if: runner.os == 'Windows'
+              shell: pwsh
+              run: |
+                  # 下载 Npcap SDK
+                  Invoke-WebRequest -Uri "https://npcap.com/dist/npcap-sdk-1.13.zip" -OutFile "npcap-sdk.zip"
+                  # 解压
+                  Expand-Archive -Path "npcap-sdk.zip" -DestinationPath "npcap-sdk"
+                  # 获取 x64 库文件的绝对路径
+                  $NpcapLibPath = "$PWD\npcap-sdk\Lib\x64"
+                  # 将路径追加到全局 LIB 环境变量中，让 MSVC 链接器能找到 Packet.lib
+                  echo "LIB=$NpcapLibPath;$env:LIB" >> $env:GITHUB_ENV
             - name: Show version information
               run: |
                   cargo --version

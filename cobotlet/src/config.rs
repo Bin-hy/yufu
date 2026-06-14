@@ -112,6 +112,71 @@ pub struct Config {
     pub mqtt: Option<Mqtt>,
     #[serde(default)]
     pub net4mqtt: Option<Net4mqtt>,
+    #[cfg(feature = "easytier")]
+    #[serde(default)]
+    pub easytier: Option<EasytierConfig>,
+}
+
+#[cfg(feature = "easytier")]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct EasytierConfig {
+    #[serde(default)]
+    pub network_name: String,
+    #[serde(default)]
+    pub network_secret: String,
+    #[serde(default)]
+    pub instance_name: String,
+    #[serde(default)]
+    pub hostname: String,
+    #[serde(default)]
+    pub ipv4: String,
+    #[serde(default)]
+    pub ipv6: String,
+    #[serde(default)]
+    pub listeners: Vec<String>,
+    #[serde(default)]
+    pub peers: Vec<String>,
+    /// cobotsrv config distribution endpoint.
+    /// If set and network_name is empty, cobotlet will auto-fetch
+    /// easytier config from cobotsrv instead of using local config.
+    #[serde(default)]
+    pub server_url: Option<String>,
+    /// Device serial number used to identify this device to cobotsrv.
+    #[serde(default)]
+    pub robot_sn: Option<String>,
+    /// Shared secret to authenticate with cobotsrv config endpoint.
+    #[serde(default)]
+    pub register_token: Option<String>,
+}
+
+#[cfg(feature = "easytier")]
+impl EasytierConfig {
+    /// Whether this config should skip local config and fetch from cobotsrv instead.
+    pub fn should_fetch_remote(&self) -> bool {
+        self.network_name.is_empty() && self.server_url.is_some()
+    }
+
+    pub fn into_cobotnet_config(self) -> cobotnet::Config {
+        cobotnet::Config {
+            network_name: self.network_name,
+            network_secret: self.network_secret,
+            instance_name: self.instance_name,
+            hostname: self.hostname,
+            ipv4: self.ipv4,
+            ipv6: self.ipv6,
+            listeners: self.listeners,
+            peers: self.peers,
+        }
+    }
+
+    pub fn validate(&mut self) {
+        if self.instance_name.is_empty() {
+            self.instance_name = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
+        }
+        if self.hostname.is_empty() {
+            self.hostname = self.instance_name.clone();
+        }
+    }
 }
 
 impl Default for Config {
@@ -131,6 +196,8 @@ impl Default for Config {
             },
             mqtt: None,
             net4mqtt: None,
+            #[cfg(feature = "easytier")]
+            easytier: None,
         }
     }
 }

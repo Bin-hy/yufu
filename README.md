@@ -215,7 +215,7 @@ cobotdoc ------- Webui
   - `cobotimx` Instant Messaging eXchange（即时消息交换平台）
   - `cobotrtc` 实时交互音视频（基于 `Live777`）
   - `cobotmap` 地图服务
-  - `cobotnet` 基于 WireGuard 配合 ICE 通过云平台辅助启动一个 P2P VPN 来实现大量数据交互（类似 Tailscale）
+  - `cobotnet` 基于 WireGuard 配合 ICE 通过云平台辅助启动一个 P2P VPN 来实现大量数据交互（类似 Tailscale）。底层使用 [EasyTier](https://github.com/EasyTier/EasyTier) 的 library API，以 feature flag `easytier` 可选启用
   - `_cobotkvm` `TODO` KVM 扩展
 - 开发部署工具链
   - `cobotnil` 和 Live777 的 `livenil` 一样，只在 开发/测试 模式里使用，快速启动一个集群
@@ -249,6 +249,148 @@ cobotdoc ------- Webui
 Net4mqtt 工作原理参考 [Live777/Net4mqtt](https://live777.pages.dev/zh/guide/net4mqtt)
 
 **Net4mqtt 主要用于保障核心通信，无状态水平扩容，CoBotSrv 和 CoBotLet 实例数量比 `M:N`。不适合大规模数据传输和高性能网络**
+
+## `CoBotNet` (EasyTier P2P VPN)
+
+cobotnet 通过 EasyTier 提供 P2P VPN 能力。基于 WireGuard 加密 + ICE 打洞，将 cobotsrv 和各 cobotlet 设备组成去中心化 mesh 网络，每个节点拥有一个虚拟 IP，通过虚拟 IP 直接互访。
+
+### 构建
+
+```bash
+cargo build --features easytier
+cargo build --features easytier --release
+```
+
+### 配置模式
+
+#### 模式 A：本地配置（cobotsrv + cobotlet 各自手写）
+
+**cobotsrv.toml**：
+
+```toml
+[easytier]
+network_name = "cobotrix-prod"
+network_secret = "your-secret-key"
+ipv4 = "10.100.0.1"
+listeners = ["tcp://0.0.0.0:11010"]
+peers = ["tcp://bootstrap.example.com:11010"]
+
+# 配置分发参数
+register_token = "shared-secret"
+```
+
+**cobotlet.toml**：
+
+```toml
+[easytier]
+network_name = "cobotrix-prod"
+network_secret = "your-secret-key"
+ipv4 = "10.100.0.10"
+listeners = ["tcp://0.0.0.0:11010"]
+peers = ["tcp://bootstrap.example.com:11010"]
+```
+
+#### 模式 B：配置分发（cobotsrv 作为网络控制器，cobotlet 零配置）
+
+**cobotsrv.toml**：
+
+```toml
+[easytier]
+network_name = "cobotrix-prod"
+network_secret = "your-secret-key"
+ipv4 = "10.126.126.1"
+listeners = ["tcp://0.0.0.0:11010"]
+peers = ["tcp://bootstrap.example.com:11010"]
+
+register_token = "shared-secret"
+
+# 可选：IP 地址池（不配则自动从 ipv4 提取前缀）
+[easytier.ip_pool]
+prefix = "10.126.126"    # 默认从 ipv4 自动提取
+start = 10                # 默认 10
+end = 250                # 默认 250
+lease_days = 30          # 离线 30 天回收 IP
+```
+
+**cobotlet.toml**（仅配 `server_url`，其余字段由 cobotsrv 下发）：
+
+```toml
+[easytier]
+server_url = "http://<cobotsrv IP>:4001/api/v1/easytier/config"
+robot_sn = "robot-001"
+register_token = "shared-secret"
+```
+
+> **注意**：使用模式 B 时，`network_name` **必须留空**，否则走本地配置模式，忽略 `server_url`。
+
+cobotlet 启动 → HTTP GET cobotsrv `/api/v1/easytier/config` → cobotsrv 从 IP 池分配一个虚拟 IP → 返回完整 easytier 配置 → cobotlet 启动 easytier 节点。
+
+### IP 管理
+
+cobotsrv 通过 PostgreSQL `easytier_network` 表管理虚拟 IP 分配，支持：
+
+| 功能 | 说明 |
+|------|------|
+| **静态绑定** | 同一 `robot_sn` 每次获取相同 IP，重启不漂移 |
+| **自动分配** | 新设备从 IP 池（默认 `10.x.x.10~250`）中取第一个未用 IP |
+| **租约回收** | 设备离线超过 30 天自动释放 IP（每天凌晨定时任务） |
+| **手动注销** | 管理员 `POST /api/v1/easytier/admin/scrap?robot_sn=xxx` 立即释放 |
+| **重新入网** | 回收/注销后设备重新请求配置，自动分配新 IP |
+
+IP 池前缀自动从 cobotsrv 的 `ipv4` 提取（`10.126.126.1` → 池 `10.126.126.10~250`），无需单独配置。
+
+### API
+
+```
+# 公共端点（register_token 认证）
+GET  /api/v1/easytier/config?robot_sn=xxx      # 获取/分配 easytier 配置
+POST /api/v1/easytier/heartbeat?robot_sn=xxx   # 心跳续租
+
+# 管理端点（JWT 认证）
+GET  /api/v1/easytier/admin/devices             # 列出所有设备
+POST /api/v1/easytier/admin/scrap?robot_sn=xxx # 手动注销设备
+POST /api/v1/easytier/admin/reclaim             # 手动触发回收
+```
+
+### 工作原理
+
+```
+cobotlet 启动
+    │
+    ├─ 本地有 network_name? → 直接启动 easytier
+    │
+    └─ 有 server_url?
+         │
+         ├─ GET /api/v1/easytier/config?robot_sn=SN-001
+         │   Authorization: Bearer <register_token>
+         │
+         └─ cobotsrv:
+              ├─ 校验 token
+              ├─ DB 查 SN → 命中返回原 IP : 分配新 IP
+              ├─ peers 复制 cobotsrv 的 peers
+              └─ JSON: { network_name, secret, ipv4, listeners, peers }
+                        │
+                        ▼
+              cobotlet 用返回的配置启动 easytier
+```
+
+### 项目结构
+
+```
+cobonet/
+├── Cargo.toml        # 依赖 easytier (GitHub, v2.6.4)
+├── examples/
+│   └── standalone.rs # 独立测试节点
+└── src/
+    ├── config.rs     # Config 结构体
+    └── lib.rs        # EasytierNode、PeerInfo、PeerEvent、StopHandle
+
+cobotsrv/src/
+├── entity/easytier_network.rs              # IP 分配表实体
+├── migration/m20260602_..._easytier_network.rs  # 建表迁移
+├── service/network.rs                      # IP 分配 / 回收 / 心跳服务
+└── route/easytier_config.rs                # 配置分发 + 管理 API
+```
 
 ## OIDC 实现
 

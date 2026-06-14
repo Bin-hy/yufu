@@ -17,6 +17,10 @@ pub struct Config {
     #[serde(default)]
     pub net4mqtt: Option<Net4mqtt>,
 
+    #[cfg(feature = "easytier")]
+    #[serde(default)]
+    pub easytier: Option<EasytierConfig>,
+
     #[serde(default)]
     pub mqtt: Option<Mqtt>,
 
@@ -172,6 +176,118 @@ fn default_net4mqtt_listen() -> SocketAddr {
 #[cfg(feature = "net4mqtt")]
 fn default_net4mqtt_domain() -> String {
     String::from("net4mqtt.local")
+}
+
+#[cfg(feature = "easytier")]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct EasytierConfig {
+    #[serde(default)]
+    pub network_name: String,
+    #[serde(default)]
+    pub network_secret: String,
+    #[serde(default)]
+    pub instance_name: String,
+    #[serde(default)]
+    pub hostname: String,
+    #[serde(default)]
+    pub ipv4: String,
+    #[serde(default)]
+    pub ipv6: String,
+    #[serde(default)]
+    pub listeners: Vec<String>,
+    #[serde(default)]
+    pub peers: Vec<String>,
+    /// Shared secret for cobotlet registration/config-fetch.
+    #[serde(default)]
+    pub register_token: String,
+    /// Public endpoint of this cobotsrv, used as the peer address
+    /// in configs distributed to cobotlets.
+    #[serde(default)]
+    pub public_endpoint: String,
+    /// IP pool configuration for the easytier virtual network.
+    #[serde(default)]
+    pub ip_pool: IpPoolConfig,
+}
+
+/// IP pool configuration for easytier virtual network.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpPoolConfig {
+    /// Subnet prefix (e.g. "10.100" → "10.100.0.0/24").
+    /// Leave empty to auto-derive from `easytier.ipv4`.
+    #[serde(default)]
+    pub prefix: String,
+    /// First assignable host octet (default 10)
+    #[serde(default = "default_ip_pool_start")]
+    pub start: u8,
+    /// Last assignable host octet (default 250)
+    #[serde(default = "default_ip_pool_end")]
+    pub end: u8,
+    /// Lease duration in days
+    #[serde(default = "default_lease_days")]
+    pub lease_days: u32,
+}
+
+fn default_ip_pool_start() -> u8 {
+    10
+}
+fn default_ip_pool_end() -> u8 {
+    250
+}
+fn default_lease_days() -> u32 {
+    30
+}
+
+impl Default for IpPoolConfig {
+    fn default() -> Self {
+        Self {
+            prefix: String::new(),
+            start: default_ip_pool_start(),
+            end: default_ip_pool_end(),
+            lease_days: default_lease_days(),
+        }
+    }
+}
+
+impl IpPoolConfig {
+    /// Resolve the effective pool prefix.
+    /// If `prefix` is explicitly set, use it; otherwise derive from cobotsrv's own IPv4.
+    pub fn resolve_prefix(&self, own_ipv4: &str) -> String {
+        if !self.prefix.is_empty() {
+            return self.prefix.clone();
+        }
+        // Extract the first 3 octets from cobotsrv's IPv4.
+        // "10.126.126.1" → "10.126.126"
+        if let Some(pos) = own_ipv4.rfind('.') {
+            own_ipv4[..pos].to_string()
+        } else {
+            "10.100.0".to_string()
+        }
+    }
+}
+
+#[cfg(feature = "easytier")]
+impl EasytierConfig {
+    pub fn into_cobotnet_config(self) -> cobotnet::Config {
+        cobotnet::Config {
+            network_name: self.network_name,
+            network_secret: self.network_secret,
+            instance_name: self.instance_name,
+            hostname: self.hostname,
+            ipv4: self.ipv4,
+            ipv6: self.ipv6,
+            listeners: self.listeners,
+            peers: self.peers,
+        }
+    }
+
+    pub fn validate(&mut self) {
+        if self.instance_name.is_empty() {
+            self.instance_name = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
+        }
+        if self.hostname.is_empty() {
+            self.hostname = self.instance_name.clone();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
