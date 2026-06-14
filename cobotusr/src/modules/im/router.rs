@@ -8,13 +8,14 @@ use crate::AppState;
 
 use super::controller::{
     conversation_controller, group_controller, message_controller, outbox_controller,
-    upload_controller, websocket_controller,
+    upload_controller, user_controller, websocket_controller,
 };
 
 const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
 pub fn init_im_router() -> Router<AppState> {
     Router::new()
+        .route("/users", get(user_controller::get_users_by_ids))
         .route("/ws", get(websocket_controller::ws_handler))
         .route(
             "/conversations",

@@ -1,5 +1,7 @@
 packages:
   - "cobotweb/apps/*"
   - "cobotweb/packages/*"
+  - "cobotweb"
+  - "cobotimx"
 allowBuilds:
   esbuild: true

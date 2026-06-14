@@ -89,3 +89,6 @@ node_modules
 # redb
 data/uploads/
 data/
+
+# upload files
+storage
