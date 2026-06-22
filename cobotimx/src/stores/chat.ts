@@ -43,6 +43,25 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
+  // ── Active conversation detail (loaded on select) ──
+  const activeConversationMembers = ref<number[]>([]);
+  const activeConversationOwnerId = ref<number | null>(null);
+
+  async function loadActiveConversationDetail() {
+    activeConversationMembers.value = [];
+    activeConversationOwnerId.value = null;
+    if (!activeConversationId.value) return;
+    try {
+      const res = await conversationApi.detail(activeConversationId.value);
+      if (res.data.data) {
+        activeConversationMembers.value = res.data.data.member_ids;
+        activeConversationOwnerId.value = res.data.data.owner_id;
+      }
+    } catch (e) {
+      console.error("Failed to load conversation detail:", e);
+    }
+  }
+
   // ── Messages ──
   const messages = ref<Message[]>([]);
   const hasMore = ref(true);
@@ -107,12 +126,17 @@ export const useChatStore = defineStore("chat", () => {
   function clearMessages() {
     messages.value = [];
     hasMore.value = true;
+    activeConversationMembers.value = [];
+    activeConversationOwnerId.value = null;
   }
 
   return {
     conversations,
     activeConversationId,
     activeConversation,
+    activeConversationMembers,
+    activeConversationOwnerId,
+    loadActiveConversationDetail,
     loadConversations,
     upsertConversationFromPush,
     messages,

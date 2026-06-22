@@ -248,11 +248,23 @@ pub async fn get_conversation(
             }
         };
 
+        // Fetch owner_id for group conversations
+        let owner_id = if conv.conversation_type == ConversationType::Group {
+            match group::find_by_conversation_id(db, conversation_id).await {
+                Ok(Some(g)) => Some(g.owner_id),
+                Ok(None) => None,
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         ApiResponse::ok(ConversationDetailResponse {
             conversation_id,
             conversation_type: conv.conversation_type,
             title: conv.title,
             member_ids,
+            owner_id,
         })
     }))
     .await
@@ -319,15 +331,16 @@ pub async fn list_conversation_members(
     super::join_response(tokio::spawn(async move {
         let db = &state.database.connection;
         let user_id = i64::from(current_user.id);
-        if let Err(response) = super::load_member_conversation::<ConversationMembersResponse>(
+        let conv = match super::load_member_conversation::<ConversationMembersResponse>(
             db,
             user_id,
             conversation_id,
         )
         .await
         {
-            return response;
-        }
+            Ok(v) => v,
+            Err(response) => return response,
+        };
 
         let member_ids = match conversation::list_member_ids(db, conversation_id).await {
             Ok(v) => v,
@@ -338,9 +351,21 @@ pub async fn list_conversation_members(
             }
         };
 
+        // Fetch owner_id for group conversations
+        let owner_id = if conv.conversation_type == ConversationType::Group {
+            match group::find_by_conversation_id(db, conversation_id).await {
+                Ok(Some(g)) => Some(g.owner_id),
+                Ok(None) => None,
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         ApiResponse::ok(ConversationMembersResponse {
             conversation_id,
             member_ids,
+            owner_id,
         })
     }))
     .await

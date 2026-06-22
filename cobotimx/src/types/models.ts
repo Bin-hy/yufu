@@ -42,6 +42,7 @@ export type ConversationDetail = {
   conversation_type: ConversationType;
   title: string | null;
   member_ids: number[];
+  owner_id: number | null;
 };
 
 export type CreateConversationRequest = {

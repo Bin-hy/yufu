@@ -53,3 +53,10 @@ alias = "cobotsrv"
 mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
 listen = "127.0.0.1:1078"
 domain = "net4mqtt.local"
+
+[easytier]
+network_name = "cobotrix-prod"
+network_secret = "your-secret"
+ipv4 = "10.100.0.1"
+listeners = ["tcp://0.0.0.0:11010"]
+peers = ["tcp://bootstrap.example.com:11010"]

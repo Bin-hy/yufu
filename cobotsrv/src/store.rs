@@ -25,6 +25,8 @@ pub enum NodeKind {
     Manual,
     #[serde(rename = "net4mqtt")]
     Net4mqtt,
+    #[serde(rename = "easytier")]
+    Easytier,
 }
 
 #[derive(Clone)]

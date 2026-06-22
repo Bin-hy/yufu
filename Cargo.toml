@@ -47,10 +47,10 @@ members = [
     "cobotsrv",
     "cobotusr",
     "cobotset",
-    "cobotsrv",
     "cobotmap",
     "libs/auth",
 ]
+exclude = ["cobotnet", "cobotnet/*"]
 
 [workspace.package]
 version = "0.0.0"
@@ -136,4 +136,16 @@ default = ["net4mqtt"]
 webui = ["cobotlet/webui", "cobotusr/webui", "cobotsrv/webui"]
 net4mqtt = ["cobotlet/net4mqtt", "cobotusr/net4mqtt", "cobotsrv/net4mqtt"]
 openapi = ["cobotusr/openapi"]
+easytier = ["cobotlet/easytier", "cobotsrv/easytier"]
 
+[profile.dev]
+# 默认是 2（完整调试信息）。改为 1（仅保留行号），可以减少 50%~80% 的体积
+debug = 1 
+
+# 让编译器单独存放调试信息，而不是全部塞进链接器，减轻 ld 的并发压力
+split-debuginfo = "unpacked" 
+
+[profile.test]
+# 同理，应用到测试 profile 中
+debug = 1
+split-debuginfo = "unpacked"

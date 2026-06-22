@@ -92,3 +92,9 @@ data/
 
 # upload files
 storage
+# Configuration
+cobotsrv.toml
+cobotlet.toml
+cobotnil
+/conf/cobolet.toml
+/conf/cobotusr.toml

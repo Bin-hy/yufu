@@ -43,12 +43,15 @@ async fn main() -> Result<()> {
 
     #[cfg(debug_assertions)]
     log::set(format!(
-        "cobotsrv={},net4mqtt={},http_log={}",
-        log_level, log_level, log_level
+        "cobotsrv={},net4mqtt={},http_log={},cobotnet={}",
+        log_level, log_level, log_level, log_level
     ));
 
     #[cfg(not(debug_assertions))]
-    log::set(format!("cobotsrv={},http_log={}", log_level, log_level));
+    log::set(format!(
+        "cobotsrv={},http_log={},cobotnet={}",
+        log_level, log_level, log_level
+    ));
 
     warn!("set log level: [{}]", log_level);
     debug!("config : {:?}", cfg);

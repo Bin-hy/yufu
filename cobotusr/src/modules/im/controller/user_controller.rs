@@ -2,8 +2,8 @@ use axum::{
     extract::{Query, State},
     response::IntoResponse,
 };
-use serde::{Deserialize, Serialize};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use crate::AppState;
@@ -37,7 +37,11 @@ pub async fn get_users_by_ids(
     let models = if query.all == Some(true) {
         match user::Entity::find().all(db).await {
             Ok(v) => v,
-            Err(e) => return super::internal_error::<ImUsersResponse>(format!("query users failed: {e}")),
+            Err(e) => {
+                return super::internal_error::<ImUsersResponse>(format!(
+                    "query users failed: {e}"
+                ));
+            }
         }
     } else {
         let ids_str = match query.ids.as_deref() {
@@ -63,7 +67,11 @@ pub async fn get_users_by_ids(
             .await
         {
             Ok(v) => v,
-            Err(e) => return super::internal_error::<ImUsersResponse>(format!("query users failed: {e}")),
+            Err(e) => {
+                return super::internal_error::<ImUsersResponse>(format!(
+                    "query users failed: {e}"
+                ));
+            }
         }
     };
 

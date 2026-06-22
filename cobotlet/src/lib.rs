@@ -78,7 +78,7 @@ pub async fn serve(
     }
 
     let state = AppState {
-        config: cfg,
+        config: cfg.clone(),
         store,
         http_client,
         events,
@@ -96,10 +96,131 @@ pub async fn serve(
         .fallback(static_handler);
 
     info!("cobotlet serving");
+
+    #[cfg(feature = "easytier")]
+    let easytier_stop: Option<cobotnet::StopHandle> = {
+        if let Some(mut c) = cfg.easytier.clone() {
+            c.validate();
+
+            let maybe_config = if c.should_fetch_remote() {
+                fetch_easytier_config(&c).await
+            } else if !c.network_name.is_empty() {
+                tracing::info!("using local easytier config");
+                Some(c.into_cobotnet_config())
+            } else {
+                tracing::info!(
+                    "easytier: no network_name configured and no server_url, skipping P2P node"
+                );
+                None
+            };
+
+            maybe_config.and_then(start_easytier_node)
+        } else {
+            None
+        }
+    };
+
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await
         .unwrap_or_else(|e| tracing::error!(error = %e, "server error"));
+
+    #[cfg(feature = "easytier")]
+    if let Some(handle) = easytier_stop {
+        tracing::info!("stopping easytier node");
+        handle.stop();
+    }
+}
+
+// ── easytier helpers ──────────────────────────────────────────────────
+
+#[cfg(feature = "easytier")]
+async fn fetch_easytier_config(c: &crate::config::EasytierConfig) -> Option<cobotnet::Config> {
+    let server_url = c.server_url.as_deref().unwrap_or("");
+    let robot_sn = c.robot_sn.as_deref().unwrap_or(c.hostname.as_str());
+    let register_token = c.register_token.as_deref().unwrap_or("");
+
+    let url = format!("{}?robot_sn={}", server_url.trim_end_matches('/'), robot_sn);
+
+    tracing::info!(
+        server_url = server_url,
+        robot_sn = robot_sn,
+        "fetching easytier config from cobotsrv"
+    );
+
+    let resp = match reqwest::Client::new()
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", register_token))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::warn!("failed to fetch easytier config from cobotsrv: {:?}", e);
+            return None;
+        }
+    };
+
+    if !resp.status().is_success() {
+        tracing::warn!(
+            "cobotsrv returned {} for easytier config fetch",
+            resp.status()
+        );
+        return None;
+    }
+
+    match resp.json::<crate::config::EasytierConfig>().await {
+        Ok(mut remote_cfg) => {
+            remote_cfg.validate();
+            tracing::info!(
+                "fetched easytier config: network_name={}, ipv4={}",
+                remote_cfg.network_name,
+                remote_cfg.ipv4
+            );
+            Some(remote_cfg.into_cobotnet_config())
+        }
+        Err(e) => {
+            tracing::warn!("failed to parse easytier config from cobotsrv: {:?}", e);
+            None
+        }
+    }
+}
+
+#[cfg(feature = "easytier")]
+fn start_easytier_node(cfg: cobotnet::Config) -> Option<cobotnet::StopHandle> {
+    let node = cobotnet::EasytierNode::new(cfg);
+    match node.start() {
+        Ok((stop_handle, mut receiver)) => {
+            tracing::info!("easytier node started on cobotlet");
+            std::thread::spawn(move || {
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(async move {
+                        while let Some(event) = receiver.recv().await {
+                            match event {
+                                cobotnet::PeerEvent::Online(peer) => {
+                                    tracing::info!(
+                                        "easytier peer online: {} at {}",
+                                        peer.name,
+                                        peer.virtual_ip
+                                    );
+                                }
+                                cobotnet::PeerEvent::Offline(name) => {
+                                    tracing::info!("easytier peer offline: {}", name);
+                                }
+                            }
+                        }
+                        tracing::warn!("easytier peer channel closed");
+                    });
+            });
+            Some(stop_handle)
+        }
+        Err(e) => {
+            tracing::error!("failed to start easytier node on cobotlet: {:?}", e);
+            None
+        }
+    }
 }
 
 #[cfg(feature = "webui")]

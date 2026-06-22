@@ -25,3 +25,7 @@
 # `client_id={alias}` use alias as MQTT `client_id`
 # mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
 
+[easytier]
+server_url = "http://<cobotsrv IP>:4001/api/v1/easytier/config"
+robot_sn = "robot-001"
+register_token = "my-register-token"

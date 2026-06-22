@@ -4,6 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useNicknames } from "@/composables/useNicknames";
 import { messageApi } from "@/api/messages";
 import { fileApi } from "@/api/files";
+import { formatMessageTime } from "@/utils/time";
 import type { Message } from "@/types/models";
 
 const props = defineProps<{ message: Message }>();
@@ -11,10 +12,7 @@ const auth = useAuthStore();
 const { get: getNick } = useNicknames();
 
 const isMine = computed(() => props.message.sender_id === auth.userId);
-const time = computed(() => {
-  const d = new Date(props.message.created_at);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-});
+const time = computed(() => formatMessageTime(props.message.created_at));
 
 const mediaPath = computed(() => {
   const extra = props.message.extra as Record<string, unknown> | null;

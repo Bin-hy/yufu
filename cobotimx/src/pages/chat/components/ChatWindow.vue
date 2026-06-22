@@ -5,6 +5,7 @@ import MessageBubble from "./MessageBubble.vue";
 import MessageInput from "./MessageInput.vue";
 import GroupSettings from "./GroupSettings.vue";
 import { ref, watch, nextTick } from "vue";
+import { isSameDay, formatDateSeparator } from "@/utils/time";
 
 const chat = useChatStore();
 const showGroupSettings = ref(false);
@@ -53,11 +54,18 @@ watch(
       <div v-else-if="chat.hasMore" class="text-center text-xs text-gray-400 py-2">
         上滑加载更多
       </div>
-      <MessageBubble
-        v-for="msg in chat.messages"
-        :key="msg.id"
-        :message="msg"
-      />
+      <template v-for="(msg, idx) in chat.messages" :key="msg.id">
+        <!-- Date separator -->
+        <div
+          v-if="idx === 0 || !isSameDay(chat.messages[idx - 1].created_at, msg.created_at)"
+          class="flex justify-center py-2"
+        >
+          <span class="text-xs text-gray-400 bg-gray-100 px-3 py-0.5 rounded-full">
+            {{ formatDateSeparator(msg.created_at) }}
+          </span>
+        </div>
+        <MessageBubble :message="msg" />
+      </template>
       <div v-if="chat.messages.length === 0 && !chat.loadingMessages" class="text-center text-gray-400 text-sm py-12">
         暂无消息，打个招呼吧！
       </div>

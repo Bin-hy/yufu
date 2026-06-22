@@ -160,7 +160,70 @@ where
         }
     }
 
+    #[cfg(feature = "easytier")]
+    let mut stop_handle_storage: Option<cobotnet::StopHandle> = None;
+    #[cfg(feature = "easytier")]
+    {
+        if let Some(c) = cfg.easytier.clone() {
+            let mut cobotnet_cfg = c.into_cobotnet_config();
+            cobotnet_cfg.validate();
+
+            let node = cobotnet::EasytierNode::new(cobotnet_cfg);
+            match node.start() {
+                Ok((stop_handle, mut receiver)) => {
+                    stop_handle_storage = Some(stop_handle);
+                    info!("easytier node started");
+
+                    let store_nodes = store.get_map_nodes_mut();
+                    std::thread::spawn(move || {
+                        tokio::runtime::Runtime::new()
+                            .unwrap()
+                            .block_on(async move {
+                                while let Some(event) = receiver.recv().await {
+                                    match event {
+                                        cobotnet::PeerEvent::Online(peer) => {
+                                            let url = format!("http://{}", peer.virtual_ip);
+                                            store_nodes.write().unwrap().insert(
+                                                peer.name.clone(),
+                                                Node::new(String::new(), NodeKind::Easytier, url),
+                                            );
+                                            info!(
+                                                "easytier peer online: {} at {}",
+                                                peer.name, peer.virtual_ip
+                                            );
+                                        }
+                                        cobotnet::PeerEvent::Offline(name) => {
+                                            store_nodes.write().unwrap().remove(&name);
+                                            info!("easytier peer offline: {}", name);
+                                        }
+                                    }
+                                }
+                                tracing::warn!("easytier peer discovery channel closed");
+                            });
+                    });
+                }
+                Err(e) => {
+                    error!("failed to start easytier node: {:?}", e);
+                }
+            }
+        }
+    }
+
     let database = Arc::new(database_service);
+
+    #[cfg(feature = "easytier")]
+    {
+        let mut pool = cfg
+            .easytier
+            .as_ref()
+            .map(|c| c.ip_pool.clone())
+            .unwrap_or_default();
+        // Auto-derive pool prefix from cobotsrv's own IPv4 if not explicitly set.
+        let own_ipv4 = cfg.easytier.as_ref().map(|c| c.ipv4.as_str()).unwrap_or("");
+        pool.prefix = pool.resolve_prefix(own_ipv4);
+
+        crate::service::network::NetworkService::spawn_reclaim_task(database.clone(), pool);
+    }
 
     let mqtt_handle = if let Some(mqtt_cfg) = cfg.mqtt.clone() {
         let conn = Arc::new(database.connection.clone());
@@ -306,6 +369,12 @@ where
         .with_graceful_shutdown(signal)
         .await
         .unwrap_or_else(|e| error!("Application error: {e}"));
+
+    #[cfg(feature = "easytier")]
+    if let Some(handle) = stop_handle_storage {
+        info!("stopping easytier node");
+        handle.stop();
+    }
 }
 
 #[cfg(feature = "webui")]

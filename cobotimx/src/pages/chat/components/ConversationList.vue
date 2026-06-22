@@ -21,6 +21,7 @@ function selectConversation(id: number) {
   chat.activeConversationId = id;
   chat.clearMessages();
   chat.loadMessages(id);
+  chat.loadActiveConversationDetail();
   conversationApi.clearUnread(id).then(() => {
     const c = chat.conversations.find((c) => c.conversation_id === id);
     if (c) c.unread_count = 0;

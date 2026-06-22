@@ -328,10 +328,7 @@ pub async fn touch_private_conversations_on_send(
     Ok(())
 }
 
-async fn load_user_nicknames(
-    db: &DatabaseConnection,
-    ids: &[i64],
-) -> Vec<String> {
+async fn load_user_nicknames(db: &DatabaseConnection, ids: &[i64]) -> Vec<String> {
     let uid_list: Vec<crate::IdType> = ids.iter().map(|id| *id as crate::IdType).collect();
     let rows = match user::Entity::find()
         .filter(user::Column::Id.is_in(uid_list.clone()))
@@ -348,9 +345,13 @@ async fn load_user_nicknames(
         .map(|u| (u.id, u.nickname.unwrap_or(u.username)))
         .collect();
 
-    uid_list.iter()
+    uid_list
+        .iter()
         .map(|id| {
-            id_to_name.get(id).cloned().unwrap_or_else(|| format!("用户 #{}", id))
+            id_to_name
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| format!("用户 #{}", id))
         })
         .collect()
 }

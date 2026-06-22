@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useChatStore } from "@/stores/chat";
 import { useNicknames } from "@/composables/useNicknames";
 import { conversationApi } from "@/api/conversations";
@@ -10,19 +10,32 @@ const emit = defineEmits<{ (e: "close"): void }>();
 const chat = useChatStore();
 const { get: getNick } = useNicknames();
 
-const memberIds = ref<number[]>([]);
+const memberIds = computed({
+  get: () => chat.activeConversationMembers,
+  set: (val) => { chat.activeConversationMembers = val; },
+});
+const ownerId = computed(() => chat.activeConversationOwnerId);
 const addSelected = ref<number[]>([]);
 const addError = ref("");
 const loading = ref(false);
 
 onMounted(async () => {
+  // If store already has members (loaded at conversation select), use them.
+  // Otherwise, fall back to a dedicated API call.
   if (!chat.activeConversationId) return;
+  if (chat.activeConversationMembers.length > 0) return;
   try {
     const res = await conversationApi.members(chat.activeConversationId);
     if (res.data.data) {
-      memberIds.value = res.data.data.member_ids;
+      chat.activeConversationMembers = res.data.data.member_ids;
+      // The members endpoint now also returns owner_id
+      if (res.data.data.owner_id != null) {
+        chat.activeConversationOwnerId = res.data.data.owner_id;
+      }
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error("Failed to load conversation members:", e);
+  }
 });
 
 async function handleAdd() {
@@ -36,11 +49,11 @@ async function handleAdd() {
   try {
     const res = await groupApi.addMembers(chat.activeConversationId, addSelected.value);
     if (res.data.data) {
-      const existing = new Set(memberIds.value);
+      const existing = new Set(chat.activeConversationMembers);
       for (const id of res.data.data.added_member_ids) {
         existing.add(id);
       }
-      memberIds.value = Array.from(existing);
+      chat.activeConversationMembers = Array.from(existing);
       addSelected.value = [];
       if (res.data.data.skipped_member_ids.length > 0) {
         addError.value = `已跳过：${res.data.data.skipped_member_ids.join(", ")}`;
@@ -60,7 +73,7 @@ async function handleRemove(userId: number) {
   if (!confirm(`确定移除 ${name}？`)) return;
   try {
     await groupApi.removeMember(chat.activeConversationId, userId);
-    memberIds.value = memberIds.value.filter((id) => id !== userId);
+    chat.activeConversationMembers = chat.activeConversationMembers.filter((id) => id !== userId);
   } catch (e: unknown) {
     const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
     alert(msg || "移除成员失败");
@@ -73,6 +86,7 @@ async function handleTransfer(userId: number) {
   if (!confirm(`确定将群主转让给 ${name}？`)) return;
   try {
     await groupApi.transferOwner(chat.activeConversationId, userId);
+    chat.activeConversationOwnerId = userId;
     alert("群主已转让");
   } catch (e: unknown) {
     const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -120,7 +134,15 @@ async function handleLeave() {
               :key="id"
               class="flex items-center justify-between text-sm py-1 px-2 rounded hover:bg-gray-50"
             >
-              <span>{{ getNick(id) }}</span>
+              <span class="flex items-center gap-1.5">
+                {{ getNick(id) }}
+                <span
+                  v-if="id === ownerId"
+                  class="text-xs bg-amber-100 text-amber-700 px-1.5 py-px rounded font-medium"
+                >
+                  群主
+                </span>
+              </span>
               <div class="flex gap-1">
                 <button
                   @click="handleTransfer(id)"

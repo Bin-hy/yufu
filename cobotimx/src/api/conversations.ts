@@ -30,7 +30,7 @@ export const conversationApi = {
   },
 
   members(id: number) {
-    return http.get<ApiResponse<{ conversation_id: number; member_ids: number[] }>>(
+    return http.get<ApiResponse<{ conversation_id: number; member_ids: number[]; owner_id: number | null }>>(
       `/im/conversations/${id}/members`,
     );
   },
