@@ -11,7 +11,7 @@ crate-type = ["lib"]
 
 [dependencies]
 net4mqtt = { workspace = true, optional = true }
-cobotnet = { path = "../cobotnet", optional = true, default-features = false }
+cobotnet = { workspace = true, optional = true }
 auth = { workspace = true }
 http-log = { workspace = true }
 signal = { workspace = true }
@@ -55,4 +55,4 @@ futures = { workspace = true }
 [features]
 webui = ["dep:rust-embed", "dep:mime_guess"]
 net4mqtt = ["dep:net4mqtt"]
-easytier = ["dep:cobotnet", "cobotnet/easytier"]
+easytier = ["dep:cobotnet"]

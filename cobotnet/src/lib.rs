@@ -1,27 +1,18 @@
 pub mod config;
 
-#[cfg(feature = "easytier")]
 use std::collections::HashMap;
 
-#[cfg(feature = "easytier")]
 use anyhow::Context;
-#[cfg(feature = "easytier")]
 use easytier::common::config::{ConfigLoader, NetworkIdentity, PeerConfig, TomlConfigLoader};
-#[cfg(feature = "easytier")]
 use easytier::instance::instance::Instance;
-#[cfg(feature = "easytier")]
 use easytier::proto::rpc_types::controller::BaseController;
-#[cfg(feature = "easytier")]
 use easytier::rpc_service::InstanceRpcService;
-#[cfg(feature = "easytier")]
 use tokio::sync::{mpsc, oneshot};
-#[cfg(feature = "easytier")]
 use tracing::{error, info, warn};
 
 pub use config::Config;
 
 /// Information about a discovered peer on the VPN network.
-#[cfg(feature = "easytier")]
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
     pub name: String,
@@ -30,7 +21,6 @@ pub struct PeerInfo {
 }
 
 /// Events emitted when peers connect or disconnect.
-#[cfg(feature = "easytier")]
 #[derive(Debug, Clone)]
 pub enum PeerEvent {
     Online(PeerInfo),
@@ -38,13 +28,11 @@ pub enum PeerEvent {
 }
 
 /// Handle to stop a running easytier node.
-#[cfg(feature = "easytier")]
 pub struct StopHandle {
     stop_tx: oneshot::Sender<()>,
     done_rx: oneshot::Receiver<()>,
 }
 
-#[cfg(feature = "easytier")]
 impl StopHandle {
     /// Send stop signal and block until the background thread has
     /// cleaned up the easytier instance (calling `clear_resources`).
@@ -61,12 +49,10 @@ impl StopHandle {
 /// Wraps an easytier `Instance`, managing its lifecycle in a background thread
 /// with its own tokio runtime. Peer discovery events are emitted through
 /// an mpsc channel.
-#[cfg(feature = "easytier")]
 pub struct EasytierNode {
     config: Config,
 }
 
-#[cfg(feature = "easytier")]
 impl EasytierNode {
     /// Create a new node with the given configuration.
     /// The node is not started until `start()` is called.
@@ -194,7 +180,6 @@ impl EasytierNode {
 }
 
 /// Convert cobotnet Config into easytier's TomlConfigLoader.
-#[cfg(feature = "easytier")]
 fn config_to_toml_loader(config: &Config) -> TomlConfigLoader {
     let loader = TomlConfigLoader::default();
 
@@ -325,7 +310,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "easytier")]
     #[test]
     fn test_config_to_toml_loader_network_identity() {
         let mut cfg = Config {
@@ -341,7 +325,6 @@ mod tests {
         assert_eq!(identity.network_name, "test-net");
     }
 
-    #[cfg(feature = "easytier")]
     #[test]
     fn test_config_to_toml_loader_ipv4_parsed() {
         let mut cfg = Config {
@@ -357,7 +340,6 @@ mod tests {
         assert_eq!(ip.unwrap().to_string(), "10.100.0.1/24");
     }
 
-    #[cfg(feature = "easytier")]
     #[test]
     fn test_config_to_toml_loader_invalid_ipv4_is_ignored() {
         let mut cfg = Config {
@@ -370,7 +352,6 @@ mod tests {
         assert!(loader.get_ipv4().is_none());
     }
 
-    #[cfg(feature = "easytier")]
     #[test]
     fn test_config_to_toml_loader_listeners_and_peers() {
         let mut cfg = Config {
@@ -391,7 +372,6 @@ mod tests {
         assert_eq!(peers[0].uri.to_string(), "tcp://10.0.0.1:11010");
     }
 
-    #[cfg(feature = "easytier")]
     #[test]
     fn test_easytier_node_new() {
         let mut cfg = Config {
@@ -405,7 +385,6 @@ mod tests {
         let _node = EasytierNode::new(cfg);
     }
 
-    #[cfg(feature = "easytier")]
     #[test]
     fn test_stop_handle() {
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();

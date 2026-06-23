@@ -47,10 +47,10 @@ members = [
     "cobotsrv",
     "cobotusr",
     "cobotset",
+    "cobotnet",
     "cobotmap",
     "libs/auth",
 ]
-exclude = ["cobotnet", "cobotnet/*"]
 
 [workspace.package]
 version = "0.0.0"
@@ -60,6 +60,7 @@ authors = ["BinBat Ltd <hey@binbat.com>"]
 repository = "https://github.com/binbat/live777"
 
 [workspace.dependencies]
+cobotnet = { path = "cobotnet" }
 auth = {path = "libs/auth" }
 net4mqtt = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
 signal = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
