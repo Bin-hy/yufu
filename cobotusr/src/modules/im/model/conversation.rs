@@ -7,7 +7,7 @@ use sea_orm::{
     QuerySelect, Set,
 };
 
-use crate::entity::{conversation, conversation_member, message, user_conversation};
+use crate::entity::{conversation, conversation_member, message, user, user_conversation};
 use crate::modules::im::model::enums::{ConversationType, MessageType};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -328,6 +328,34 @@ pub async fn touch_private_conversations_on_send(
     Ok(())
 }
 
+async fn load_user_nicknames(db: &DatabaseConnection, ids: &[i64]) -> Vec<String> {
+    let uid_list: Vec<crate::IdType> = ids.iter().map(|id| *id as crate::IdType).collect();
+    let rows = match user::Entity::find()
+        .filter(user::Column::Id.is_in(uid_list.clone()))
+        .all(db)
+        .await
+    {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+
+    // preserve order of input IDs
+    let id_to_name: std::collections::HashMap<crate::IdType, String> = rows
+        .into_iter()
+        .map(|u| (u.id, u.nickname.unwrap_or(u.username)))
+        .collect();
+
+    uid_list
+        .iter()
+        .map(|id| {
+            id_to_name
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| format!("用户 #{}", id))
+        })
+        .collect()
+}
+
 pub async fn list_user_conversations(
     db: &DatabaseConnection,
     user_id: i64,
@@ -372,10 +400,26 @@ pub async fn list_user_conversations(
             }
         });
 
+        let title = if conv.conversation_type == ConversationType::Single && conv.title.is_none() {
+            match list_member_ids(db, conv.id).await {
+                Ok(ids) if ids.len() >= 2 => {
+                    let names = load_user_nicknames(db, &ids).await;
+                    if names.len() >= 2 {
+                        Some(format!("会话：{}与{}", names[0], names[1]))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            conv.title.clone()
+        };
+
         items.push(ConversationListItem {
             conversation_id: row.conversation_id,
             conversation_type: conv.conversation_type,
-            title: conv.title,
+            title,
             unread_count: row.unread_count,
             is_pinned: row.is_pinned(),
             last_message_preview: preview,

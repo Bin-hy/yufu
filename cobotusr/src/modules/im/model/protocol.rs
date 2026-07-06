@@ -155,6 +155,8 @@ pub struct ConversationDetailResponse {
     pub conversation_type: ConversationType,
     pub title: Option<String>,
     pub member_ids: Vec<i64>,
+    /// Only set for group conversations.
+    pub owner_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -167,6 +169,8 @@ pub struct DeleteConversationResponse {
 pub struct ConversationMembersResponse {
     pub conversation_id: i64,
     pub member_ids: Vec<i64>,
+    /// Only set for group conversations.
+    pub owner_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]

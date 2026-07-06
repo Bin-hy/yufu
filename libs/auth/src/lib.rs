@@ -151,14 +151,25 @@ pub async fn access_middleware<IDTYPE>(
 where
     for<'de> IDTYPE: Clone + Send + Sync + 'static + Serialize + Deserialize<'de>,
 {
-    // 1. Extract token from the Authorization header.
-    let auth_header = request.headers().get("Authorization");
+    // 1. Extract token from the Authorization header, or query param (for WebSocket).
+    let token = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .map(|t| t.trim().to_string())
+        .or_else(|| {
+            request.uri().query().and_then(|q| {
+                q.split('&')
+                    .filter_map(|p| p.split_once('='))
+                    .find(|(k, _)| *k == "access_token")
+                    .map(|(_, v)| v.trim().to_string())
+            })
+        });
 
-    let token = match auth_header.and_then(|v| v.to_str().ok()) {
-        Some(header_value) if header_value.starts_with("Bearer ") => {
-            header_value.trim_start_matches("Bearer ").trim()
-        }
-        _ => {
+    let token = match token {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
                 "Missing or invalid Authorization header",
@@ -166,6 +177,7 @@ where
                 .into_response();
         }
     };
+    let token = token.as_str();
 
     // 2. Retrieve the TokenManager from state.
     let token_manager = &auth_state.token_manager;
@@ -351,14 +363,22 @@ where
     for<'a> F: Fn(Claims<IDTYPE>, Request<Body>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<Request<Body>, (StatusCode, String)>> + Send + 'static,
 {
-    // 1. extract Token from Header
+    // 1. extract Token from Header, or query param (for WebSocket)
     let token = match request
         .headers()
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-    {
-        Some(t) => t.trim(),
+        .map(|t| t.trim().to_string())
+        .or_else(|| {
+            request.uri().query().and_then(|q| {
+                q.split('&')
+                    .filter_map(|p| p.split_once('='))
+                    .find(|(k, _)| *k == "access_token")
+                    .map(|(_, v)| v.trim().to_string())
+            })
+        }) {
+        Some(t) => t,
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -367,6 +387,7 @@ where
                 .into_response();
         }
     };
+    let token = token.as_str();
 
     // 2. validate Token
     let token_manager = &auth_state.token_manager;
@@ -417,8 +438,16 @@ pub async fn access_middleware_rs256(
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-    {
-        Some(t) => t.trim(),
+        .map(|t| t.trim().to_string())
+        .or_else(|| {
+            request.uri().query().and_then(|q| {
+                q.split('&')
+                    .filter_map(|p| p.split_once('='))
+                    .find(|(k, _)| *k == "access_token")
+                    .map(|(_, v)| v.trim().to_string())
+            })
+        }) {
+        Some(t) => t,
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -427,6 +456,7 @@ pub async fn access_middleware_rs256(
                 .into_response();
         }
     };
+    let token = token.as_str();
 
     match jwks.verify(token) {
         Ok(claims) => {
@@ -468,8 +498,16 @@ pub async fn access_middleware_local_rs256(
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-    {
-        Some(t) => t.trim(),
+        .map(|t| t.trim().to_string())
+        .or_else(|| {
+            request.uri().query().and_then(|q| {
+                q.split('&')
+                    .filter_map(|p| p.split_once('='))
+                    .find(|(k, _)| *k == "access_token")
+                    .map(|(_, v)| v.trim().to_string())
+            })
+        }) {
+        Some(t) => t,
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -478,6 +516,7 @@ pub async fn access_middleware_local_rs256(
                 .into_response();
         }
     };
+    let token = token.as_str();
 
     match signer.verify_access_token(token, None) {
         Ok(claims) => {

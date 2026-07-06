@@ -89,6 +89,9 @@ node_modules
 # redb
 data/uploads/
 data/
+
+# upload files
+storage
 # Configuration
 cobotsrv.toml
 cobotlet.toml
