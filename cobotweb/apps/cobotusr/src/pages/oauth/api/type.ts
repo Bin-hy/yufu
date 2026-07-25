@@ -6,6 +6,7 @@ export interface ClientVO {
   redirect_uris: string
   allowed_scopes: string
   grant_types: string
+  public_client: boolean
   create_time: string
   update_time: string
 }
@@ -19,11 +20,12 @@ export interface ClientCreateReq {
   redirect_uris?: string[]
   allowed_scopes?: string[]
   grant_types?: string[]
+  public_client?: boolean
 }
 
 // 注册应用响应（含一次性 secret）
 export interface ClientCreateResp extends ClientVO {
-  client_secret: string
+  client_secret: string | null
 }
 
 // 重新生成 secret 响应
@@ -37,6 +39,7 @@ export interface ClientUpdateReq {
   redirect_uris?: string[]
   allowed_scopes?: string[]
   grant_types?: string[]
+  public_client?: boolean
 }
 
 // Scope

@@ -66,13 +66,14 @@ interface AppForm {
   redirect_uris: string
   grant_types: string[]
   allowed_scopes: string[]
+  public_client: boolean
 }
 
 const GRANT_OPTIONS = ['authorization_code', 'refresh_token', 'client_credentials']
 const SCOPE_OPTIONS = ['openid', 'profile', 'email', 'phone', 'address', 'offline_access']
 
 function defaultForm(): AppForm {
-  return { name: '', description: '', redirect_uris: '', grant_types: ['authorization_code', 'refresh_token'], allowed_scopes: ['openid', 'profile', 'email'] }
+  return { name: '', description: '', redirect_uris: '', grant_types: ['authorization_code', 'refresh_token'], allowed_scopes: ['openid', 'profile', 'email'], public_client: false }
 }
 
 const dialogOpen = ref(false)
@@ -103,6 +104,7 @@ function openEdit(entry: AppEntry) {
     redirect_uris: entry.client?.redirect_uris || '',
     grant_types: entry.client?.grant_types ? entry.client.grant_types.split(',').map(s => s.trim()) : ['authorization_code'],
     allowed_scopes: entry.client?.allowed_scopes ? entry.client.allowed_scopes.split(',').map(s => s.trim()) : ['openid', 'profile'],
+    public_client: entry.client?.public_client ?? false,
   }
   newSecret.value = ''
   showSecret.value = false
@@ -144,6 +146,7 @@ async function submitForm() {
           redirect_uris: form.value.redirect_uris.split(',').map(s => s.trim()).filter(Boolean),
           allowed_scopes: form.value.allowed_scopes,
           grant_types: form.value.grant_types,
+          public_client: form.value.public_client,
         })
       }
       emitToast({ type: 'success', message: '应用已更新' })
@@ -152,9 +155,12 @@ async function submitForm() {
       const clientResp = await oauthApi.createClient({
         name: form.value.name.trim(),
         redirect_uri: form.value.redirect_uris.trim(),
+        allowed_scopes: form.value.allowed_scopes,
+        grant_types: form.value.grant_types,
+        public_client: form.value.public_client,
       })
-      newSecret.value = clientResp.client_secret
-      showSecret.value = true
+      newSecret.value = clientResp.client_secret ?? ''
+      showSecret.value = Boolean(clientResp.client_secret)
       // create application row linked to this client
       await appApi.createApplication({
         app_key: clientResp.client_id,
@@ -278,12 +284,16 @@ onMounted(async () => {
                 <div class="min-w-0">
                   <div class="text-base font-semibold text-foreground truncate">{{ e.app.name }}</div>
                   <div v-if="e.client" class="flex flex-col gap-0.5 mt-1">
+                    <div v-if="e.client.public_client" class="flex items-center gap-2 text-xs">
+                      <span class="text-muted-foreground shrink-0">Type</span>
+                      <span class="text-primary">Public (PKCE)</span>
+                    </div>
                     <div class="flex items-center gap-2 text-xs">
                       <span class="text-muted-foreground shrink-0">Client ID</span>
                       <code class="bg-muted px-1.5 py-0.5 rounded text-xs truncate">{{ e.client.client_id }}</code>
                       <button class="text-primary hover:underline shrink-0 text-xs" @click="copyText(e.client!.client_id)">复制</button>
                     </div>
-                    <div class="flex items-center gap-2 text-xs">
+                    <div v-if="!e.client.public_client" class="flex items-center gap-2 text-xs">
                       <span class="text-muted-foreground shrink-0">Secret</span>
                       <code class="bg-muted px-1.5 py-0.5 rounded text-xs">********</code>
                       <button class="text-primary hover:underline shrink-0 text-xs" @click="openRegen(e)">重新生成</button>

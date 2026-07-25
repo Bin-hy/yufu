@@ -10,23 +10,6 @@ export type MsgType = 1 | 2 | 3 | 4 | 5 | 6;
 export type GroupRole = 0 | 1;
 
 // ── Auth ──
-export type LoginRequest = {
-  username: string;
-  password: string;
-};
-
-export type RegisterRequest = {
-  username: string;
-  nickname: string;
-  password: string;
-};
-
-export type LoginResponse = {
-  access_token: string;
-  username: string;
-  nickname: string;
-};
-
 // ── Conversation ──
 export type ConversationSummary = {
   conversation_id: number;

@@ -9,7 +9,10 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    trace::TraceLayer,
+};
 use tracing::{error, info, info_span};
 
 use crate::config::Config;
@@ -161,7 +164,6 @@ where
             let origins: Vec<String> = app_state.clone().config.auth.origins;
             let has_wildcard = origins.iter().any(|o| o == "*");
             let cors_layer = CorsLayer::new()
-                .allow_credentials(true)
                 .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
                 .allow_methods([
                     Method::GET,
@@ -172,21 +174,23 @@ where
                 ]);
 
             if has_wildcard {
-                // Mirror the request Origin header back (credentials-compatible wildcard).
-                // `Access-Control-Allow-Origin: *` is forbidden when credentials are used,
-                // so we echo the actual Origin instead.
-                cors_layer.allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+                // Browser SPA requests authenticate with bearer tokens, not cookies.  A true
+                // wildcard therefore avoids credential-mode restrictions while reliably
+                // returning Access-Control-Allow-Origin for public OIDC endpoints.
+                cors_layer.allow_origin(Any)
             } else {
                 // Use predicate to match request Origin against allowed origins list
-                cors_layer.allow_origin(tower_http::cors::AllowOrigin::predicate(
-                    move |origin: &HeaderValue, _request_head: &http::request::Parts| {
-                        if let Ok(origin_str) = origin.to_str() {
-                            origins.contains(&origin_str.to_string())
-                        } else {
-                            false
-                        }
-                    },
-                ))
+                cors_layer.allow_credentials(true).allow_origin(
+                    tower_http::cors::AllowOrigin::predicate(
+                        move |origin: &HeaderValue, _request_head: &http::request::Parts| {
+                            if let Ok(origin_str) = origin.to_str() {
+                                origins.contains(&origin_str.to_string())
+                            } else {
+                                false
+                            }
+                        },
+                    ),
+                )
             }
         })
         .with_state(app_state.clone())
@@ -405,9 +409,10 @@ impl AppState {
 
     /// Auto-register OIDC clients listed in `[[oidc.bootstrap_clients]]`,
     /// and pair each one with an `Application` row so it shows up in the
-    /// permission system. Idempotent: existing rows are left untouched
-    /// (secrets are NEVER overwritten), but a missing `Application` link is
-    /// always backfilled so old DBs upgrade cleanly.
+    /// permission system. Existing secrets are NEVER overwritten. Public
+    /// clients are upgraded when configured as such, and bootstrap redirect
+    /// URIs are added (without removing administrator-managed URIs) so old
+    /// databases receive required callback paths on upgrade.
     async fn init_oidc_bootstrap_clients(&self) -> result::Result<()> {
         use crate::entity::{application, oauth_client};
         use rand::RngCore;
@@ -438,24 +443,59 @@ impl AppState {
                 .await?
             {
                 Some(existing) => {
-                    info!(client_id = %entry.client_id, "OIDC bootstrap client already exists");
-                    existing.id
+                    let mut redirect_uris: Vec<String> = existing
+                        .redirect_uris
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|uri| !uri.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    let mut redirects_changed = false;
+                    for uri in &entry.redirect_uris {
+                        if !redirect_uris.contains(uri) {
+                            redirect_uris.push(uri.clone());
+                            redirects_changed = true;
+                        }
+                    }
+                    let public_upgrade = entry.public_client && !existing.public_client;
+                    if public_upgrade || redirects_changed {
+                        let mut active: oauth_client::ActiveModel = existing.into();
+                        if public_upgrade {
+                            active.public_client = Set(true);
+                            active.client_secret_hash = Set(String::new());
+                        }
+                        if redirects_changed {
+                            active.redirect_uris = Set(redirect_uris.join(","));
+                        }
+                        active.update_time = Set(chrono::Utc::now().naive_utc());
+                        let updated = active.update(db).await?;
+                        info!(client_id = %entry.client_id, public_upgrade, redirects_changed, "OIDC bootstrap client upgraded");
+                        updated.id
+                    } else {
+                        info!(client_id = %entry.client_id, "OIDC bootstrap client already exists");
+                        existing.id
+                    }
                 }
                 None => {
-                    let (secret, generated) = match &entry.client_secret {
-                        Some(s) => (s.clone(), false),
-                        None => {
+                    let (secret, generated) = match (&entry.client_secret, entry.public_client) {
+                        (_, true) => (String::new(), false),
+                        (Some(s), false) => (s.clone(), false),
+                        (None, false) => {
                             let mut buf = [0u8; 32];
                             OsRng.fill_bytes(&mut buf);
                             (hex::encode(buf), true)
                         }
                     };
-                    let secret_hash = bcrypt::hash(&secret, bcrypt::DEFAULT_COST).map_err(|e| {
-                        crate::error::AppError::InternalServerError(anyhow::anyhow!(
-                            "bcrypt hash failed for bootstrap client {}: {e}",
-                            entry.client_id
-                        ))
-                    })?;
+                    let secret_hash = if entry.public_client {
+                        String::new()
+                    } else {
+                        bcrypt::hash(&secret, bcrypt::DEFAULT_COST).map_err(|e| {
+                            crate::error::AppError::InternalServerError(anyhow::anyhow!(
+                                "bcrypt hash failed for bootstrap client {}: {e}",
+                                entry.client_id
+                            ))
+                        })?
+                    };
 
                     let now = chrono::Utc::now().naive_utc();
                     let inserted = oauth_client::ActiveModel {
@@ -466,6 +506,7 @@ impl AppState {
                         redirect_uris: Set(entry.redirect_uris.join(",")),
                         allowed_scopes: Set(entry.allowed_scopes.join(",")),
                         client_secret_hash: Set(secret_hash),
+                        public_client: Set(entry.public_client),
                         grant_types: Set(entry.grant_types.join(",")),
                         create_time: Set(now),
                         update_time: Set(now),

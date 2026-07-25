@@ -1,5 +1,6 @@
-use axum::extract::State;
-use axum::response::Redirect;
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, header::SET_COOKIE};
+use axum::response::{Html, Redirect};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,7 @@ pub struct OidcDiscovery {
     pub jwks_uri: Option<String>,
     pub revocation_endpoint: String,
     pub introspection_endpoint: String,
+    pub end_session_endpoint: String,
     pub response_types_supported: Vec<String>,
     pub subject_types_supported: Vec<String>,
     pub id_token_signing_alg_values_supported: Vec<String>,
@@ -95,6 +97,12 @@ pub struct RevokeRequest {
     pub token_type_hint: String,
     pub client_id: Option<String>,
     pub client_secret: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct EndSessionQuery {
+    pub client_id: String,
+    pub post_logout_redirect_uri: String,
 }
 
 fn default_token_type_hint() -> String {
@@ -189,6 +197,7 @@ pub fn get_public_routes() -> Router<AppState> {
         .route("/oidc/token", post(token_endpoint))
         .route("/oidc/revoke", post(revoke))
         .route("/oidc/introspect", post(introspect))
+        .route("/oidc/logout", get(end_session))
         .route("/oidc/authorize", get(authorize))
 }
 
@@ -216,6 +225,7 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
         jwks_uri: Some(format!("{}/.well-known/jwks.json", base)),
         revocation_endpoint: format!("{}/oidc/revoke", base),
         introspection_endpoint: format!("{}/oidc/introspect", base),
+        end_session_endpoint: format!("{}/oidc/logout", base),
         response_types_supported: vec!["code".to_string()],
         subject_types_supported: vec!["public".to_string()],
         id_token_signing_alg_values_supported: vec![state.id_token_signer.algorithm().to_string()],
@@ -373,6 +383,15 @@ async fn handle_authorization_code(
             "client not allowed authorization_code grant".to_string(),
         ));
     }
+    if !OidcService::public_client_requires_s256_pkce(
+        &client,
+        Some(&entry.code_challenge),
+        &entry.code_challenge_method,
+    ) {
+        return Err(crate::error::AppError::BadRequest(
+            "public clients require a non-empty S256 code_challenge".to_string(),
+        ));
+    }
 
     // Verify PKCE
     if pkce_used {
@@ -413,7 +432,7 @@ async fn handle_refresh_token(state: &AppState, req: &TokenRequest) -> Result<Js
     let db = &state.database.connection;
 
     // Authenticate client
-    let client = OidcService::authenticate_client(
+    let client = OidcService::authenticate_token_client(
         db,
         req.client_id.as_deref(),
         req.client_secret.as_deref(),
@@ -503,19 +522,43 @@ async fn revoke(
     axum::extract::Form(req): axum::extract::Form<RevokeRequest>,
 ) -> Result<http::StatusCode> {
     let db = &state.database.connection;
-    OidcService::authenticate_client(db, req.client_id.as_deref(), req.client_secret.as_deref())
-        .await?;
+    let client = OidcService::authenticate_token_client(
+        db,
+        req.client_id.as_deref(),
+        req.client_secret.as_deref(),
+    )
+    .await?;
 
     match req.token_type_hint.as_str() {
         "refresh_token" => {
-            OidcService::revoke_by_refresh_token(db, &req.token).await?;
+            if let Some(token) =
+                crate::entity::oauth_token::Entity::find_by_refresh_token(db, &req.token).await?
+                && token.client_id == client.client_id
+            {
+                OidcService::revoke_by_refresh_token(db, &req.token).await?;
+            }
         }
         "access_token" => {
-            OidcService::revoke_by_access_token(db, &req.token).await?;
+            if let Some(token) =
+                crate::entity::oauth_token::Entity::find_by_access_token(db, &req.token).await?
+                && token.client_id == client.client_id
+            {
+                OidcService::revoke_by_access_token(db, &req.token).await?;
+            }
         }
         _ => {
-            OidcService::revoke_by_refresh_token(db, &req.token).await?;
-            OidcService::revoke_by_access_token(db, &req.token).await?;
+            if let Some(token) =
+                crate::entity::oauth_token::Entity::find_by_refresh_token(db, &req.token).await?
+                && token.client_id == client.client_id
+            {
+                OidcService::revoke_by_refresh_token(db, &req.token).await?;
+            }
+            if let Some(token) =
+                crate::entity::oauth_token::Entity::find_by_access_token(db, &req.token).await?
+                && token.client_id == client.client_id
+            {
+                OidcService::revoke_by_access_token(db, &req.token).await?;
+            }
         }
     }
     Ok(http::StatusCode::OK)
@@ -592,6 +635,46 @@ async fn userinfo(
     }))
 }
 
+/// Clear the browser-local IdP session and return to a registered client.
+///
+/// cobotusr's management SPA stores its access token at the IdP origin, so an
+/// IM-origin page cannot remove it directly. The registered redirect URI is
+/// checked before this response emits a same-origin cleanup script.
+async fn end_session(
+    State(state): State<AppState>,
+    Query(query): Query<EndSessionQuery>,
+) -> Result<(HeaderMap, Html<String>)> {
+    let db = &state.database.connection;
+    let client = oauth_client::Entity::get_by_client_id(db, &query.client_id)
+        .await?
+        .ok_or(crate::error::AppError::Unauthorized(
+            "invalid client_id".to_string(),
+        ))?;
+    if !OidcService::client_has_redirect(&client, &query.post_logout_redirect_uri) {
+        return Err(crate::error::AppError::BadRequest(
+            "invalid post_logout_redirect_uri".to_string(),
+        ));
+    }
+
+    let redirect_uri = serde_json::to_string(&query.post_logout_redirect_uri)
+        .map_err(crate::error::AppError::from)?
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026");
+    let body = format!(
+        "<!doctype html><html><body><script>localStorage.removeItem('userInfo');document.cookie='access_token=; Path=/; Max-Age=0; SameSite=Lax';window.location.replace({redirect_uri});</script></body></html>"
+    );
+
+    let mut headers = HeaderMap::new();
+    headers.append(
+        SET_COOKIE,
+        "refresh_token=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0"
+            .parse()
+            .map_err(crate::error::AppError::from)?,
+    );
+    Ok((headers, Html(body)))
+}
+
 /// Build a query string from authorize params (for redirect URLs).
 fn build_authorize_query_string(q: &AuthorizeQuery) -> String {
     let mut parts = vec![
@@ -649,6 +732,15 @@ async fn authorize(
     if !OidcService::client_has_redirect(&client, &redirect_uri) {
         return Err(crate::error::AppError::Unauthorized(
             "invalid redirect_uri".to_string(),
+        ));
+    }
+    if !OidcService::public_client_requires_s256_pkce(
+        &client,
+        q.code_challenge.as_deref(),
+        &q.code_challenge_method,
+    ) {
+        return Err(crate::error::AppError::BadRequest(
+            "public clients require a non-empty S256 code_challenge".to_string(),
         ));
     }
 
@@ -779,6 +871,15 @@ async fn authorize_consent(
     if !OidcService::client_has_redirect(&client, &req.redirect_uri) {
         return Err(crate::error::AppError::Unauthorized(
             "invalid redirect_uri".to_string(),
+        ));
+    }
+    if !OidcService::public_client_requires_s256_pkce(
+        &client,
+        req.code_challenge.as_deref(),
+        &req.code_challenge_method,
+    ) {
+        return Err(crate::error::AppError::BadRequest(
+            "public clients require a non-empty S256 code_challenge".to_string(),
         ));
     }
 

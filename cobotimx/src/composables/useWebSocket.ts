@@ -1,6 +1,8 @@
 import { ref, onUnmounted } from "vue";
 import { useChatStore } from "@/stores/chat";
 import { useAuthStore } from "@/stores/auth";
+import { getAccessToken } from "@/auth/oidc";
+import { apiBase } from "@/http";
 import type {
   WsServerEnvelope,
   WsChatPushPayload,
@@ -14,9 +16,11 @@ const HEARTBEAT_INTERVAL = 25_000;
 const RECONNECT_DELAY = 3_000;
 
 function getWsUrl(): string {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const token = sessionStorage.getItem("access_token") || "";
-  return `${proto}//${location.host}/api/v1/im/ws?access_token=${encodeURIComponent(token)}`;
+  const apiUrl = new URL(apiBase, window.location.origin);
+  apiUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
+  apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, "")}/im/ws`;
+  apiUrl.searchParams.set("access_token", getAccessToken() ?? "");
+  return apiUrl.toString();
 }
 
 export function useWebSocket() {
@@ -29,7 +33,7 @@ export function useWebSocket() {
 
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-    if (!sessionStorage.getItem("access_token")) return;
+    if (!getAccessToken()) return;
 
     ws = new WebSocket(getWsUrl());
 

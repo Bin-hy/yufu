@@ -224,6 +224,11 @@ pub struct BootstrapClient {
     /// stable dev/test secrets.
     #[serde(default)]
     pub client_secret: Option<String>,
+    /// Public SPA clients authenticate authorization-code exchanges with PKCE
+    /// and never receive a client secret. They may use their client_id for
+    /// refresh-token and revocation requests.
+    #[serde(default)]
+    pub public_client: bool,
 }
 
 fn default_bootstrap_scopes() -> Vec<String> {

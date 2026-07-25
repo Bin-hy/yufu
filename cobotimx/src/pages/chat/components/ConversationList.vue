@@ -2,14 +2,12 @@
 import { ref } from "vue";
 import { useChatStore } from "@/stores/chat";
 import { useAuthStore } from "@/stores/auth";
-import { useRouter } from "vue-router";
 import { conversationApi } from "@/api/conversations";
 import type { CreateConversationRequest } from "@/types/models";
 import UserPicker from "./UserPicker.vue";
 
 const chat = useChatStore();
 const auth = useAuthStore();
-const router = useRouter();
 
 const showCreate = ref(false);
 const createType = ref<1 | 2>(1);
@@ -57,7 +55,6 @@ async function handleCreate() {
 
 async function handleLogout() {
   await auth.logout();
-  router.push("/login");
 }
 
 function convIcon(type: 1 | 2): string {

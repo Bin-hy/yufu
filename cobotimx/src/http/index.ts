@@ -1,13 +1,16 @@
 import axios from "axios";
+import { clearAuth, getAccessToken, refreshAccessToken, redirectToLogin } from "@/auth/oidc";
+
+export const apiBase = import.meta.env.VITE_IM_API_BASE ?? "/api/v1";
 
 const http = axios.create({
-  baseURL: "/api/v1",
+  baseURL: apiBase,
   timeout: 30_000,
   headers: { "Content-Type": "application/json" },
 });
 
 http.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem("access_token");
+  const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -20,24 +23,20 @@ http.interceptors.response.use(
     const original = error.config;
     if (
       error.response?.status === 401 &&
-      !original._retry &&
-      original.url !== "/refresh"
+      !original._retry
     ) {
       original._retry = true;
       try {
-        const { data } = await axios.post("/api/v1/refresh", null, {
-          withCredentials: true,
-        });
-        const token = data.access_token;
+        const token = await refreshAccessToken();
         if (token) {
-          sessionStorage.setItem("access_token", token);
           original.headers.Authorization = `Bearer ${token}`;
           return http(original);
         }
       } catch {
-        sessionStorage.removeItem("access_token");
-        window.location.href = "/login";
+        // The common unauthorized path below clears local OIDC state and starts a new flow.
       }
+      clearAuth();
+      void redirectToLogin(window.location.pathname + window.location.search);
     }
     return Promise.reject(error);
   },

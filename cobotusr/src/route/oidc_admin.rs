@@ -23,6 +23,8 @@ pub struct ClientCreateReq {
     pub allowed_scopes: Option<Vec<String>>,
     #[serde(default)]
     pub grant_types: Option<Vec<String>>,
+    #[serde(default)]
+    pub public_client: bool,
 }
 
 #[derive(Serialize)]
@@ -33,6 +35,7 @@ pub struct ClientVO {
     pub redirect_uris: String,
     pub allowed_scopes: String,
     pub grant_types: String,
+    pub public_client: bool,
     pub create_time: String,
     pub update_time: String,
 }
@@ -46,6 +49,7 @@ impl From<crate::entity::oauth_client::Model> for ClientVO {
             redirect_uris: m.redirect_uris,
             allowed_scopes: m.allowed_scopes,
             grant_types: m.grant_types,
+            public_client: m.public_client,
             create_time: m.create_time.format("%Y-%m-%d %H:%M:%S").to_string(),
             update_time: m.update_time.format("%Y-%m-%d %H:%M:%S").to_string(),
         }
@@ -56,7 +60,7 @@ impl From<crate::entity::oauth_client::Model> for ClientVO {
 pub struct ClientCreateResp {
     #[serde(flatten)]
     pub client: ClientVO,
-    pub client_secret: String, // returned only once
+    pub client_secret: Option<String>, // returned only once for confidential clients
 }
 
 #[derive(Serialize)]
@@ -70,6 +74,7 @@ pub struct ClientUpdateReq {
     pub redirect_uris: Option<Vec<String>>,
     pub allowed_scopes: Option<Vec<String>>,
     pub grant_types: Option<Vec<String>>,
+    pub public_client: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -127,6 +132,7 @@ async fn create_client(
         redirect_uris,
         allowed_scopes,
         grant_types,
+        req.public_client,
     )
     .await?;
     Ok(Json(ClientCreateResp {
@@ -162,6 +168,7 @@ async fn update_client(
         req.redirect_uris,
         req.allowed_scopes,
         req.grant_types,
+        req.public_client,
     )
     .await?;
     Ok(Json(ClientVO::from(updated)))
