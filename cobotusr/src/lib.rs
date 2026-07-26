@@ -7,13 +7,14 @@ use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, Qu
 use sea_orm_migration::MigratorTrait;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::net::TcpListener;
 
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
-use tracing::{error, info, info_span};
+use tracing::{error, info, info_span, warn};
 
 use crate::config::Config;
 use crate::entity::role::RoleEnum;
@@ -44,6 +45,87 @@ pub mod route;
 mod seed;
 pub mod service;
 mod swagger_docs;
+
+fn is_successful_http_exchange(status: StatusCode) -> bool {
+    status.is_informational() || status.is_success()
+}
+
+fn redact_access_token(uri: &http::Uri) -> String {
+    let Some(query) = uri.query() else {
+        return uri.to_string();
+    };
+
+    let pairs: Vec<_> = url::form_urlencoded::parse(query.as_bytes()).collect();
+    if !pairs.iter().any(|(key, _)| key == "access_token") {
+        return uri.to_string();
+    }
+
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for (key, value) in pairs {
+        let value = if key == "access_token" {
+            "REDACTED"
+        } else {
+            value.as_ref()
+        };
+        serializer.append_pair(&key, value);
+    }
+
+    format!("{}?{}", uri.path(), serializer.finish())
+}
+
+async fn print_request_response(
+    req: Request,
+    next: middleware::Next,
+) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
+    let start = Instant::now();
+    let method = req.method().clone();
+    let uri = redact_access_token(req.uri());
+
+    let request_headers = req.headers().clone();
+    let (request_parts, request_body) = req.into_parts();
+    let request_bytes =
+        http_log::buffer_and_print("request", request_headers, request_body).await?;
+    let request = Request::from_parts(request_parts, Body::from(request_bytes));
+
+    let response = next.run(request).await;
+    let response_headers = response.headers().clone();
+    let (response_parts, response_body) = response.into_parts();
+    let response_bytes =
+        http_log::buffer_and_print("response", response_headers, response_body).await?;
+    let response = axum::response::Response::from_parts(response_parts, Body::from(response_bytes));
+
+    let duration = start.elapsed();
+    let status = response.status();
+    if is_successful_http_exchange(status) {
+        if duration.as_millis() > 500 {
+            warn!(
+                "[{} {}] [{}] {}ms",
+                method,
+                uri,
+                status.as_u16(),
+                duration.as_millis()
+            );
+        } else {
+            info!(
+                "[{} {}] [{}] {}ms",
+                method,
+                uri,
+                status.as_u16(),
+                duration.as_millis()
+            );
+        }
+    } else {
+        error!(
+            "[{} {}] [{}] {}ms",
+            method,
+            uri,
+            status.as_u16(),
+            duration.as_millis()
+        );
+    }
+
+    Ok(response)
+}
 
 pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
 where
@@ -194,12 +276,12 @@ where
             }
         })
         .with_state(app_state.clone())
-        .layer(axum::middleware::from_fn(http_log::print_request_response))
+        .layer(axum::middleware::from_fn(print_request_response))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
                 let span = info_span!(
                     "http_request",
-                    uri = ?request.uri(),
+                    uri = %redact_access_token(request.uri()),
                     method = ?request.method(),
                     span_id = tracing::field::Empty,
                     target_addr = tracing::field::Empty,
@@ -594,5 +676,51 @@ impl AppState {
             info!("Initial the super admin account has created before.");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_successful_http_exchange_accepts_websocket_switching_protocols() {
+        assert!(is_successful_http_exchange(StatusCode::SWITCHING_PROTOCOLS));
+        assert!(is_successful_http_exchange(StatusCode::OK));
+        assert!(!is_successful_http_exchange(StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn test_redact_access_token_masks_each_token_and_preserves_other_parameters() {
+        let uri: http::Uri =
+            "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4&access_token=first&access_token=second"
+                .parse()
+                .unwrap();
+
+        let redacted = redact_access_token(&uri);
+
+        assert_eq!(
+            redacted,
+            "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4&access_token=REDACTED&access_token=REDACTED"
+        );
+        assert!(!redacted.contains("first"));
+        assert!(!redacted.contains("second"));
+    }
+
+    #[test]
+    fn test_redact_access_token_leaves_uris_without_token_unchanged() {
+        let without_query: http::Uri = "/api/v1/im/users".parse().unwrap();
+        let without_token: http::Uri = "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4"
+            .parse()
+            .unwrap();
+
+        assert_eq!(
+            redact_access_token(&without_query),
+            without_query.to_string()
+        );
+        assert_eq!(
+            redact_access_token(&without_token),
+            without_token.to_string()
+        );
     }
 }

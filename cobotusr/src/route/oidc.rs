@@ -662,7 +662,7 @@ async fn end_session(
         .replace('>', "\\u003e")
         .replace('&', "\\u0026");
     let body = format!(
-        "<!doctype html><html><body><script>localStorage.removeItem('userInfo');document.cookie='access_token=; Path=/; Max-Age=0; SameSite=Lax';window.location.replace({redirect_uri});</script></body></html>"
+        "<!doctype html><html><body><script>localStorage.removeItem('userInfo');for(const part of document.cookie.split(';')){{const name=part.trim().split('=',1)[0];if(name==='access_token'||name.endsWith('-token-key'))document.cookie=name+'=; Path=/; Max-Age=0; SameSite=Lax';}}window.location.replace({redirect_uri});</script></body></html>"
     );
 
     let mut headers = HeaderMap::new();

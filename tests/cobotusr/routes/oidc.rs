@@ -1,10 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+use axum::http::StatusCode;
 use cobotusr::config::{BootstrapClient, Config};
-use http::StatusCode;
-use reqwest::Client;
+use reqwest::{Client, Url};
 use tokio::net::TcpListener;
-use url::Url;
 
 use super::super::common::{get_postgres_container, get_test_token, shutdown_signal};
 
@@ -97,13 +96,12 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         .expect("end-session request should complete");
     assert_eq!(end_session.status(), StatusCode::OK);
     assert!(end_session.headers().contains_key("set-cookie"));
-    assert!(
-        end_session
-            .text()
-            .await
-            .expect("end-session response should be text")
-            .contains(POST_LOGOUT_REDIRECT_URI)
-    );
+    let end_session_body = end_session
+        .text()
+        .await
+        .expect("end-session response should be text");
+    assert!(end_session_body.contains(POST_LOGOUT_REDIRECT_URI));
+    assert!(end_session_body.contains("name.endsWith('-token-key')"));
 
     let invalid_end_session = client
         .get(format!("{base_url}/oidc/logout"))
