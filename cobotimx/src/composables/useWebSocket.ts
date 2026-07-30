@@ -1,7 +1,7 @@
 import { ref, onUnmounted } from "vue";
 import { useChatStore } from "@/stores/chat";
 import { useAuthStore } from "@/stores/auth";
-import { getAccessToken } from "@/auth/oidc";
+import { getAccessToken, hasExplicitlySignedOut, refreshAccessToken } from "@/auth/oidc";
 import { apiBase } from "@/http";
 import type {
   WsServerEnvelope,
@@ -28,12 +28,18 @@ export function useWebSocket() {
   let ws: WebSocket | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let connectPromise: Promise<void> | null = null;
   let seqCounter = 0;
   let destroyed = false;
 
-  function connect() {
+  async function connectInner() {
+    if (destroyed) return;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-    if (!getAccessToken()) return;
+    if (!getAccessToken() && !(await refreshAccessToken())) {
+      if (!hasExplicitlySignedOut()) scheduleReconnect();
+      return;
+    }
+    if (destroyed) return;
 
     ws = new WebSocket(getWsUrl());
 
@@ -62,8 +68,18 @@ export function useWebSocket() {
     };
   }
 
+  function connect() {
+    if (!connectPromise) {
+      connectPromise = connectInner().finally(() => {
+        connectPromise = null;
+      });
+    }
+    return connectPromise;
+  }
+
   function disconnect() {
     destroyed = true;
+    connectPromise = null;
     stopHeartbeat();
     clearReconnect();
     if (ws) {

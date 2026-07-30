@@ -140,6 +140,21 @@ describe("IM OIDC PKCE flow", () => {
     expect(localStorage.getItem(EXPIRY_KEY)).toBeNull();
   });
 
+  it("keeps existing tokens when refresh fails because of a network error", async () => {
+    localStorage.setItem(ACCESS_KEY, "old-access");
+    localStorage.setItem(REFRESH_KEY, "refresh-token");
+    localStorage.setItem(EXPIRY_KEY, String(Date.now() + 3_600_000));
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("network error");
+    }));
+
+    await expect(refreshAccessToken()).resolves.toBeNull();
+
+    expect(localStorage.getItem(ACCESS_KEY)).toBe("old-access");
+    expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-token");
+    expect(localStorage.getItem(EXPIRY_KEY)).toBeTruthy();
+  });
+
   it("revokes the refresh token and clears local authentication", async () => {
     localStorage.setItem(ACCESS_KEY, "access-token");
     localStorage.setItem(REFRESH_KEY, "refresh-token");

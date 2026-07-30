@@ -211,6 +211,7 @@ pub struct Oidc {
 
 /// One row in `[[oidc.bootstrap_clients]]`. See `Oidc::bootstrap_clients`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BootstrapClient {
     pub client_id: String,
     pub name: String,

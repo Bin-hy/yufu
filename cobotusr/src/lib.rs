@@ -1,13 +1,13 @@
 use axum::body::Body;
 use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
-use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use http::{HeaderValue, Method, StatusCode, Uri};
+use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE};
+use http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
 use tower_http::{
@@ -50,7 +50,7 @@ fn is_successful_http_exchange(status: StatusCode) -> bool {
     status.is_informational() || status.is_success()
 }
 
-fn redact_access_token(uri: &http::Uri) -> String {
+pub(crate) fn redact_access_token(uri: &http::Uri) -> String {
     let Some(query) = uri.query() else {
         return uri.to_string();
     };
@@ -73,29 +73,23 @@ fn redact_access_token(uri: &http::Uri) -> String {
     format!("{}?{}", uri.path(), serializer.finish())
 }
 
-async fn print_request_response(
-    req: Request,
-    next: middleware::Next,
-) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
-    let start = Instant::now();
-    let method = req.method().clone();
-    let uri = redact_access_token(req.uri());
+fn redact_sensitive_headers(mut headers: HeaderMap) -> HeaderMap {
+    headers.remove(AUTHORIZATION);
+    headers.remove(COOKIE);
+    headers.remove(SET_COOKIE);
+    headers
+}
 
-    let request_headers = req.headers().clone();
-    let (request_parts, request_body) = req.into_parts();
-    let request_bytes =
-        http_log::buffer_and_print("request", request_headers, request_body).await?;
-    let request = Request::from_parts(request_parts, Body::from(request_bytes));
+fn should_skip_body_logging(uri: &http::Uri, headers: &HeaderMap) -> bool {
+    matches!(uri.path(), "/oidc/token" | "/oidc/revoke")
+        || uri.path() == "/api/v1/im/files"
+        || headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("multipart/"))
+}
 
-    let response = next.run(request).await;
-    let response_headers = response.headers().clone();
-    let (response_parts, response_body) = response.into_parts();
-    let response_bytes =
-        http_log::buffer_and_print("response", response_headers, response_body).await?;
-    let response = axum::response::Response::from_parts(response_parts, Body::from(response_bytes));
-
-    let duration = start.elapsed();
-    let status = response.status();
+fn log_http_exchange(method: &Method, uri: &str, status: StatusCode, duration: Duration) {
     if is_successful_http_exchange(status) {
         if duration.as_millis() > 500 {
             warn!(
@@ -123,6 +117,45 @@ async fn print_request_response(
             duration.as_millis()
         );
     }
+}
+
+async fn print_request_response(
+    req: Request,
+    next: middleware::Next,
+) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
+    let start = Instant::now();
+    let method = req.method().clone();
+    let uri = redact_access_token(req.uri());
+    let skip_body_logging = should_skip_body_logging(req.uri(), req.headers());
+
+    if skip_body_logging {
+        let response = next.run(req).await;
+        log_http_exchange(&method, &uri, response.status(), start.elapsed());
+        return Ok(response);
+    }
+
+    let request_headers = redact_sensitive_headers(req.headers().clone());
+    let (request_parts, request_body) = req.into_parts();
+    let request_bytes = http_log::buffer_and_print("request", request_headers, request_body)
+        .await
+        .inspect_err(|err| {
+            warn!("{}", err.1);
+        })?;
+    let request = Request::from_parts(request_parts, Body::from(request_bytes));
+
+    let response = next.run(request).await;
+    let response_headers = redact_sensitive_headers(response.headers().clone());
+    let (response_parts, response_body) = response.into_parts();
+    let response_bytes = http_log::buffer_and_print("response", response_headers, response_body)
+        .await
+        .inspect_err(|err| {
+            warn!("{}", err.1);
+        })?;
+    let response = axum::response::Response::from_parts(response_parts, Body::from(response_bytes));
+
+    let duration = start.elapsed();
+    let status = response.status();
+    log_http_exchange(&method, &uri, status, duration);
 
     Ok(response)
 }
@@ -722,5 +755,59 @@ mod tests {
             redact_access_token(&without_token),
             without_token.to_string()
         );
+    }
+
+    #[test]
+    fn test_redact_sensitive_headers_removes_credentials() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer token"));
+        headers.insert(COOKIE, HeaderValue::from_static("sid=value"));
+        headers.insert(SET_COOKIE, HeaderValue::from_static("sid=value"));
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        let redacted = redact_sensitive_headers(headers);
+
+        assert!(!redacted.contains_key(AUTHORIZATION));
+        assert!(!redacted.contains_key(COOKIE));
+        assert!(!redacted.contains_key(SET_COOKIE));
+        assert_eq!(
+            redacted.get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+    }
+
+    #[test]
+    fn test_should_skip_body_logging_for_oidc_token_endpoints() {
+        let headers = HeaderMap::new();
+        let mut multipart_headers = HeaderMap::new();
+        multipart_headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data; boundary=test"),
+        );
+
+        assert!(should_skip_body_logging(
+            &"/oidc/token".parse().unwrap(),
+            &headers
+        ));
+        assert!(should_skip_body_logging(
+            &"/oidc/revoke".parse().unwrap(),
+            &headers
+        ));
+        assert!(should_skip_body_logging(
+            &"/api/v1/im/files".parse().unwrap(),
+            &headers
+        ));
+        assert!(!should_skip_body_logging(
+            &"/something-im/files".parse().unwrap(),
+            &headers
+        ));
+        assert!(!should_skip_body_logging(
+            &"/api/v1/im/users".parse().unwrap(),
+            &headers
+        ));
+        assert!(should_skip_body_logging(
+            &"/api/v1/im/messages".parse().unwrap(),
+            &multipart_headers
+        ));
     }
 }

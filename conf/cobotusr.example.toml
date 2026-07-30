@@ -9,10 +9,10 @@ listen = "127.0.0.1:4000"
 # secret = "<jwt_secret>"
 # static JWT token, superadmin, debuggger can use this token
 # tokens = ["live777"]
-# expiration_seconds, default 5min.
-exp_seconds = 300000
-# refresh_expiration_seconds, default 30d.
-refresh_exp_seconds = 25920000 # 30*24*3600
+# expiration_seconds, default 2h.
+exp_seconds = 7200
+# refresh_expiration_seconds, default 7d.
+refresh_exp_seconds = 604800 # 7*24*3600
 
 # CORS origins 列表
 origins = [
@@ -33,6 +33,22 @@ origins = [
 # If empty, falls back to http.public, then derived from http.listen.
 # issuer = "https://auth.example.com"
 
+# RSA private key path for ID Token signing (RS256).
+# Auto-generated if the file does not exist.
+rsa_private_key_path = "conf/oidc_rsa_private.local.pem"
+
+# Token lifetimes (optional, defaults to auth.exp_seconds / auth.refresh_exp_seconds)
+access_token_expire_seconds = 3600
+refresh_token_expire_seconds = 604800
+
+# Default email domain for users without an email address.
+# UserInfo endpoint returns "{username}@{email_domain}".
+# email_domain = "cobotrix.local"
+
+# Algorithm for signing access tokens. RS256 (default) requires rsa_private_key_path;
+# HS256 falls back to auth.secret (handy for tests / no-key dev clusters).
+# signing_algorithm = "RS256"
+
 [[oidc.bootstrap_clients]]
 client_id = "cobotsrv"
 name = "CoBotrix Device Management Server"
@@ -51,23 +67,8 @@ redirect_uris = ["http://localhost:5174/oauth/callback", "http://localhost:5174/
 allowed_scopes = ["openid", "profile", "email"]
 grant_types = ["authorization_code", "refresh_token"]
 public_client = true
-# RSA private key path for ID Token signing (RS256).
-# Auto-generated if the file does not exist.
-rsa_private_key_path = "conf/oidc_rsa_private.local.pem"
 
-# Token lifetimes (optional, defaults to auth.exp_seconds / auth.refresh_exp_seconds)
-access_token_expire_seconds = 3600
-refresh_token_expire_seconds = 604800
-
-# Default email domain for users without an email address.
-# UserInfo endpoint returns "{username}@{email_domain}".
-# email_domain = "cobotrix.local"
-
-# Algorithm for signing access tokens. RS256 (default) requires rsa_private_key_path;
-# HS256 falls back to auth.secret (handy for tests / no-key dev clusters).
-# signing_algorithm = "RS256"
-
-# OIDC clients to auto-register at startup. Existing entries (matched by client_id)
+# Additional OIDC clients can be auto-registered at startup. Existing entries (matched by client_id)
 # are left untouched — secrets are NEVER overwritten by config.
 # If client_secret is omitted, a random one is generated on first run and printed
 # ONCE in the startup log. Set explicitly here for stable dev/test secrets.
@@ -124,4 +125,3 @@ connect_timeout = 30
 # token = "live777"
 # Live777 Address
 # url = "http://liveion-0.net4mqtt.local:7777"
-

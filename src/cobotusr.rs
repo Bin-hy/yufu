@@ -54,7 +54,12 @@ async fn main() -> Result<()> {
     ));
 
     warn!("set log level: [{}]", log_level);
-    debug!("config : {:?}", cfg);
+    debug!(
+        listen = %cfg.http.listen,
+        api_prefix = %cfg.http.api_prefix,
+        log_level = %cfg.log.level,
+        "config loaded"
+    );
 
     let listener = tokio::net::TcpListener::bind(cfg.http.listen).await?;
     let addr = listener.local_addr()?;

@@ -8,17 +8,28 @@ use tokio::net::TcpListener;
 use super::super::common::{get_postgres_container, get_test_token, shutdown_signal};
 
 const CLIENT_ID: &str = "cobotimx-test";
+const CONFIDENTIAL_CLIENT_ID: &str = "confidential-pkce-test";
+const CONFIDENTIAL_CLIENT_SECRET: &str = "confidential-secret";
 const REDIRECT_URI: &str = "http://localhost:5174/oauth/callback";
 const POST_LOGOUT_REDIRECT_URI: &str = "http://localhost:5174/login";
 const CODE_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const CODE_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
 async fn authorize_code(client: &Client, base_url: &str, access_token: &str) -> String {
+    authorize_code_for_client(client, base_url, access_token, CLIENT_ID).await
+}
+
+async fn authorize_code_for_client(
+    client: &Client,
+    base_url: &str,
+    access_token: &str,
+    client_id: &str,
+) -> String {
     let response = client
         .post(format!("{base_url}/api/v1/oidc/authorize/consent"))
         .bearer_auth(access_token)
         .json(&serde_json::json!({
-            "client_id": CLIENT_ID,
+            "client_id": client_id,
             "redirect_uri": REDIRECT_URI,
             "response_type": "code",
             "code_challenge": CODE_CHALLENGE,
@@ -78,6 +89,19 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         ],
         client_secret: None,
         public_client: true,
+    });
+    config.oidc.bootstrap_clients.push(BootstrapClient {
+        client_id: CONFIDENTIAL_CLIENT_ID.to_string(),
+        name: "Confidential PKCE integration test".to_string(),
+        redirect_uris: vec![REDIRECT_URI.to_string()],
+        allowed_scopes: vec![
+            "openid".to_string(),
+            "profile".to_string(),
+            "email".to_string(),
+        ],
+        grant_types: vec!["authorization_code".to_string()],
+        client_secret: Some(CONFIDENTIAL_CLIENT_SECRET.to_string()),
+        public_client: false,
     });
     let access_token = get_test_token(&mut config);
     tokio::spawn(cobotusr::serve(config, listener, shutdown_signal()));
@@ -145,6 +169,25 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         .await
         .expect("plain PKCE consent request should complete");
     assert_eq!(plain_pkce.status(), StatusCode::BAD_REQUEST);
+
+    let confidential_code =
+        authorize_code_for_client(&client, &base_url, &access_token, CONFIDENTIAL_CLIENT_ID).await;
+    let confidential_without_secret = client
+        .post(format!("{base_url}/oidc/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", confidential_code.as_str()),
+            ("redirect_uri", REDIRECT_URI),
+            ("client_id", CONFIDENTIAL_CLIENT_ID),
+            ("code_verifier", CODE_VERIFIER),
+        ])
+        .send()
+        .await
+        .expect("confidential token request should complete");
+    assert_eq!(
+        confidential_without_secret.status(),
+        StatusCode::BAD_REQUEST
+    );
 
     let code = authorize_code(&client, &base_url, &access_token).await;
     let exchanged = client

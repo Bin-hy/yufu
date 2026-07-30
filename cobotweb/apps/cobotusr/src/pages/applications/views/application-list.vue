@@ -44,7 +44,7 @@ async function loadData() {
   try {
     const [appPage, clients] = await Promise.all([
       appApi.getApplicationsByPage(pageNumber.value, pageSize.value),
-      oauthApi.listClients().catch(() => [] as ClientVO[]),
+      oauthApi.listClients(),
     ])
     const apps = appPage.data_list || []
     totalPages.value = appPage.total_pages || 1
@@ -54,6 +54,7 @@ async function loadData() {
     }))
   } catch (e) {
     console.error('加载应用列表失败', e)
+    emitToast({ type: 'error', message: '加载应用列表失败' })
   } finally {
     loading.value = false
   }
@@ -74,6 +75,10 @@ const SCOPE_OPTIONS = ['openid', 'profile', 'email', 'phone', 'address', 'offlin
 
 function defaultForm(): AppForm {
   return { name: '', description: '', redirect_uris: '', grant_types: ['authorization_code', 'refresh_token'], allowed_scopes: ['openid', 'profile', 'email'], public_client: false }
+}
+
+function parseCsvList(value: string): string[] {
+  return value.split(',').map(s => s.trim()).filter(Boolean)
 }
 
 const dialogOpen = ref(false)
@@ -112,9 +117,17 @@ function openEdit(entry: AppEntry) {
 }
 
 function toggleGrant(g: string) {
+  if (form.value.public_client && g === 'client_credentials') return
   const idx = form.value.grant_types.indexOf(g)
   if (idx > -1) form.value.grant_types.splice(idx, 1)
   else form.value.grant_types.push(g)
+}
+
+function togglePublicClient() {
+  form.value.public_client = !form.value.public_client
+  if (form.value.public_client) {
+    form.value.grant_types = form.value.grant_types.filter(g => g !== 'client_credentials')
+  }
 }
 
 function toggleScope(s: string) {
@@ -124,12 +137,24 @@ function toggleScope(s: string) {
 }
 
 async function submitForm() {
+  if (!isEditing.value && showSecret.value && newSecret.value) {
+    dialogOpen.value = false
+    newSecret.value = ''
+    showSecret.value = false
+    await loadData()
+    return
+  }
   if (!form.value.name.trim()) {
     emitToast({ type: 'warning', message: '请填写应用名称' })
     return
   }
   if (!form.value.redirect_uris.trim()) {
     emitToast({ type: 'warning', message: '请填写回调地址' })
+    return
+  }
+  const redirectUris = parseCsvList(form.value.redirect_uris)
+  if (redirectUris.length === 0) {
+    emitToast({ type: 'warning', message: '请填写有效的回调地址' })
     return
   }
   submitting.value = true
@@ -143,7 +168,7 @@ async function submitForm() {
       if (clientId) {
         await oauthApi.updateClient(clientId, {
           name: form.value.name.trim(),
-          redirect_uris: form.value.redirect_uris.split(',').map(s => s.trim()).filter(Boolean),
+          redirect_uris: redirectUris,
           allowed_scopes: form.value.allowed_scopes,
           grant_types: form.value.grant_types,
           public_client: form.value.public_client,
@@ -154,7 +179,8 @@ async function submitForm() {
       // create: POST /oidc/clients → POST /application
       const clientResp = await oauthApi.createClient({
         name: form.value.name.trim(),
-        redirect_uri: form.value.redirect_uris.trim(),
+        redirect_uri: redirectUris[0],
+        redirect_uris: redirectUris,
         allowed_scopes: form.value.allowed_scopes,
         grant_types: form.value.grant_types,
         public_client: form.value.public_client,
@@ -170,7 +196,9 @@ async function submitForm() {
       })
       emitToast({ type: 'success', message: '应用注册成功' })
     }
-    dialogOpen.value = false
+    if (!showSecret.value) {
+      dialogOpen.value = false
+    }
     await loadData()
   } catch (e) {
     console.error('保存应用失败', e)
@@ -337,7 +365,14 @@ onMounted(async () => {
     </div>
 
     <!-- create / edit dialog -->
-    <UiDialog v-model:open="dialogOpen" :title="isEditing ? '编辑应用' : '注册新应用'" @confirm="submitForm" @cancel="onDialogClose">
+    <UiDialog
+      v-model:open="dialogOpen"
+      :title="isEditing ? '编辑应用' : '注册新应用'"
+      :confirm-text="showSecret && newSecret ? '关闭' : '确认'"
+      :close-on-confirm="false"
+      @confirm="submitForm"
+      @cancel="onDialogClose"
+    >
       <div class="space-y-4">
         <div>
           <label class="block text-sm mb-1">应用名称 <span class="text-destructive">*</span></label>
@@ -351,6 +386,20 @@ onMounted(async () => {
           <label class="block text-sm mb-1">授权回调地址 <span class="text-destructive">*</span></label>
           <UiInput v-model="form.redirect_uris" placeholder="http://localhost:5173/oauth/callback（多个用逗号分隔）" />
         </div>
+        <label class="flex items-start gap-3 rounded-md border border-border p-3 text-sm">
+          <input
+            type="checkbox"
+            class="mt-1 h-4 w-4"
+            :checked="form.public_client"
+            @change="togglePublicClient"
+          />
+          <span>
+            <span class="block font-medium text-foreground">Public client (PKCE)</span>
+            <span class="block text-xs text-muted-foreground">
+              浏览器客户端不分配 client secret；切换为 Public 会立即清空已有密钥。
+            </span>
+          </span>
+        </label>
         <div>
           <label class="block text-sm mb-1">授权方式</label>
           <div class="flex flex-wrap gap-2">
@@ -358,6 +407,7 @@ onMounted(async () => {
               v-for="g in GRANT_OPTIONS" :key="g" type="button"
               class="px-3 py-1 text-xs rounded-full border transition-colors"
               :class="form.grant_types.includes(g) ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50'"
+              :disabled="form.public_client && g === 'client_credentials'"
               @click="toggleGrant(g)"
             >{{ g }}</button>
           </div>

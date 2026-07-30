@@ -1,5 +1,11 @@
 import axios from "axios";
-import { clearAuth, getAccessToken, refreshAccessToken, redirectToLogin } from "@/auth/oidc";
+import {
+  clearAuth,
+  getAccessToken,
+  hasExplicitlySignedOut,
+  refreshAccessToken,
+  redirectToLogin,
+} from "@/auth/oidc";
 
 export const apiBase = import.meta.env.VITE_IM_API_BASE ?? "/api/v1";
 
@@ -23,7 +29,9 @@ http.interceptors.response.use(
     const original = error.config;
     if (
       error.response?.status === 401 &&
-      !original._retry
+      original &&
+      !original._retry &&
+      !hasExplicitlySignedOut()
     ) {
       original._retry = true;
       try {
@@ -36,7 +44,9 @@ http.interceptors.response.use(
         // The common unauthorized path below clears local OIDC state and starts a new flow.
       }
       clearAuth();
-      void redirectToLogin(window.location.pathname + window.location.search);
+      if (!hasExplicitlySignedOut()) {
+        void redirectToLogin(window.location.pathname + window.location.search);
+      }
     }
     return Promise.reject(error);
   },

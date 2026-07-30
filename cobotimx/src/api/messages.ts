@@ -2,10 +2,10 @@ import http from "@/http";
 import type { ApiResponse, GetMessagesResponse, SendMessageRequest, SendMessageResponse } from "@/types/models";
 
 export const messageApi = {
-  list(conversationId: number, beforeId?: number, limit = 50) {
+  list(conversationId: number, beforeId?: number, limit = 50, signal?: AbortSignal) {
     return http.get<ApiResponse<GetMessagesResponse>>(
       `/im/conversations/${conversationId}/messages`,
-      { params: { before_id: beforeId, limit } },
+      { params: { before_id: beforeId, limit }, signal },
     );
   },
 

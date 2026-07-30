@@ -108,6 +108,7 @@ impl OidcService {
 // ---------------------------------------------------------------------------
 impl OidcService {
     /// Register a new OAuth client. Returns (Model, plaintext_secret).
+    #[allow(clippy::too_many_arguments)]
     pub async fn register_client(
         db: &DatabaseConnection,
         user_id: IdType,
@@ -179,6 +180,11 @@ impl OidcService {
         user_id: IdType,
     ) -> Result<(oauth_client::Model, String)> {
         let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
+        if client.public_client {
+            return Err(AppError::BadRequest(
+                "public clients do not have a client_secret to regenerate".to_string(),
+            ));
+        }
 
         let mut buf = [0u8; 32];
         OsRng.fill_bytes(&mut buf);
@@ -188,13 +194,13 @@ impl OidcService {
 
         let mut am: oauth_client::ActiveModel = client.into();
         am.client_secret_hash = Set(secret_hash);
-        am.public_client = Set(false);
         am.update_time = Set(Utc::now().naive_utc());
         let updated = am.update(db).await?;
         Ok((updated, new_secret))
     }
 
     /// Update an existing OAuth client's mutable fields.
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_client(
         db: &DatabaseConnection,
         id: i32,

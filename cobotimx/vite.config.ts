@@ -5,8 +5,9 @@ import { resolve } from "path";
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const proxyTarget = env.IM_API_PROXY_TARGET;
+  const isDevServer = command === "serve" && process.env.npm_lifecycle_event !== "preview";
 
-  if (command === "serve" && !proxyTarget) {
+  if (isDevServer && !proxyTarget) {
     throw new Error("IM_API_PROXY_TARGET is required for the Vite dev server");
   }
 
@@ -18,7 +19,7 @@ export default defineConfig(({ mode, command }) => {
       },
     },
     server:
-      command === "serve"
+      isDevServer
         ? {
             port: 5174,
             proxy: {

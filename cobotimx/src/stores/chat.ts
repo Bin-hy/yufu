@@ -20,8 +20,9 @@ export const useChatStore = defineStore("chat", () => {
     conversations.value.find((c) => c.conversation_id === activeConversationId.value) ?? null,
   );
 
-  async function loadConversations() {
-    const res = await conversationApi.list();
+  async function loadConversations(signal?: AbortSignal) {
+    const res = await conversationApi.list(50, signal);
+    if (signal?.aborted) return;
     if (res.data.data) {
       conversations.value = res.data.data.items;
     }
@@ -67,10 +68,11 @@ export const useChatStore = defineStore("chat", () => {
   const hasMore = ref(true);
   const loadingMessages = ref(false);
 
-  async function loadMessages(conversationId: number, beforeId?: number) {
+  async function loadMessages(conversationId: number, beforeId?: number, signal?: AbortSignal) {
     loadingMessages.value = true;
     try {
-      const res = await messageApi.list(conversationId, beforeId);
+      const res = await messageApi.list(conversationId, beforeId, 50, signal);
+      if (signal?.aborted) return;
       if (res.data.data) {
         const result = res.data.data;
         if (beforeId) {

@@ -9,9 +9,10 @@ import type {
 } from "@/types/models";
 
 export const conversationApi = {
-  list(limit = 50) {
+  list(limit = 50, signal?: AbortSignal) {
     return http.get<ApiResponse<ConversationListResponse>>("/im/conversations", {
       params: { limit },
+      signal,
     });
   },
 

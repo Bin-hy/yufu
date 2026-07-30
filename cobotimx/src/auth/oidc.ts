@@ -22,7 +22,15 @@ const STORAGE_KEYS = {
   explicitlySignedOut: "cobotimx.explicitly_signed_out",
 } as const;
 
-const OIDC_ISSUER = (import.meta.env.VITE_OIDC_ISSUER ?? "http://127.0.0.1:4000").replace(/\/$/, "");
+function readOidcIssuer(): string {
+  const issuer = import.meta.env.VITE_OIDC_ISSUER;
+  if (!issuer && import.meta.env.PROD) {
+    throw new Error("VITE_OIDC_ISSUER is required for production builds");
+  }
+  return (issuer ?? "http://127.0.0.1:4000").replace(/\/$/, "");
+}
+
+const OIDC_ISSUER = readOidcIssuer();
 const CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? "cobotimx";
 const SCOPE = "openid profile email";
 const EXPIRY_SKEW_MS = 30_000;
@@ -198,7 +206,10 @@ async function refreshAccessTokenInner(): Promise<string | null> {
       body,
     });
     if (!response.ok) {
-      clearAuth();
+      // Only 400/401 conclusively mean the stored refresh token is invalid.
+      // Keep tokens on transient server errors so the session can recover
+      // after the identity provider comes back.
+      if (response.status === 400 || response.status === 401) clearAuth();
       return null;
     }
     const tokens = (await response.json()) as OidcTokens;
@@ -209,7 +220,6 @@ async function refreshAccessTokenInner(): Promise<string | null> {
     storeTokens(tokens);
     return tokens.access_token;
   } catch {
-    clearAuth();
     return null;
   }
 }

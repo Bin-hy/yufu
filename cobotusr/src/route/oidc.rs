@@ -237,6 +237,7 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
         token_endpoint_auth_methods_supported: vec![
             "client_secret_post".to_string(),
             "client_secret_basic".to_string(),
+            "none".to_string(),
         ],
         scopes_supported: vec![
             "openid".to_string(),
@@ -350,21 +351,21 @@ async fn handle_authorization_code(
         ));
     }
 
-    // PKCE (code_challenge present) provides proof-of-possession — public clients
-    // (SPA) don't need client_secret. Non-PKCE flows still require secret auth.
-    let pkce_used = !entry.code_challenge.is_empty();
-    let client = if pkce_used {
-        let cid = req
-            .client_id
-            .as_deref()
-            .ok_or(crate::error::AppError::BadRequest(
-                "missing client_id".to_string(),
-            ))?;
-        oauth_client::Entity::get_by_client_id(db, cid)
-            .await?
-            .ok_or(crate::error::AppError::Unauthorized(
-                "invalid client_id".to_string(),
-            ))?
+    // Public clients use PKCE instead of a secret. Confidential clients still
+    // must authenticate at the token endpoint, even when PKCE was used.
+    let cid = req
+        .client_id
+        .as_deref()
+        .ok_or(crate::error::AppError::BadRequest(
+            "missing client_id".to_string(),
+        ))?;
+    let code_client = oauth_client::Entity::get_by_client_id(db, cid)
+        .await?
+        .ok_or(crate::error::AppError::Unauthorized(
+            "invalid client_id".to_string(),
+        ))?;
+    let client = if code_client.public_client {
+        code_client
     } else {
         OidcService::authenticate_client(db, req.client_id.as_deref(), req.client_secret.as_deref())
             .await?
@@ -394,7 +395,7 @@ async fn handle_authorization_code(
     }
 
     // Verify PKCE
-    if pkce_used {
+    if !entry.code_challenge.is_empty() {
         let verifier = code_verifier.ok_or(crate::error::AppError::BadRequest(
             "missing code_verifier (PKCE was used during authorization)".to_string(),
         ))?;
