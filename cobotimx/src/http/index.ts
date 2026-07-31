@@ -1,13 +1,22 @@
 import axios from "axios";
+import {
+  clearAuth,
+  getAccessToken,
+  hasExplicitlySignedOut,
+  refreshAccessToken,
+  redirectToLogin,
+} from "@/auth/oidc";
+
+export const apiBase = import.meta.env.VITE_IM_API_BASE ?? "/api/v1";
 
 const http = axios.create({
-  baseURL: "/api/v1",
+  baseURL: apiBase,
   timeout: 30_000,
   headers: { "Content-Type": "application/json" },
 });
 
 http.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem("access_token");
+  const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -20,24 +29,26 @@ http.interceptors.response.use(
     const original = error.config;
     if (
       error.response?.status === 401 &&
+      original &&
       !original._retry &&
-      original.url !== "/refresh"
+      !hasExplicitlySignedOut()
     ) {
       original._retry = true;
-      try {
-        const { data } = await axios.post("/api/v1/refresh", null, {
-          withCredentials: true,
-        });
-        const token = data.access_token;
-        if (token) {
-          sessionStorage.setItem("access_token", token);
-          original.headers.Authorization = `Bearer ${token}`;
-          return http(original);
-        }
-      } catch {
-        sessionStorage.removeItem("access_token");
-        window.location.href = "/login";
+      const result = await refreshAccessToken();
+      if (result.status === "ok") {
+        original.headers.Authorization = `Bearer ${result.token}`;
+        return http(original);
       }
+      if (result.status === "invalid") {
+        // Credentials are conclusively rejected: clear local OIDC state and
+        // start a new sign-in flow.
+        clearAuth();
+        if (!hasExplicitlySignedOut()) {
+          void redirectToLogin(window.location.pathname + window.location.search);
+        }
+      }
+      // "error" is transient (network/server): keep the stored tokens and
+      // only reject the current request.
     }
     return Promise.reject(error);
   },

@@ -1,4 +1,6 @@
 import http from "@/http";
+import { apiBase } from "@/http";
+import { getAccessToken } from "@/auth/oidc";
 import type { ApiResponse, UploadFileResponse } from "@/types/models";
 
 export const fileApi = {
@@ -12,7 +14,7 @@ export const fileApi = {
   },
 
   getUrl(path: string): string {
-    const token = sessionStorage.getItem("access_token") || "";
-    return `/api/v1/im/files?path=${encodeURIComponent(path)}&access_token=${encodeURIComponent(token)}`;
+    const token = getAccessToken() ?? "";
+    return `${apiBase}/im/files?path=${encodeURIComponent(path)}&access_token=${encodeURIComponent(token)}`;
   },
 };

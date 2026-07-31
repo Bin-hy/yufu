@@ -25,6 +25,8 @@ export function showModal(options: ModalOptions): Promise<boolean> {
       {
         title: options.title,
         open: true,
+        confirmText: options.confirmText,
+        cancelText: options.cancelText,
         onConfirm: () => {
           options.confirmCallback ? options.confirmCallback() : ''
           resolve(true)

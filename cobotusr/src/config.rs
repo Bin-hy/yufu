@@ -211,6 +211,7 @@ pub struct Oidc {
 
 /// One row in `[[oidc.bootstrap_clients]]`. See `Oidc::bootstrap_clients`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BootstrapClient {
     pub client_id: String,
     pub name: String,
@@ -224,6 +225,11 @@ pub struct BootstrapClient {
     /// stable dev/test secrets.
     #[serde(default)]
     pub client_secret: Option<String>,
+    /// Public SPA clients authenticate authorization-code exchanges with PKCE
+    /// and never receive a client secret. They may use their client_id for
+    /// refresh-token and revocation requests.
+    #[serde(default)]
+    pub public_client: bool,
 }
 
 fn default_bootstrap_scopes() -> Vec<String> {

@@ -20,8 +20,9 @@ export const useChatStore = defineStore("chat", () => {
     conversations.value.find((c) => c.conversation_id === activeConversationId.value) ?? null,
   );
 
-  async function loadConversations() {
-    const res = await conversationApi.list();
+  async function loadConversations(signal?: AbortSignal) {
+    const res = await conversationApi.list(50, signal);
+    if (signal?.aborted) return;
     if (res.data.data) {
       conversations.value = res.data.data.items;
     }
@@ -67,10 +68,13 @@ export const useChatStore = defineStore("chat", () => {
   const hasMore = ref(true);
   const loadingMessages = ref(false);
 
-  async function loadMessages(conversationId: number, beforeId?: number) {
+  async function loadMessages(conversationId: number, beforeId?: number, signal?: AbortSignal) {
     loadingMessages.value = true;
     try {
-      const res = await messageApi.list(conversationId, beforeId);
+      const res = await messageApi.list(conversationId, beforeId, 50, signal);
+      if (signal?.aborted) return;
+      // 切换会话后迟到的响应不得覆盖当前会话的消息
+      if (conversationId !== activeConversationId.value) return;
       if (res.data.data) {
         const result = res.data.data;
         if (beforeId) {
@@ -82,6 +86,32 @@ export const useChatStore = defineStore("chat", () => {
       }
     } finally {
       loadingMessages.value = false;
+    }
+  }
+
+  // 轮询专用合并：按消息 id 去重，追加新消息并同步已有消息的撤回等状态。
+  // 不重置 hasMore、不清空已加载的历史分页，也不闪烁全局 loadingMessages。
+  async function mergePolledMessages(conversationId: number, signal?: AbortSignal) {
+    const res = await messageApi.list(conversationId, undefined, 50, signal);
+    if (signal?.aborted) return;
+    if (conversationId !== activeConversationId.value) return;
+    const items = res.data.data?.items;
+    if (!items) return;
+    const byId = new Map(messages.value.map((m) => [m.id, m]));
+    const fresh: Message[] = [];
+    for (const item of items) {
+      const existing = byId.get(item.id);
+      if (existing) {
+        existing.content = item.content;
+        existing.extra = item.extra;
+        existing.is_recalled = item.is_recalled;
+        existing.recalled_at = item.recalled_at;
+      } else {
+        fresh.push(item);
+      }
+    }
+    if (fresh.length) {
+      messages.value = [...messages.value, ...fresh].sort((a, b) => a.id - b.id);
     }
   }
 
@@ -143,6 +173,7 @@ export const useChatStore = defineStore("chat", () => {
     hasMore,
     loadingMessages,
     loadMessages,
+    mergePolledMessages,
     addMessage,
     addSentMessage,
     markRecalled,

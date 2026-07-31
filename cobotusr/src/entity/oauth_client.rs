@@ -17,6 +17,7 @@ pub struct Model {
     pub allowed_scopes: String, // comma-separated
     #[serde(skip_serializing)]
     pub client_secret_hash: String, // bcrypt hash
+    pub public_client: bool,
     pub grant_types: String, // comma-separated: authorization_code,refresh_token,client_credentials
     pub create_time: DateTime,
     pub update_time: DateTime,

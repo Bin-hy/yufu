@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { useChatStore } from "@/stores/chat";
+import { useChatPolling } from "@/composables/useChatPolling";
 import { useWebSocket } from "@/composables/useWebSocket";
 import { useNicknames } from "@/composables/useNicknames";
 import ConversationList from "./components/ConversationList.vue";
 import ChatWindow from "./components/ChatWindow.vue";
 
 const chat = useChatStore();
-const { connect } = useWebSocket();
+const { connected, connect } = useWebSocket();
+const { start: startPolling } = useChatPolling(connected);
 const { loadAll } = useNicknames();
 
 onMounted(async () => {
   await Promise.all([chat.loadConversations(), loadAll()]);
   connect();
+  startPolling();
 });
 </script>
 

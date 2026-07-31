@@ -1,14 +1,33 @@
 <script setup lang="ts">
 import { ref, watchEffect, computed } from 'vue'
 const props = withDefaults(
-  defineProps<{ open?: boolean; title?: string; size?: 'md' | 'lg' | 'xl'; contentScrollable?: boolean; hideFooter?: boolean }>(),
-  { open: false, size: 'md', contentScrollable: true, hideFooter: false }
+  defineProps<{
+    open?: boolean
+    title?: string
+    size?: 'md' | 'lg' | 'xl'
+    contentScrollable?: boolean
+    hideFooter?: boolean
+    confirmText?: string
+    cancelText?: string
+    confirmDisabled?: boolean
+    closeOnConfirm?: boolean
+  }>(),
+  {
+    open: false,
+    size: 'md',
+    contentScrollable: true,
+    hideFooter: false,
+    confirmText: '确认',
+    cancelText: '取消',
+    confirmDisabled: false,
+    closeOnConfirm: true,
+  }
 )
 const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'confirm'): void; (e: 'cancel'): void }>()
 const visible = ref(props.open)
 watchEffect(() => { visible.value = !!props.open })
 function close() { emit('update:open', false) }
-function onConfirm() { emit('confirm'); close() }
+function onConfirm() { emit('confirm'); if (props.closeOnConfirm) close() }
 function onCancel() { emit('cancel'); close() }
 
 const sizeClass = computed(() => {
@@ -68,13 +87,14 @@ const sizeClass = computed(() => {
                 class="inline-flex h-9 items-center justify-center rounded-xl border border-input bg-background px-4 text-sm font-medium text-foreground hover:bg-accent transition-colors"
                 @click="onCancel"
               >
-                取消
+                {{ props.cancelText }}
               </button>
               <button
-                class="inline-flex h-9 items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                class="inline-flex h-9 items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                :disabled="props.confirmDisabled"
                 @click="onConfirm"
               >
-                确认
+                {{ props.confirmText }}
               </button>
             </div>
           </div>

@@ -41,7 +41,20 @@ impl OidcService {
     }
 
     pub fn client_verify_secret(client: &oauth_client::Model, secret: &str) -> bool {
+        if client.public_client {
+            return false;
+        }
         bcrypt::verify(secret, &client.client_secret_hash).unwrap_or(false)
+    }
+
+    pub fn public_client_requires_s256_pkce(
+        client: &oauth_client::Model,
+        code_challenge: Option<&str>,
+        code_challenge_method: &str,
+    ) -> bool {
+        !client.public_client
+            || (code_challenge.is_some_and(|value| !value.is_empty())
+                && code_challenge_method == "S256")
     }
 }
 
@@ -66,6 +79,28 @@ impl OidcService {
         }
         Ok(client)
     }
+
+    /// Authenticate a token-management request. Public clients identify
+    /// themselves with client_id; confidential clients must additionally prove
+    /// possession of their registered client_secret.
+    pub async fn authenticate_token_client(
+        db: &DatabaseConnection,
+        client_id: Option<&str>,
+        client_secret: Option<&str>,
+    ) -> Result<oauth_client::Model> {
+        if client_secret.is_some() {
+            return Self::authenticate_client(db, client_id, client_secret).await;
+        }
+
+        let client_id = client_id.ok_or(AppError::BadRequest("missing client_id".to_string()))?;
+        let client = oauth_client::Entity::get_by_client_id(db, client_id)
+            .await?
+            .ok_or(AppError::Unauthorized("invalid client_id".to_string()))?;
+        if !client.public_client {
+            return Err(AppError::BadRequest("missing client_secret".to_string()));
+        }
+        Ok(client)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +108,7 @@ impl OidcService {
 // ---------------------------------------------------------------------------
 impl OidcService {
     /// Register a new OAuth client. Returns (Model, plaintext_secret).
+    #[allow(clippy::too_many_arguments)]
     pub async fn register_client(
         db: &DatabaseConnection,
         user_id: IdType,
@@ -81,15 +117,30 @@ impl OidcService {
         redirect_uris: Vec<String>,
         allowed_scopes: Vec<String>,
         grant_types: Vec<String>,
-    ) -> Result<(oauth_client::Model, String)> {
+        public_client: bool,
+    ) -> Result<(oauth_client::Model, Option<String>)> {
+        // Dirty-data guard: a public client proves possession with PKCE and has
+        // no secret, so the client_credentials grant can never succeed for it.
+        if public_client && grant_types.iter().any(|g| g == "client_credentials") {
+            return Err(AppError::BadRequest(
+                "public clients cannot use the client_credentials grant".to_string(),
+            ));
+        }
+
         let now = Utc::now().naive_utc();
 
-        // Generate a random client_secret
-        let mut buf = [0u8; 32];
-        OsRng.fill_bytes(&mut buf);
-        let client_secret = hex::encode(buf);
-        let secret_hash = bcrypt::hash(&client_secret, bcrypt::DEFAULT_COST)
-            .map_err(|e| AppError::InternalServerError(anyhow::anyhow!("hash error: {}", e)))?;
+        let client_secret = if public_client {
+            None
+        } else {
+            let mut buf = [0u8; 32];
+            OsRng.fill_bytes(&mut buf);
+            Some(hex::encode(buf))
+        };
+        let secret_hash = match &client_secret {
+            Some(secret) => bcrypt::hash(secret, bcrypt::DEFAULT_COST)
+                .map_err(|e| AppError::InternalServerError(anyhow::anyhow!("hash error: {}", e)))?,
+            None => String::new(),
+        };
 
         let am = oauth_client::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
@@ -99,6 +150,7 @@ impl OidcService {
             redirect_uris: Set(redirect_uris.join(",")),
             allowed_scopes: Set(allowed_scopes.join(",")),
             client_secret_hash: Set(secret_hash),
+            public_client: Set(public_client),
             grant_types: Set(grant_types.join(",")),
             create_time: Set(now),
             update_time: Set(now),
@@ -136,6 +188,11 @@ impl OidcService {
         user_id: IdType,
     ) -> Result<(oauth_client::Model, String)> {
         let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
+        if client.public_client {
+            return Err(AppError::BadRequest(
+                "public clients do not have a client_secret to regenerate".to_string(),
+            ));
+        }
 
         let mut buf = [0u8; 32];
         OsRng.fill_bytes(&mut buf);
@@ -151,6 +208,7 @@ impl OidcService {
     }
 
     /// Update an existing OAuth client's mutable fields.
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_client(
         db: &DatabaseConnection,
         id: i32,
@@ -159,8 +217,35 @@ impl OidcService {
         redirect_uris: Option<Vec<String>>,
         allowed_scopes: Option<Vec<String>>,
         grant_types: Option<Vec<String>>,
+        public_client: Option<bool>,
     ) -> Result<oauth_client::Model> {
         let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
+        let was_public = client.public_client;
+        if public_client == Some(false) && was_public {
+            return Err(AppError::BadRequest(
+                "converting a public client back to confidential is not supported".to_string(),
+            ));
+        }
+        // Dirty-data guard on the effective combination: a public client has no
+        // secret, so the client_credentials grant can never succeed for it.
+        let effective_public = public_client.unwrap_or(was_public);
+        let effective_grant_types = grant_types.clone().unwrap_or_else(|| {
+            client
+                .grant_types
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        });
+        if effective_public
+            && effective_grant_types
+                .iter()
+                .any(|g| g == "client_credentials")
+        {
+            return Err(AppError::BadRequest(
+                "public clients cannot use the client_credentials grant".to_string(),
+            ));
+        }
         let mut am: oauth_client::ActiveModel = client.into();
         if let Some(v) = name {
             am.name = Set(v);
@@ -173,6 +258,10 @@ impl OidcService {
         }
         if let Some(v) = grant_types {
             am.grant_types = Set(v.join(","));
+        }
+        if let Some(true) = public_client {
+            am.public_client = Set(true);
+            am.client_secret_hash = Set(String::new());
         }
         am.update_time = Set(Utc::now().naive_utc());
         let updated = am.update(db).await?;
@@ -568,9 +657,18 @@ impl OidcService {
         oauth_consent::Entity::delete_by_id_and_user(db, consent_id, user_id).await?;
 
         // Revoke all tokens for this user+client
+        Self::revoke_tokens_for_user_client(db, user_id, &client_id).await
+    }
+
+    /// Revoke all active tokens for a user+client pair.
+    pub async fn revoke_tokens_for_user_client(
+        db: &DatabaseConnection,
+        user_id: IdType,
+        client_id: &str,
+    ) -> Result<()> {
         let tokens = oauth_token::Entity::find()
             .filter(oauth_token::Column::UserId.eq(user_id))
-            .filter(oauth_token::Column::ClientId.eq(&client_id))
+            .filter(oauth_token::Column::ClientId.eq(client_id))
             .filter(oauth_token::Column::Revoked.eq(false))
             .all(db)
             .await?;

@@ -38,7 +38,7 @@ async function handleSubmit() {
     router.push({
       name: 'oauth-detail',
       params: { id: resp.id },
-      query: { new_secret: resp.client_secret }
+      query: resp.client_secret ? { new_secret: resp.client_secret } : {}
     })
   } catch (e) {
     console.error('注册应用失败', e)

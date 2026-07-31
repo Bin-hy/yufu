@@ -1,16 +1,20 @@
 use axum::body::Body;
 use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
-use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use http::{HeaderValue, Method, StatusCode, Uri};
+use http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, SET_COOKIE};
+use http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{error, info, info_span};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    trace::TraceLayer,
+};
+use tracing::{error, info, info_span, warn};
 
 use crate::config::Config;
 use crate::entity::role::RoleEnum;
@@ -41,6 +45,152 @@ pub mod route;
 mod seed;
 pub mod service;
 mod swagger_docs;
+
+fn is_successful_http_exchange(status: StatusCode) -> bool {
+    status.is_informational() || status.is_success()
+}
+
+pub(crate) fn redact_access_token(uri: &http::Uri) -> String {
+    let Some(query) = uri.query() else {
+        return uri.to_string();
+    };
+
+    let pairs: Vec<_> = url::form_urlencoded::parse(query.as_bytes()).collect();
+    if !pairs.iter().any(|(key, _)| key == "access_token") {
+        return uri.to_string();
+    }
+
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for (key, value) in pairs {
+        let value = if key == "access_token" {
+            "REDACTED"
+        } else {
+            value.as_ref()
+        };
+        serializer.append_pair(&key, value);
+    }
+
+    format!("{}?{}", uri.path(), serializer.finish())
+}
+
+fn redact_sensitive_headers(mut headers: HeaderMap) -> HeaderMap {
+    headers.remove(AUTHORIZATION);
+    headers.remove(COOKIE);
+    headers.remove(SET_COOKIE);
+    headers
+}
+
+/// Endpoints whose request/response bodies carry credentials (passwords,
+/// tokens, client secrets) or large binary payloads are logged as status
+/// lines only. Paths under the API prefix are derived from the configured
+/// `http.api_prefix` instead of being hard-coded.
+fn should_skip_body_logging(uri: &http::Uri, headers: &HeaderMap, api_prefix: &str) -> bool {
+    let path = uri.path();
+    matches!(path, "/oidc/token" | "/oidc/revoke" | "/oidc/introspect")
+        || [
+            format!("{api_prefix}/login"),
+            format!("{api_prefix}/register"),
+            format!("{api_prefix}/refresh"),
+            format!("{api_prefix}/im/files"),
+        ]
+        .iter()
+        .any(|skip| skip == path)
+        || headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("multipart/"))
+}
+
+/// Bodies larger than this are never buffered for logging — only the status
+/// line is recorded (e.g. paginated message history responses).
+const MAX_LOGGED_BODY_BYTES: u64 = 256 * 1024;
+
+fn body_exceeds_log_limit(headers: &HeaderMap) -> bool {
+    headers
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|len| len > MAX_LOGGED_BODY_BYTES)
+}
+
+fn log_http_exchange(method: &Method, uri: &str, status: StatusCode, duration: Duration) {
+    if is_successful_http_exchange(status) {
+        if duration.as_millis() > 500 {
+            warn!(
+                "[{} {}] [{}] {}ms",
+                method,
+                uri,
+                status.as_u16(),
+                duration.as_millis()
+            );
+        } else {
+            info!(
+                "[{} {}] [{}] {}ms",
+                method,
+                uri,
+                status.as_u16(),
+                duration.as_millis()
+            );
+        }
+    } else {
+        error!(
+            "[{} {}] [{}] {}ms",
+            method,
+            uri,
+            status.as_u16(),
+            duration.as_millis()
+        );
+    }
+}
+
+async fn print_request_response(
+    State(api_prefix): State<String>,
+    req: Request,
+    next: middleware::Next,
+) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
+    let start = Instant::now();
+    let method = req.method().clone();
+    let uri = redact_access_token(req.uri());
+    let skip_body_logging = should_skip_body_logging(req.uri(), req.headers(), &api_prefix)
+        || body_exceeds_log_limit(req.headers());
+
+    if skip_body_logging {
+        let response = next.run(req).await;
+        log_http_exchange(&method, &uri, response.status(), start.elapsed());
+        return Ok(response);
+    }
+
+    let request_headers = redact_sensitive_headers(req.headers().clone());
+    let (request_parts, request_body) = req.into_parts();
+    let request_bytes = http_log::buffer_and_print("request", request_headers, request_body)
+        .await
+        .inspect_err(|err| {
+            warn!("{}", err.1);
+        })?;
+    let request = Request::from_parts(request_parts, Body::from(request_bytes));
+
+    let response = next.run(request).await;
+    // Large responses (e.g. paginated message history) skip body buffering
+    // and only record the status line.
+    if body_exceeds_log_limit(response.headers()) {
+        log_http_exchange(&method, &uri, response.status(), start.elapsed());
+        return Ok(response);
+    }
+    let response_headers = redact_sensitive_headers(response.headers().clone());
+    let (response_parts, response_body) = response.into_parts();
+    let response_bytes = http_log::buffer_and_print("response", response_headers, response_body)
+        .await
+        .inspect_err(|err| {
+            warn!("{}", err.1);
+        })?;
+    let response = axum::response::Response::from_parts(response_parts, Body::from(response_bytes));
+
+    let duration = start.elapsed();
+    let status = response.status();
+    log_http_exchange(&method, &uri, status, duration);
+
+    Ok(response)
+}
 
 pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
 where
@@ -161,7 +311,6 @@ where
             let origins: Vec<String> = app_state.clone().config.auth.origins;
             let has_wildcard = origins.iter().any(|o| o == "*");
             let cors_layer = CorsLayer::new()
-                .allow_credentials(true)
                 .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
                 .allow_methods([
                     Method::GET,
@@ -172,30 +321,35 @@ where
                 ]);
 
             if has_wildcard {
-                // Mirror the request Origin header back (credentials-compatible wildcard).
-                // `Access-Control-Allow-Origin: *` is forbidden when credentials are used,
-                // so we echo the actual Origin instead.
-                cors_layer.allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+                // Browser SPA requests authenticate with bearer tokens, not cookies.  A true
+                // wildcard therefore avoids credential-mode restrictions while reliably
+                // returning Access-Control-Allow-Origin for public OIDC endpoints.
+                cors_layer.allow_origin(Any)
             } else {
                 // Use predicate to match request Origin against allowed origins list
-                cors_layer.allow_origin(tower_http::cors::AllowOrigin::predicate(
-                    move |origin: &HeaderValue, _request_head: &http::request::Parts| {
-                        if let Ok(origin_str) = origin.to_str() {
-                            origins.contains(&origin_str.to_string())
-                        } else {
-                            false
-                        }
-                    },
-                ))
+                cors_layer.allow_credentials(true).allow_origin(
+                    tower_http::cors::AllowOrigin::predicate(
+                        move |origin: &HeaderValue, _request_head: &http::request::Parts| {
+                            if let Ok(origin_str) = origin.to_str() {
+                                origins.contains(&origin_str.to_string())
+                            } else {
+                                false
+                            }
+                        },
+                    ),
+                )
             }
         })
         .with_state(app_state.clone())
-        .layer(axum::middleware::from_fn(http_log::print_request_response))
+        .layer(axum::middleware::from_fn_with_state(
+            cfg.http.api_prefix.clone(),
+            print_request_response,
+        ))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
                 let span = info_span!(
                     "http_request",
-                    uri = ?request.uri(),
+                    uri = %redact_access_token(request.uri()),
                     method = ?request.method(),
                     span_id = tracing::field::Empty,
                     target_addr = tracing::field::Empty,
@@ -405,9 +559,10 @@ impl AppState {
 
     /// Auto-register OIDC clients listed in `[[oidc.bootstrap_clients]]`,
     /// and pair each one with an `Application` row so it shows up in the
-    /// permission system. Idempotent: existing rows are left untouched
-    /// (secrets are NEVER overwritten), but a missing `Application` link is
-    /// always backfilled so old DBs upgrade cleanly.
+    /// permission system. Existing secrets are NEVER overwritten. Public
+    /// clients are upgraded when configured as such, and bootstrap redirect
+    /// URIs are added (without removing administrator-managed URIs) so old
+    /// databases receive required callback paths on upgrade.
     async fn init_oidc_bootstrap_clients(&self) -> result::Result<()> {
         use crate::entity::{application, oauth_client};
         use rand::RngCore;
@@ -438,24 +593,59 @@ impl AppState {
                 .await?
             {
                 Some(existing) => {
-                    info!(client_id = %entry.client_id, "OIDC bootstrap client already exists");
-                    existing.id
+                    let mut redirect_uris: Vec<String> = existing
+                        .redirect_uris
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|uri| !uri.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    let mut redirects_changed = false;
+                    for uri in &entry.redirect_uris {
+                        if !redirect_uris.contains(uri) {
+                            redirect_uris.push(uri.clone());
+                            redirects_changed = true;
+                        }
+                    }
+                    let public_upgrade = entry.public_client && !existing.public_client;
+                    if public_upgrade || redirects_changed {
+                        let mut active: oauth_client::ActiveModel = existing.into();
+                        if public_upgrade {
+                            active.public_client = Set(true);
+                            active.client_secret_hash = Set(String::new());
+                        }
+                        if redirects_changed {
+                            active.redirect_uris = Set(redirect_uris.join(","));
+                        }
+                        active.update_time = Set(chrono::Utc::now().naive_utc());
+                        let updated = active.update(db).await?;
+                        info!(client_id = %entry.client_id, public_upgrade, redirects_changed, "OIDC bootstrap client upgraded");
+                        updated.id
+                    } else {
+                        info!(client_id = %entry.client_id, "OIDC bootstrap client already exists");
+                        existing.id
+                    }
                 }
                 None => {
-                    let (secret, generated) = match &entry.client_secret {
-                        Some(s) => (s.clone(), false),
-                        None => {
+                    let (secret, generated) = match (&entry.client_secret, entry.public_client) {
+                        (_, true) => (String::new(), false),
+                        (Some(s), false) => (s.clone(), false),
+                        (None, false) => {
                             let mut buf = [0u8; 32];
                             OsRng.fill_bytes(&mut buf);
                             (hex::encode(buf), true)
                         }
                     };
-                    let secret_hash = bcrypt::hash(&secret, bcrypt::DEFAULT_COST).map_err(|e| {
-                        crate::error::AppError::InternalServerError(anyhow::anyhow!(
-                            "bcrypt hash failed for bootstrap client {}: {e}",
-                            entry.client_id
-                        ))
-                    })?;
+                    let secret_hash = if entry.public_client {
+                        String::new()
+                    } else {
+                        bcrypt::hash(&secret, bcrypt::DEFAULT_COST).map_err(|e| {
+                            crate::error::AppError::InternalServerError(anyhow::anyhow!(
+                                "bcrypt hash failed for bootstrap client {}: {e}",
+                                entry.client_id
+                            ))
+                        })?
+                    };
 
                     let now = chrono::Utc::now().naive_utc();
                     let inserted = oauth_client::ActiveModel {
@@ -466,6 +656,7 @@ impl AppState {
                         redirect_uris: Set(entry.redirect_uris.join(",")),
                         allowed_scopes: Set(entry.allowed_scopes.join(",")),
                         client_secret_hash: Set(secret_hash),
+                        public_client: Set(entry.public_client),
                         grant_types: Set(entry.grant_types.join(",")),
                         create_time: Set(now),
                         update_time: Set(now),
@@ -553,5 +744,177 @@ impl AppState {
             info!("Initial the super admin account has created before.");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_successful_http_exchange_accepts_websocket_switching_protocols() {
+        assert!(is_successful_http_exchange(StatusCode::SWITCHING_PROTOCOLS));
+        assert!(is_successful_http_exchange(StatusCode::OK));
+        assert!(!is_successful_http_exchange(StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn test_redact_access_token_masks_each_token_and_preserves_other_parameters() {
+        let uri: http::Uri =
+            "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4&access_token=first&access_token=second"
+                .parse()
+                .unwrap();
+
+        let redacted = redact_access_token(&uri);
+
+        assert_eq!(
+            redacted,
+            "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4&access_token=REDACTED&access_token=REDACTED"
+        );
+        assert!(!redacted.contains("first"));
+        assert!(!redacted.contains("second"));
+    }
+
+    #[test]
+    fn test_redact_access_token_leaves_uris_without_token_unchanged() {
+        let without_query: http::Uri = "/api/v1/im/users".parse().unwrap();
+        let without_token: http::Uri = "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4"
+            .parse()
+            .unwrap();
+
+        assert_eq!(
+            redact_access_token(&without_query),
+            without_query.to_string()
+        );
+        assert_eq!(
+            redact_access_token(&without_token),
+            without_token.to_string()
+        );
+    }
+
+    #[test]
+    fn test_redact_sensitive_headers_removes_credentials() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer token"));
+        headers.insert(COOKIE, HeaderValue::from_static("sid=value"));
+        headers.insert(SET_COOKIE, HeaderValue::from_static("sid=value"));
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        let redacted = redact_sensitive_headers(headers);
+
+        assert!(!redacted.contains_key(AUTHORIZATION));
+        assert!(!redacted.contains_key(COOKIE));
+        assert!(!redacted.contains_key(SET_COOKIE));
+        assert_eq!(
+            redacted.get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+    }
+
+    #[test]
+    fn test_should_skip_body_logging_for_oidc_token_endpoints() {
+        let headers = HeaderMap::new();
+        let mut multipart_headers = HeaderMap::new();
+        multipart_headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("multipart/form-data; boundary=test"),
+        );
+
+        assert!(should_skip_body_logging(
+            &"/oidc/token".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+        assert!(should_skip_body_logging(
+            &"/oidc/revoke".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+        assert!(should_skip_body_logging(
+            &"/api/v1/im/files".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+        assert!(!should_skip_body_logging(
+            &"/something-im/files".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+        assert!(!should_skip_body_logging(
+            &"/api/v1/im/users".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+        assert!(should_skip_body_logging(
+            &"/api/v1/im/messages".parse().unwrap(),
+            &multipart_headers,
+            "/api/v1"
+        ));
+    }
+
+    #[test]
+    fn test_should_skip_body_logging_for_credential_endpoints() {
+        let headers = HeaderMap::new();
+
+        // OIDC introspection carries token + client_secret in the form body;
+        // legacy auth endpoints carry plaintext passwords / access tokens.
+        assert!(should_skip_body_logging(
+            &"/oidc/introspect".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+        for path in ["/api/v1/login", "/api/v1/register", "/api/v1/refresh"] {
+            assert!(should_skip_body_logging(
+                &path.parse().unwrap(),
+                &headers,
+                "/api/v1"
+            ));
+        }
+        assert!(!should_skip_body_logging(
+            &"/api/v1/users".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+    }
+
+    #[test]
+    fn test_should_skip_body_logging_follows_configured_api_prefix() {
+        let headers = HeaderMap::new();
+
+        assert!(should_skip_body_logging(
+            &"/custom/login".parse().unwrap(),
+            &headers,
+            "/custom"
+        ));
+        assert!(should_skip_body_logging(
+            &"/custom/im/files".parse().unwrap(),
+            &headers,
+            "/custom"
+        ));
+        assert!(!should_skip_body_logging(
+            &"/api/v1/login".parse().unwrap(),
+            &headers,
+            "/custom"
+        ));
+    }
+
+    #[test]
+    fn test_body_exceeds_log_limit_checks_content_length() {
+        let mut over_limit = HeaderMap::new();
+        over_limit.insert(
+            CONTENT_LENGTH,
+            HeaderValue::from_static("262145"), // 256 KiB + 1
+        );
+        assert!(body_exceeds_log_limit(&over_limit));
+
+        let mut at_limit = HeaderMap::new();
+        at_limit.insert(CONTENT_LENGTH, HeaderValue::from_static("262144")); // 256 KiB
+        assert!(!body_exceeds_log_limit(&at_limit));
+
+        let mut invalid = HeaderMap::new();
+        invalid.insert(CONTENT_LENGTH, HeaderValue::from_static("not-a-number"));
+        assert!(!body_exceeds_log_limit(&invalid));
+
+        assert!(!body_exceeds_log_limit(&HeaderMap::new()));
     }
 }

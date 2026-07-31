@@ -1,6 +1,6 @@
 use crate::entity::{authority, recording};
 use crate::error::AppError;
-use crate::{AppState, parse_user_id};
+use crate::{AppState, parse_user_id, redact_access_token};
 use auth::claims::AccessTokenClaims;
 use axum::extract::{Request, State};
 use axum::middleware::Next;
@@ -20,7 +20,7 @@ pub async fn recording_operation_middleware(
     // 获取到用户的操作 get user operations.
     // 查找权限表记录该操作 find the authority in the table.
     let request_method = request.method().to_string().to_uppercase();
-    let request_full_uri = request.uri().to_string();
+    let request_full_uri = redact_access_token(request.uri());
 
     // ignore query_path
     let authority_uri = request_full_uri
