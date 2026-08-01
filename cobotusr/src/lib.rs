@@ -301,11 +301,19 @@ where
     // routes don't need auth, public routes
     let sub_public_router = route::get_public_routes();
 
+    // Service-to-service routes: Bearer JWT verified, but no user load / URI-RBAC,
+    // so machine callers (cobotsrv revocation introspection) always get JSON or 401.
+    let sub_service_router = route::get_service_routes().layer(middleware::from_fn_with_state(
+        id_token_signer.clone(),
+        access_middleware_local_rs256,
+    ));
+
     let api_prefix = &cfg.http.api_prefix;
     #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
     let mut app = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
+        .nest(api_prefix, sub_service_router)
         .merge(get_no_prefix_routes())
         .layer({
             let origins: Vec<String> = app_state.clone().config.auth.origins;
@@ -509,6 +517,16 @@ impl AppState {
         scope: &str,
     ) -> result::Result<String> {
         let iss = self.issuer();
+        // Resolve the user's roles + permissions for the target application
+        // (`aud` is the app_key) so they travel in the JWT. This lets resource
+        // servers enforce locally via `require_perm!`'s JWT-fallback mode without
+        // a PDP round-trip. Superadmin gets all of the app's permissions.
+        let (roles, permissions) = crate::service::permission::resolve_user_permissions(
+            &self.database.connection,
+            sub,
+            aud,
+        )
+        .await?;
         self.id_token_signer
             .sign_access_token(
                 &sub.to_string(),
@@ -516,8 +534,41 @@ impl AppState {
                 aud,
                 scope,
                 self.oidc_access_token_exp(),
-                vec![],
-                vec![],
+                roles,
+                permissions,
+            )
+            .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
+    }
+
+    /// Configured upper bound (days) for long-lived MCP access tokens.
+    pub fn mcp_token_max_ttl_days(&self) -> u32 {
+        self.config.oidc.mcp_token_max_ttl_days
+    }
+
+    /// Mint an access token with an explicit TTL, `jti`, and pre-resolved
+    /// roles/permissions. Used for long-lived MCP access tokens
+    /// (`POST /api/v1/oidc/mcp-tokens`); the caller persists a revocable record keyed
+    /// by the same `jti` so the token can later be revoked.
+    pub fn mint_access_token(
+        &self,
+        sub: IdType,
+        aud: &str,
+        ttl_seconds: i64,
+        roles: Vec<String>,
+        permissions: Vec<String>,
+        jti: &str,
+    ) -> result::Result<String> {
+        let iss = self.issuer();
+        self.id_token_signer
+            .sign_access_token_with_jti(
+                &sub.to_string(),
+                &iss,
+                aud,
+                "",
+                ttl_seconds,
+                roles,
+                permissions,
+                jti,
             )
             .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
     }

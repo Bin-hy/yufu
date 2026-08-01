@@ -19,7 +19,8 @@ pub fn get_protected_routes() -> Router<AppState> {
         .merge(remote::route())
         .merge(cobotlet::route())
         .merge(tool::route())
-        .merge(crate::mcp::route::route());
+        .merge(crate::mcp::route::route())
+        .merge(crate::mcp::admin::route());
     #[cfg(feature = "easytier")]
     let router = router.merge(easytier_config::get_protected_routes());
     router

@@ -6,34 +6,38 @@ use auth::PermissionChecker;
 use dashmap::DashMap;
 use tracing::{debug, warn};
 
-/// Client that calls cobotsrv's PDP `/api/v1/enforce` endpoint with local
+/// Client that calls cobotusr's PDP `/api/v1/enforce` endpoint with local
 /// caching to avoid a network round-trip on every request.
 pub struct EnforceClient {
     client: reqwest::Client,
-    cobotsrv_base: String,
+    cobotusr_base: String,
+    /// Application key to enforce against — must match the app this service
+    /// registered its permissions under (its OAuth `client_id`).
+    application: String,
     cache: DashMap<(String, String), (bool, Instant)>,
     cache_ttl: Duration,
 }
 
 impl EnforceClient {
-    pub fn new(cobotsrv_base: String, cache_ttl_secs: u64) -> Self {
+    pub fn new(cobotusr_base: String, application: String, cache_ttl_secs: u64) -> Self {
         Self {
             client: reqwest::Client::new(),
-            cobotsrv_base,
+            cobotusr_base,
+            application,
             cache: DashMap::new(),
             cache_ttl: Duration::from_secs(cache_ttl_secs.max(1)),
         }
     }
 
     async fn call_pdp(&self, subject: &str, action: &str, auth_header: &str) -> bool {
-        let url = format!("{}/api/v1/enforce", self.cobotsrv_base);
+        let url = format!("{}/api/v1/enforce", self.cobotusr_base);
 
         let subject_id = subject.parse::<i32>().unwrap_or_else(|_| {
             warn!(subject, "cannot parse subject as i32, defaulting to 0");
             0
         });
         let body = serde_json::json!({
-            "application": "cobotrix",
+            "application": self.application,
             "subject": subject_id,
             "action": action,
         });

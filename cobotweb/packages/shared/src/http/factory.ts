@@ -102,11 +102,25 @@ function createInstance(opts: RequestFactoryOptions): AxiosInstance {
         opts.onUnauthorized?.()
       }
 
+      // Surface the server error body (plain string or { message } / { error })
+      // on the rejected error so pages render something useful instead of
+      // axios' generic "Request failed with status code 403".
+      const data: unknown = error?.response?.data
+      const serverMessage =
+        typeof data === 'string' && data
+          ? data
+          : data && typeof data === 'object'
+            ? ((data as Record<string, unknown>).message ?? (data as Record<string, unknown>).error)
+            : undefined
+      if (typeof serverMessage === 'string' && serverMessage) {
+        error.message = serverMessage
+      }
+
       const message =
-        error?.response?.data ??
-        error?.message ??
+        (typeof serverMessage === 'string' && serverMessage) ||
+        error?.message ||
         '请求错误'
-      opts.onError?.(typeof message === 'string' ? message : JSON.stringify(message), status)
+      opts.onError?.(message, status)
       return Promise.reject(error)
     },
   )

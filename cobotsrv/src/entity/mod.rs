@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod device;
 pub mod easytier_network;
+pub mod mcp_call_log;
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct PageSelectQuery {

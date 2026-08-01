@@ -18,6 +18,7 @@ mod m20260508_000001_create_application;
 mod m20260508_000002_create_permission;
 mod m20260508_000003_create_role_permission;
 mod m20260508_000004_create_user_permission;
+mod m20260617_000001_create_mcp_token;
 mod m20260725_000001_add_oauth_client_public_client;
 
 use crate::seed;
@@ -44,6 +45,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260508_000002_create_permission::Migration),
             Box::new(m20260508_000003_create_role_permission::Migration),
             Box::new(m20260508_000004_create_user_permission::Migration),
+            Box::new(m20260617_000001_create_mcp_token::Migration),
             Box::new(m20260725_000001_add_oauth_client_public_client::Migration),
         ];
         // SeaORM re-sorts all migrations by name, so the seeds appended here

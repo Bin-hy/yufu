@@ -81,6 +81,13 @@ name = "mcp:access"
 action = "access"
 resource_type = "mcp"
 resource_pattern = "*"
+
+# 需要 mcp:admin 权限才能访问 MCP 管理端点 (/mcp/admin/*)
+[[permissions]]
+name = "mcp:admin"
+action = "admin"
+resource_type = "mcp"
+resource_pattern = "*"
 # Globally unique id
 # alias = "static-0"
 # Auth token

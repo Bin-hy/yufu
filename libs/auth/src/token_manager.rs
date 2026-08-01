@@ -347,6 +347,33 @@ impl IdTokenSigner {
         roles: Vec<String>,
         permissions: Vec<String>,
     ) -> JwtResult<String> {
+        self.sign_access_token_with_jti(
+            sub,
+            iss,
+            aud,
+            scope,
+            ttl_seconds,
+            roles,
+            permissions,
+            &Uuid::new_v4().to_string(),
+        )
+    }
+
+    /// Like [`Self::sign_access_token`] but with a caller-supplied `jti`. Used when the
+    /// issuer needs the token's id up front (e.g. to persist a revocable MCP-token record
+    /// keyed by `jti` before handing the token out).
+    #[allow(clippy::too_many_arguments)]
+    pub fn sign_access_token_with_jti(
+        &self,
+        sub: &str,
+        iss: &str,
+        aud: &str,
+        scope: &str,
+        ttl_seconds: i64,
+        roles: Vec<String>,
+        permissions: Vec<String>,
+        jti: &str,
+    ) -> JwtResult<String> {
         let now = Utc::now();
         let exp = now + Duration::seconds(ttl_seconds);
         let claims = AccessTokenClaims {
@@ -355,7 +382,7 @@ impl IdTokenSigner {
             aud: aud.to_string(),
             iat: now.timestamp() as u64,
             exp: exp.timestamp() as u64,
-            jti: Uuid::new_v4().to_string(),
+            jti: jti.to_string(),
             scope: scope.to_string(),
             roles,
             permissions,

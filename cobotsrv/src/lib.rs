@@ -37,6 +37,13 @@ pub mod route;
 pub mod service;
 mod store;
 
+/// Capacity of the MCP audit-record queue feeding the background writer task.
+const MCP_AUDIT_QUEUE_CAPACITY: usize = 1024;
+/// MCP audit records older than this are purged (once per day).
+const MCP_AUDIT_RETENTION_DAYS: i64 = 30;
+/// TTL of the MCP token-revocation introspect cache, in seconds.
+const MCP_REVOCATION_CACHE_TTL_SECS: u64 = 10;
+
 pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
 where
     F: Future<Output = ()> + Send + 'static,
@@ -241,12 +248,53 @@ where
         None
     };
 
+    // Active MCP session registry + idle-eviction reaper (5 min TTL, 60s sweep).
+    let mcp_sessions = Arc::new(crate::mcp::session::SessionRegistry::new());
+    mcp_sessions.spawn_reaper(Duration::from_secs(300), Duration::from_secs(60));
+
+    // MCP audit log: bounded queue + single background writer. Producers
+    // (tools/call handlers) `try_send` and drop on overload rather than
+    // spawning a task per call.
+    let (mcp_audit_tx, mut mcp_audit_rx) =
+        tokio::sync::mpsc::channel::<crate::mcp::audit::CallRecord>(MCP_AUDIT_QUEUE_CAPACITY);
+    {
+        let db = database.connection.clone();
+        tokio::spawn(async move {
+            while let Some(rec) = mcp_audit_rx.recv().await {
+                crate::mcp::audit::record(&db, rec).await;
+            }
+        });
+    }
+
+    // Daily purge of MCP audit records past the retention window.
+    {
+        let db = database.connection.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
+            loop {
+                tick.tick().await;
+                match crate::mcp::audit::purge_older_than(&db, MCP_AUDIT_RETENTION_DAYS).await {
+                    Ok(deleted) => {
+                        info!(
+                            deleted,
+                            retention_days = MCP_AUDIT_RETENTION_DAYS,
+                            "mcp_call_log purge"
+                        )
+                    }
+                    Err(e) => tracing::warn!(error = %e, "mcp_call_log purge failed"),
+                }
+            }
+        });
+    }
+
     let app_state = AppState {
         config: cfg.clone(),
         client: client_req.build().unwrap(),
         storage: store,
         database: database.clone(),
         mqtt: mqtt_handle,
+        mcp_sessions,
+        mcp_audit_tx,
     };
 
     // JWT verification (Phase 1): pull cobotusr's public key from JWKS, verify RS256.
@@ -294,25 +342,67 @@ where
         next.run(request).await
     }
 
-    let protected = if cfg.auth.require_permissions {
-        let enforce_client: Arc<dyn auth::PermissionChecker> = Arc::new(
-            enforce::EnforceClient::new(cfg.auth.cobotusr_base_url(), 10),
-        );
-        get_protected_routes()
-            .layer(middleware::from_fn_with_state(
-                enforce_client,
-                enforce_injector,
-            ))
-            .layer(middleware::from_fn_with_state(
-                jwks.clone(),
-                access_middleware_rs256,
-            ))
-    } else {
-        get_protected_routes().layer(middleware::from_fn_with_state(
+    // Revocation guard for long-lived MCP tokens. Runs after JWT verification (claims
+    // present) and rejects any `/mcp` request whose token `jti` is on cobotusr's denylist.
+    // Non-MCP routes are skipped entirely (no cobotusr round-trip). Fails open on outage.
+    async fn mcp_revocation_guard(
+        rev: axum::extract::State<Arc<crate::mcp::revocation::RevocationClient>>,
+        request: Request,
+        next: middleware::Next,
+    ) -> axum::response::Response {
+        let path = request.uri().path();
+        if !(path == "/mcp" || path.starts_with("/mcp/")) {
+            return next.run(request).await;
+        }
+        let jti = request
+            .extensions()
+            .get::<auth::claims::AccessTokenClaims>()
+            .map(|c| c.jti.clone())
+            .unwrap_or_default();
+        if !jti.is_empty() {
+            let auth_header = request
+                .headers()
+                .get(http::header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            if rev.0.is_revoked(&jti, &auth_header).await {
+                return (http::StatusCode::UNAUTHORIZED, "token revoked").into_response();
+            }
+        }
+        next.run(request).await
+    }
+
+    let revocation: Arc<crate::mcp::revocation::RevocationClient> =
+        Arc::new(crate::mcp::revocation::RevocationClient::new(
+            cfg.auth.cobotusr_base_url(),
+            MCP_REVOCATION_CACHE_TTL_SECS,
+        ));
+
+    let mut protected = get_protected_routes();
+    if cfg.auth.require_permissions {
+        let enforce_client: Arc<dyn auth::PermissionChecker> =
+            Arc::new(enforce::EnforceClient::new(
+                cfg.auth.cobotusr_base_url(),
+                cfg.auth.client_id.clone(),
+                10,
+            ));
+        protected = protected.layer(middleware::from_fn_with_state(
+            enforce_client,
+            enforce_injector,
+        ));
+    }
+    // Order matters: access middleware (outermost) injects claims, then the revocation
+    // guard reads them, then the routes run.
+    let protected = protected
+        .layer(middleware::from_fn_with_state(
+            revocation,
+            mcp_revocation_guard,
+        ))
+        .layer(middleware::from_fn_with_state(
             jwks.clone(),
             access_middleware_rs256,
-        ))
-    };
+        ));
 
     let app = Router::new()
         .merge(protected)
@@ -411,7 +501,7 @@ async fn sync_permissions(cfg: &Config) {
         return;
     }
 
-    let cobotsrv_base = cfg.auth.cobotusr_base_url();
+    let cobotusr_base = cfg.auth.cobotusr_base_url();
 
     let client = reqwest::Client::new();
 
@@ -428,7 +518,7 @@ async fn sync_permissions(cfg: &Config) {
     match client
         .post(format!(
             "{}/api/v1/application/sync-permissions",
-            cobotsrv_base
+            cobotusr_base
         ))
         .json(&body)
         .send()
@@ -453,6 +543,11 @@ pub struct AppState {
     storage: Storage,
     database: Arc<DatabaseService>,
     pub mqtt: Option<Arc<crate::mqtt::MqttHandle>>,
+    /// Active MCP session registry (Mcp-Session-Id → session info).
+    pub mcp_sessions: Arc<crate::mcp::session::SessionRegistry>,
+    /// Queue of pending MCP audit records; drained by a single background
+    /// writer task (bounded — producers drop on overload).
+    pub mcp_audit_tx: tokio::sync::mpsc::Sender<crate::mcp::audit::CallRecord>,
 }
 
 pub type IdType = i32;

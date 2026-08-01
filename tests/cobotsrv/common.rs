@@ -23,8 +23,11 @@ pub struct CobotsrvTestCtx {
     pub _jwks_stop: oneshot::Sender<()>,
     /// Base URL of the running cobotsrv (e.g. "http://127.0.0.1:PORT").
     pub base: String,
-    /// A valid Bearer token with mcp:access + task:execute + device:read.
+    /// A valid Bearer token with mcp:access + mcp:admin + task:execute + device:read.
     pub token: String,
+    /// PKCS#8 PEM of the signing key — mint custom-permission tokens with
+    /// [`sign_test_token`].
+    pub signing_pem: Vec<u8>,
     /// Direct database connection for inserting test fixtures.
     pub db: DatabaseConnection,
 }
@@ -32,16 +35,39 @@ pub struct CobotsrvTestCtx {
 impl CobotsrvTestCtx {
     /// POST /mcp helper: sends a JSON-RPC request and returns the parsed response.
     pub async fn mcp_post(&self, body: Value) -> (reqwest::StatusCode, Value) {
+        self.mcp_post_with(&self.token, body).await
+    }
+
+    /// POST /mcp with an explicit token.
+    pub async fn mcp_post_with(&self, token: &str, body: Value) -> (reqwest::StatusCode, Value) {
         let client = reqwest::Client::new();
         let resp = client
             .post(format!("{}/mcp", self.base))
-            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Authorization", format!("Bearer {token}"))
             .json(&body)
             .send()
             .await
             .expect("mcp post failed");
         let status = resp.status();
         let json: Value = resp.json().await.expect("response is not json");
+        (status, json)
+    }
+
+    /// Authenticated GET helper. Returns (status, parsed-json-if-any).
+    pub async fn get_authed(&self, path: &str) -> (reqwest::StatusCode, Value) {
+        self.get_authed_with(&self.token, path).await
+    }
+
+    /// Authenticated GET with an explicit token.
+    pub async fn get_authed_with(&self, token: &str, path: &str) -> (reqwest::StatusCode, Value) {
+        let resp = reqwest::Client::new()
+            .get(format!("{}{}", self.base, path))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("get failed");
+        let status = resp.status();
+        let json = resp.json().await.unwrap_or(Value::Null);
         (status, json)
     }
 }
@@ -90,7 +116,10 @@ pub async fn start() -> CobotsrvTestCtx {
     let pem = private_key
         .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
         .expect("pem encode failed");
-    let token = sign_test_token(pem.as_bytes());
+    let token = sign_test_token(
+        pem.as_bytes(),
+        &["mcp:access", "mcp:admin", "task:execute", "device:read"],
+    );
 
     // ── 5. Start cobotsrv ─────────────────────────────────────────────────────
     let mut cfg = cobotsrv::config::Config::default();
@@ -129,6 +158,7 @@ pub async fn start() -> CobotsrvTestCtx {
         _jwks_stop,
         base,
         token,
+        signing_pem: pem.as_bytes().to_vec(),
         db,
     }
 }
@@ -161,9 +191,9 @@ async fn start_jwks_server(jwks: Value) -> (std::net::SocketAddr, oneshot::Sende
     (addr, tx)
 }
 
-/// Sign an RS256 JWT with the given PEM private key.
-/// Claims: aud="cobotsrv", permissions=[mcp:access, task:execute, device:read], 100yr expiry.
-fn sign_test_token(pem: &[u8]) -> String {
+/// Sign an RS256 JWT with the given PEM private key and permission set.
+/// Claims: aud="cobotsrv", 100yr expiry.
+pub fn sign_test_token(pem: &[u8], permissions: &[&str]) -> String {
     let encoding_key = EncodingKey::from_rsa_pem(pem).expect("encoding key from pem");
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("test-key".to_string());
@@ -182,11 +212,7 @@ fn sign_test_token(pem: &[u8]) -> String {
         jti: uuid::Uuid::new_v4().to_string(),
         scope: String::new(),
         roles: vec![],
-        permissions: vec![
-            "mcp:access".to_string(),
-            "task:execute".to_string(),
-            "device:read".to_string(),
-        ],
+        permissions: permissions.iter().map(|p| p.to_string()).collect(),
     };
 
     encode(&header, &claims, &encoding_key).expect("token sign failed")

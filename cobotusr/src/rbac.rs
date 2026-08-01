@@ -77,7 +77,7 @@ pub async fn authority_check_middleware_rbac_abac(
             if ua.allow {
                 return next.run(request).await;
             } else {
-                return AppError::Forbidden(format!("{} No access permission (ABAC deny)", &uri))
+                return AppError::Forbidden(format!("{} No access permission (ABAC deny)", uri))
                     .into_response();
             }
         }
@@ -100,7 +100,7 @@ pub async fn authority_check_middleware_rbac_abac(
         }
         Ok(e) => {
             // 无权限
-            AppError::Forbidden(format!("{} No access permission, {:?}", &uri, e)).into_response()
+            AppError::Forbidden(format!("{} No access permission, {:?}", uri, e)).into_response()
         }
         Err(e) => AppError::from(e).into_response(),
     }
@@ -168,7 +168,7 @@ pub async fn check_authority_abac(
 
     let user = match user::Entity::find_by_id(user_id).one(db).await {
         Ok(Some(u)) => u,
-        Ok(None) => return Err(AppError::NotFound(format!("User {} not found", &user_id))),
+        Ok(None) => return Err(AppError::NotFound(format!("User {} not found", user_id))),
         Err(e) => return Err(AppError::from(e)),
     };
 

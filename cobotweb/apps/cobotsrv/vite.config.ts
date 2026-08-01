@@ -19,9 +19,22 @@ export default defineConfig(({ mode }) => {
                 '/tasks': { target: COBOTRIX_URL, changeOrigin: true, secure: false },
                 '/remote': { target: COBOTRIX_URL, changeOrigin: true, secure: false },
                 '/hello': { target: COBOTRIX_URL, changeOrigin: true, secure: false },
-                // OIDC + JWKS → cobotusr (port 4000)
+                '/tools': { target: COBOTRIX_URL, changeOrigin: true, secure: false },
+                '/mcp': {
+                    target: COBOTRIX_URL,
+                    changeOrigin: true,
+                    secure: false,
+                    // The SPA itself has /mcp/* routes (overview, tokens, …). Let
+                    // browser navigations (Accept: text/html) fall through to
+                    // index.html; only API calls are proxied to the backend.
+                    bypass(req) {
+                        if (req.headers.accept?.includes('text/html')) return '/index.html'
+                    },
+                },
+                // OIDC + JWKS + userinfo / MCP token API → cobotusr (port 4000)
                 '/oidc': { target: COBOTSRV_URL, changeOrigin: true, secure: false },
                 '/.well-known': { target: COBOTSRV_URL, changeOrigin: true, secure: false },
+                '/api/v1': { target: COBOTSRV_URL, changeOrigin: true, secure: false },
             },
         },
         build: {

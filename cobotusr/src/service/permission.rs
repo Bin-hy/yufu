@@ -11,8 +11,9 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 /// key exists (e.g. for cobotsrv's own internal tokens), returns empty sets.
 ///
 /// Resolution order (permission):
-///   1. `user_permission` explicit allow/deny overrides everything
-///   2. `role_permission` via the user's role(s)
+///   1. `user_permission` explicit allow/deny overrides everything (including superadmin)
+///   2. superadmin role implicitly holds every permission of the application
+///   3. `role_permission` via the user's role(s)
 pub async fn resolve_user_permissions(
     db: &DatabaseConnection,
     user_id: IdType,
@@ -29,6 +30,7 @@ pub async fn resolve_user_permissions(
         .map(|r| r.name)
         .unwrap_or_default();
 
+    let is_superadmin = user_role == role::RoleEnum::Superadmin.get_name();
     let roles = vec![user_role];
 
     let Some(app) = application::Entity::get_by_app_key(db, aud).await? else {
@@ -37,7 +39,9 @@ pub async fn resolve_user_permissions(
 
     let all_perms = permission::Entity::list_by_application(db, app.id).await?;
 
-    // user_permission overrides (allow/deny)
+    // user_permission overrides (allow/deny) — evaluated BEFORE the superadmin
+    // short-circuit: an explicit deny wins even over superadmin role grants,
+    // matching the legacy authority system (rbac.rs).
     let user_overrides: Vec<user_permission::Model> =
         user_permission::Entity::list_by_user(db, user_id).await?;
 
@@ -50,6 +54,18 @@ pub async fn resolve_user_permissions(
         } else {
             denied_ids.insert(ov.permission_id);
         }
+    }
+
+    // Superadmin implicitly holds every permission of the application except
+    // explicit `user_permission` denies (mirrors
+    // `AuthorityService::ensure_sadmin_authorities` for the legacy authority system).
+    if is_superadmin {
+        let names = all_perms
+            .iter()
+            .filter(|p| !denied_ids.contains(&p.id))
+            .map(|p| p.name.clone())
+            .collect();
+        return Ok((roles, names));
     }
 
     // role_permission via user's role
@@ -121,7 +137,9 @@ pub async fn enforce(db: &DatabaseConnection, req: &EnforceRequest) -> Result<En
 
     let all_perms = permission::Entity::list_by_application(db, app.id).await?;
 
-    // user_permission overrides
+    // user_permission overrides — evaluated BEFORE the superadmin short-circuit:
+    // an explicit deny wins even over superadmin, matching the legacy authority
+    // system (rbac.rs).
     let user_overrides: Vec<user_permission::Model> =
         user_permission::Entity::list_by_user(db, req.subject).await?;
 
@@ -136,6 +154,33 @@ pub async fn enforce(db: &DatabaseConnection, req: &EnforceRequest) -> Result<En
         .map(|o| o.permission_id)
         .collect();
 
+    // Superadmin is allowed everything EXCEPT what an explicit `user_permission`
+    // deny covers (mirrors the legacy authority system's `ensure_sadmin_authorities`
+    // plus its ABAC override precedence).
+    let is_superadmin = role::Entity::find_by_id(user.role_id)
+        .one(db)
+        .await?
+        .map(|r| r.name == role::RoleEnum::Superadmin.get_name())
+        .unwrap_or(false);
+    if is_superadmin {
+        if let Some(perm) = all_perms
+            .iter()
+            .find(|p| denied_ids.contains(&p.id) && perm_matches(p, req))
+        {
+            return Ok(EnforceResponse {
+                allow: false,
+                reason: format!(
+                    "explicit user deny on permission #{} ({})",
+                    perm.id, perm.name
+                ),
+            });
+        }
+        return Ok(EnforceResponse {
+            allow: true,
+            reason: "superadmin".to_string(),
+        });
+    }
+
     let role_perm_ids: Vec<IdType> =
         role_permission::Entity::list_permission_ids_by_role(db, user.role_id).await?;
     let role_perm_set: std::collections::HashSet<IdType> = role_perm_ids.into_iter().collect();
@@ -149,21 +194,7 @@ pub async fn enforce(db: &DatabaseConnection, req: &EnforceRequest) -> Result<En
         if !allowed_ids.contains(&perm.id) && !role_perm_set.contains(&perm.id) {
             continue;
         }
-        // action must match (allow matching against either the action verb
-        // like "read" or the full permission name like "device:read")
-        if perm.action != req.action && perm.name != req.action {
-            continue;
-        }
-        // resource_type must match if specified
-        if let (Some(req_rt), Some(perm_rt)) = (&req.resource_type, &perm.resource_type)
-            && req_rt != perm_rt
-        {
-            continue;
-        }
-        // resource_pattern match
-        if let (Some(rid), Some(pattern)) = (&req.resource_id, &perm.resource_pattern)
-            && !glob_match(pattern, rid)
-        {
+        if !perm_matches(perm, req) {
             continue;
         }
         return Ok(EnforceResponse {
@@ -176,6 +207,28 @@ pub async fn enforce(db: &DatabaseConnection, req: &EnforceRequest) -> Result<En
         allow: false,
         reason: "no matching permission".to_string(),
     })
+}
+
+/// Whether a permission row matches the request's action / resource_type /
+/// resource_pattern. Action matches either the verb ("read") or the full
+/// permission name ("device:read").
+fn perm_matches(perm: &permission::Model, req: &EnforceRequest) -> bool {
+    if perm.action != req.action && perm.name != req.action {
+        return false;
+    }
+    // resource_type must match if specified
+    if let (Some(req_rt), Some(perm_rt)) = (&req.resource_type, &perm.resource_type)
+        && req_rt != perm_rt
+    {
+        return false;
+    }
+    // resource_pattern match
+    if let (Some(rid), Some(pattern)) = (&req.resource_id, &perm.resource_pattern)
+        && !glob_match(pattern, rid)
+    {
+        return false;
+    }
+    true
 }
 
 /// Simple glob match: `*` matches any sequence (including empty), `?` matches exactly one char.

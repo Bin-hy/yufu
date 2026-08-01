@@ -51,10 +51,12 @@ pub struct ToolListResponse {
     pub tools: Vec<ToolDescriptor>,
 }
 
-async fn list_tools(State(state): State<AppState>) -> Result<Json<ToolListResponse>> {
-    let devices = DeviceService::list(&state.database.connection).await?;
+/// Aggregate device capabilities into deduplicated tool descriptors, grouping
+/// every device that declares a capability as a provider of that tool. Sorted
+/// by tool name. Shared by `GET /tools` and the MCP admin info endpoint.
+pub(crate) fn aggregate_tools(devices: &[crate::entity::device::Model]) -> Vec<ToolDescriptor> {
     let mut seen: HashMap<String, ToolDescriptor> = HashMap::new();
-    for device in &devices {
+    for device in devices {
         let caps: Vec<Capability> =
             serde_json::from_value(device.capabilities.clone()).unwrap_or_default();
         for cap in caps {
@@ -78,7 +80,14 @@ async fn list_tools(State(state): State<AppState>) -> Result<Json<ToolListRespon
     }
     let mut tools: Vec<ToolDescriptor> = seen.into_values().collect();
     tools.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(Json(ToolListResponse { tools }))
+    tools
+}
+
+async fn list_tools(State(state): State<AppState>) -> Result<Json<ToolListResponse>> {
+    let devices = DeviceService::list(&state.database.connection).await?;
+    Ok(Json(ToolListResponse {
+        tools: aggregate_tools(&devices),
+    }))
 }
 
 async fn get_tool(
@@ -118,5 +127,7 @@ async fn get_tool(
         }
     }
 
-    Ok(Json(descriptor.unwrap()))
+    let descriptor =
+        descriptor.ok_or_else(|| AppError::not_found(format!("tool '{name}' not found")))?;
+    Ok(Json(descriptor))
 }

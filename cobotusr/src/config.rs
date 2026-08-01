@@ -207,6 +207,11 @@ pub struct Oidc {
     /// rotation. Use the admin API to rotate secrets explicitly.
     #[serde(default)]
     pub bootstrap_clients: Vec<BootstrapClient>,
+
+    /// Maximum lifetime (days) for long-lived MCP access tokens minted via
+    /// `POST /api/v1/oidc/mcp-tokens`. Requested TTL is clamped to this. Default 90.
+    #[serde(default = "default_mcp_token_max_ttl_days")]
+    pub mcp_token_max_ttl_days: u32,
 }
 
 /// One row in `[[oidc.bootstrap_clients]]`. See `Oidc::bootstrap_clients`.
@@ -244,6 +249,10 @@ fn default_signing_algorithm() -> String {
     "RS256".to_string()
 }
 
+fn default_mcp_token_max_ttl_days() -> u32 {
+    90
+}
+
 impl Default for Oidc {
     fn default() -> Self {
         Self {
@@ -254,6 +263,7 @@ impl Default for Oidc {
             email_domain: default_oidc_email_domain(),
             signing_algorithm: default_signing_algorithm(),
             bootstrap_clients: Vec::new(),
+            mcp_token_max_ttl_days: default_mcp_token_max_ttl_days(),
         }
     }
 }
