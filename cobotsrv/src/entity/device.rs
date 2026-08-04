@@ -14,7 +14,7 @@ pub struct Model {
     pub service_url: String,
     /// Capabilities serialized as JSON.
     pub capabilities: Json,
-    pub online: bool,
+    pub state: String,
     pub last_heartbeat: DateTime,
     pub registered_at: DateTime,
     pub update_time: DateTime,
@@ -45,7 +45,7 @@ pub struct DeviceVO {
     pub device_id: String,
     pub service_url: String,
     pub capabilities: Vec<Capability>,
-    pub online: bool,
+    pub state: String,
     pub last_heartbeat: String,
     pub registered_at: String,
 }
@@ -60,7 +60,7 @@ impl From<Model> for DeviceVO {
             device_id: m.device_id,
             service_url: m.service_url,
             capabilities,
-            online: m.online,
+            state: m.state,
             last_heartbeat: m.last_heartbeat.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
             registered_at: m.registered_at.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         }

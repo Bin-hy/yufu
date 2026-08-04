@@ -14,7 +14,7 @@ use auth::require_perm;
 
 #[derive(Debug, Default, Deserialize)]
 struct DeviceQuery {
-    pub online: Option<bool>,
+    pub state: Option<String>,
     pub capability: Option<String>,
 }
 
@@ -38,7 +38,7 @@ async fn list(
     let devices = DeviceService::list_filtered(
         &state.database.connection,
         None,
-        q.online,
+        q.state.as_deref(),
         q.capability.as_deref(),
     )
     .await?;
@@ -53,7 +53,7 @@ async fn list_by_alias(
     let devices = DeviceService::list_filtered(
         &state.database.connection,
         Some(&alias),
-        q.online,
+        q.state.as_deref(),
         q.capability.as_deref(),
     )
     .await?;

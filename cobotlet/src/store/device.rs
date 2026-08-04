@@ -25,6 +25,60 @@ fn default_method() -> String {
     String::from("POST")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceState {
+    #[default]
+    Registering,
+    Ready,
+    Busy {
+        task_id: String,
+    },
+    Error {
+        reason: String,
+    },
+    Maintenance,
+    Offline,
+}
+
+impl DeviceState {
+    pub fn can_transition_to(&self, target: &DeviceState) -> bool {
+        matches!(
+            (self, target),
+            (Self::Registering, Self::Ready)
+                | (Self::Registering, Self::Offline { .. })
+                | (Self::Ready, Self::Busy { .. })
+                | (Self::Ready, Self::Maintenance)
+                | (Self::Ready, Self::Offline { .. })
+                | (Self::Busy { .. }, Self::Ready)
+                | (Self::Busy { .. }, Self::Error { .. })
+                | (Self::Busy { .. }, Self::Offline { .. })
+                | (Self::Error { .. }, Self::Ready)
+                | (Self::Error { .. }, Self::Maintenance)
+                | (Self::Error { .. }, Self::Offline { .. })
+                | (Self::Maintenance, Self::Ready)
+                | (Self::Maintenance, Self::Offline { .. })
+                | (Self::Offline { .. }, Self::Ready)
+                | (Self::Offline { .. }, Self::Registering)
+        )
+    }
+
+    pub fn is_available(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Registering => "registering",
+            Self::Ready => "ready",
+            Self::Busy { .. } => "busy",
+            Self::Error { .. } => "error",
+            Self::Maintenance => "maintenance",
+            Self::Offline => "offline",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
     pub id: String,
@@ -33,12 +87,8 @@ pub struct Device {
     pub capabilities: Vec<Capability>,
     pub last_heartbeat: DateTime<Utc>,
     pub registered_at: DateTime<Utc>,
-    #[serde(default = "default_true")]
-    pub online: bool,
-}
-
-fn default_true() -> bool {
-    true
+    #[serde(default)]
+    pub state: DeviceState,
 }
 
 const TABLE: TableDefinition<&str, &str> = TableDefinition::new("devices");
@@ -133,21 +183,95 @@ impl DeviceStore {
         Ok(device)
     }
 
-    /// Returns the updated device and whether it transitioned from offline → online.
-    pub fn heartbeat(&self, id: &str) -> Result<Option<(Device, bool)>> {
+    /// Returns the updated device and the previous state.
+    /// Transitions Registering/Offline/Error → Ready on heartbeat.
+    /// Busy/Ready/Maintenance just update last_heartbeat.
+    pub fn heartbeat(&self, id: &str) -> Result<Option<(Device, DeviceState)>> {
         let mut entry = match self.devices.get_mut(id) {
             Some(e) => e,
             None => return Ok(None),
         };
+        let old_state = entry.state.clone();
         entry.last_heartbeat = Utc::now();
-        let was_offline = !entry.online;
-        entry.online = true;
+        let transitioned = matches!(
+            old_state,
+            DeviceState::Registering | DeviceState::Offline | DeviceState::Error { .. }
+        );
+        if transitioned {
+            entry.state = DeviceState::Ready;
+        }
         let device = entry.clone();
         drop(entry);
-        if was_offline {
+        if transitioned {
             self.persist(&device)?;
         }
-        Ok(Some((device, was_offline)))
+        Ok(Some((device, old_state)))
+    }
+
+    pub fn transition(&self, id: &str, to: DeviceState) -> Result<Option<Device>> {
+        let mut entry = match self.devices.get_mut(id) {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        if !entry.state.can_transition_to(&to) {
+            anyhow::bail!(
+                "invalid transition: {} → {}",
+                entry.state.as_str(),
+                to.as_str()
+            );
+        }
+        entry.state = to;
+        let device = entry.clone();
+        drop(entry);
+        self.persist(&device)?;
+        Ok(Some(device))
+    }
+
+    pub fn acquire_for_task(&self, id: &str, task_id: &str) -> Result<Option<Device>> {
+        let mut entry = match self.devices.get_mut(id) {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        if !entry.state.is_available() {
+            return Ok(None);
+        }
+        entry.state = DeviceState::Busy {
+            task_id: task_id.to_string(),
+        };
+        let device = entry.clone();
+        drop(entry);
+        self.persist(&device)?;
+        Ok(Some(device))
+    }
+
+    pub fn release_from_task(&self, id: &str) -> Result<Option<Device>> {
+        let mut entry = match self.devices.get_mut(id) {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        if !matches!(entry.state, DeviceState::Busy { .. }) {
+            return Ok(None);
+        }
+        entry.state = DeviceState::Ready;
+        let device = entry.clone();
+        drop(entry);
+        self.persist(&device)?;
+        Ok(Some(device))
+    }
+
+    pub fn mark_error(&self, id: &str, reason: String) -> Result<Option<Device>> {
+        let mut entry = match self.devices.get_mut(id) {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+        if !matches!(entry.state, DeviceState::Busy { .. }) {
+            return Ok(None);
+        }
+        entry.state = DeviceState::Error { reason };
+        let device = entry.clone();
+        drop(entry);
+        self.persist(&device)?;
+        Ok(Some(device))
     }
 
     pub fn list(&self) -> Vec<Device> {
@@ -189,20 +313,22 @@ impl DeviceStore {
         };
         set.iter()
             .filter_map(|id| self.devices.get(id).map(|e| e.clone()))
-            .filter(|d| d.online)
+            .filter(|d| d.state.is_available())
             .collect()
     }
 
     /// Sweeps devices whose `last_heartbeat` is older than `timeout_secs`,
-    /// flips them to offline, persists the change, and returns the snapshots
-    /// of devices that just transitioned.
+    /// transitions them to Offline, persists the change, and returns the
+    /// snapshots of devices that just transitioned.
     pub fn sweep_offline(&self, timeout_secs: u64) -> Vec<Device> {
         let now = Utc::now();
         let mut newly_offline = Vec::new();
         for mut entry in self.devices.iter_mut() {
             let age = (now - entry.last_heartbeat).num_seconds().max(0) as u64;
-            if entry.online && age > timeout_secs {
-                entry.online = false;
+            if !matches!(entry.state, DeviceState::Offline | DeviceState::Maintenance)
+                && age > timeout_secs
+            {
+                entry.state = DeviceState::Offline;
                 newly_offline.push(entry.clone());
             }
         }
@@ -237,7 +363,7 @@ mod tests {
                 .collect(),
             last_heartbeat: now,
             registered_at: now,
-            online: true,
+            state: DeviceState::Ready,
         }
     }
 
@@ -252,22 +378,22 @@ mod tests {
         let (s, _g) = store();
         s.register(sample("d1", &["move"])).unwrap();
         assert!(s.get("d1").is_some());
-        let by_cap = s.find_by_capability("move");
-        assert_eq!(by_cap.len(), 1);
-        assert_eq!(by_cap[0].id, "d1");
+        assert_eq!(s.get("d1").unwrap().state, DeviceState::Ready);
+        assert_eq!(s.find_by_capability("move").len(), 1);
+        assert_eq!(s.find_by_capability("move")[0].id, "d1");
     }
 
     #[test]
     fn heartbeat_resurrects_offline() {
         let (s, _g) = store();
         let mut d = sample("d1", &["move"]);
-        d.online = false;
+        d.state = DeviceState::Offline;
         d.last_heartbeat = Utc::now() - chrono::Duration::seconds(120);
         s.register(d).unwrap();
 
-        let (after, was_offline) = s.heartbeat("d1").unwrap().unwrap();
-        assert!(was_offline);
-        assert!(after.online);
+        let (after, old_state) = s.heartbeat("d1").unwrap().unwrap();
+        assert_eq!(old_state, DeviceState::Offline);
+        assert_eq!(after.state, DeviceState::Ready);
         assert_eq!(s.find_by_capability("move").len(), 1);
     }
 
@@ -275,16 +401,15 @@ mod tests {
     fn sweep_marks_stale_offline() {
         let (s, _g) = store();
         let mut d = sample("d1", &["move"]);
+        d.state = DeviceState::Ready;
         d.last_heartbeat = Utc::now() - chrono::Duration::seconds(120);
         s.register(d).unwrap();
 
         let dropped = s.sweep_offline(30);
         assert_eq!(dropped.len(), 1);
         assert_eq!(dropped[0].id, "d1");
-        assert!(!s.get("d1").unwrap().online);
-        // find_by_capability filters offline.
+        assert_eq!(s.get("d1").unwrap().state, DeviceState::Offline);
         assert!(s.find_by_capability("move").is_empty());
-        // Idempotent — second sweep finds nothing newly offline.
         assert!(s.sweep_offline(30).is_empty());
     }
 
@@ -307,6 +432,7 @@ mod tests {
         }
         let s2 = DeviceStore::open(&path).unwrap();
         assert!(s2.get("d1").is_some());
+        assert_eq!(s2.get("d1").unwrap().state, DeviceState::Ready);
         assert_eq!(s2.find_by_capability("move").len(), 1);
     }
 
@@ -314,6 +440,7 @@ mod tests {
     fn remove_clears_capability_index() {
         let (s, _g) = store();
         s.register(sample("d1", &["move"])).unwrap();
+        s.heartbeat("d1").unwrap();
         s.remove("d1").unwrap();
         assert!(s.find_by_capability("move").is_empty());
         assert!(s.get("d1").is_none());
@@ -323,6 +450,7 @@ mod tests {
     fn update_capabilities_replaces_and_reindexes() {
         let (s, _g) = store();
         s.register(sample("d1", &["move", "grip"])).unwrap();
+        s.heartbeat("d1").unwrap();
 
         let new_caps = vec![Capability {
             name: "camera".to_string(),
@@ -334,12 +462,9 @@ mod tests {
         }];
         let updated = s.update_capabilities("d1", new_caps).unwrap().unwrap();
 
-        // New capability is queryable.
         assert_eq!(updated.capabilities.len(), 1);
         assert_eq!(updated.capabilities[0].name, "camera");
         assert_eq!(s.find_by_capability("camera").len(), 1);
-
-        // Old capabilities removed from index.
         assert!(s.find_by_capability("move").is_empty());
         assert!(s.find_by_capability("grip").is_empty());
     }
@@ -358,6 +483,7 @@ mod tests {
         {
             let s = DeviceStore::open(&path).unwrap();
             s.register(sample("d1", &["move"])).unwrap();
+            s.heartbeat("d1").unwrap();
             let caps = vec![Capability {
                 name: "grip".to_string(),
                 description: None,
@@ -371,5 +497,137 @@ mod tests {
         let s2 = DeviceStore::open(&path).unwrap();
         assert!(s2.find_by_capability("move").is_empty());
         assert_eq!(s2.find_by_capability("grip").len(), 1);
+    }
+
+    #[test]
+    fn device_state_valid_transitions() {
+        let cases = vec![
+            (DeviceState::Registering, DeviceState::Ready),
+            (
+                DeviceState::Ready,
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+            ),
+            (DeviceState::Ready, DeviceState::Maintenance),
+            (DeviceState::Ready, DeviceState::Offline),
+            (
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+                DeviceState::Ready,
+            ),
+            (
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+                DeviceState::Error {
+                    reason: "500".into(),
+                },
+            ),
+            (
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+                DeviceState::Offline,
+            ),
+            (
+                DeviceState::Error { reason: "x".into() },
+                DeviceState::Ready,
+            ),
+            (
+                DeviceState::Error { reason: "x".into() },
+                DeviceState::Maintenance,
+            ),
+            (
+                DeviceState::Error { reason: "x".into() },
+                DeviceState::Offline,
+            ),
+            (DeviceState::Maintenance, DeviceState::Ready),
+            (DeviceState::Maintenance, DeviceState::Offline),
+            (DeviceState::Offline, DeviceState::Ready),
+            (DeviceState::Offline, DeviceState::Registering),
+        ];
+        for (from, to) in cases {
+            assert!(
+                from.can_transition_to(&to),
+                "{from:?} → {to:?} should be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn device_state_invalid_transitions() {
+        let cases = vec![
+            (
+                DeviceState::Registering,
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+            ),
+            (DeviceState::Registering, DeviceState::Maintenance),
+            (
+                DeviceState::Offline,
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+            ),
+            (DeviceState::Offline, DeviceState::Maintenance),
+            (
+                DeviceState::Maintenance,
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+            ),
+            (
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+                DeviceState::Maintenance,
+            ),
+            (
+                DeviceState::Error { reason: "x".into() },
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+            ),
+        ];
+        for (from, to) in cases {
+            assert!(
+                !from.can_transition_to(&to),
+                "{from:?} → {to:?} should be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn device_state_is_available() {
+        assert!(DeviceState::Ready.is_available());
+        assert!(!DeviceState::Registering.is_available());
+        assert!(
+            !DeviceState::Busy {
+                task_id: "t".into()
+            }
+            .is_available()
+        );
+        assert!(!DeviceState::Error { reason: "x".into() }.is_available());
+        assert!(!DeviceState::Maintenance.is_available());
+        assert!(!DeviceState::Offline.is_available());
+    }
+
+    #[test]
+    fn device_state_as_str() {
+        assert_eq!(DeviceState::Registering.as_str(), "registering");
+        assert_eq!(DeviceState::Ready.as_str(), "ready");
+        assert_eq!(
+            DeviceState::Busy {
+                task_id: "t".into()
+            }
+            .as_str(),
+            "busy"
+        );
+        assert_eq!(DeviceState::Error { reason: "x".into() }.as_str(), "error");
+        assert_eq!(DeviceState::Maintenance.as_str(), "maintenance");
+        assert_eq!(DeviceState::Offline.as_str(), "offline");
     }
 }

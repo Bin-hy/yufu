@@ -387,7 +387,7 @@ async fn handle_device_event(
                     device_id,
                     service_url: parsed.service_url,
                     capabilities: parsed.capabilities,
-                    online: true,
+                    state: "ready".to_string(),
                     last_heartbeat: parsed.last_heartbeat.naive_utc(),
                     registered_at: parsed.registered_at.naive_utc(),
                 },

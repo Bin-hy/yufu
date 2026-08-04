@@ -12,7 +12,7 @@ pub fn route() -> Router<AppState> {
 #[derive(Debug, Serialize)]
 pub struct ToolProvider {
     pub device_id: String,
-    pub online: bool,
+    pub state: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -43,7 +43,7 @@ pub(crate) async fn list_tools(State(state): State<AppState>) -> Json<ToolListRe
                 });
             entry.providers.push(ToolProvider {
                 device_id: device.id.clone(),
-                online: device.online,
+                state: device.state.as_str().to_string(),
             });
         }
     }
@@ -97,7 +97,11 @@ mod tests {
                 .collect(),
             last_heartbeat: now,
             registered_at: now,
-            online,
+            state: if online {
+                crate::store::DeviceState::Ready
+            } else {
+                crate::store::DeviceState::Offline
+            },
         }
     }
 
@@ -168,12 +172,12 @@ mod tests {
         let providers = move_tool["providers"].as_array().unwrap();
         assert_eq!(providers.len(), 2, "both devices must appear as providers");
 
-        let online_flags: Vec<bool> = providers
+        let states: Vec<&str> = providers
             .iter()
-            .map(|p| p["online"].as_bool().unwrap())
+            .map(|p| p["state"].as_str().unwrap())
             .collect();
-        assert!(online_flags.contains(&true));
-        assert!(online_flags.contains(&false));
+        assert!(states.contains(&"ready"));
+        assert!(states.contains(&"offline"));
     }
 
     #[tokio::test]

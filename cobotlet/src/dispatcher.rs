@@ -78,20 +78,23 @@ pub async fn dispatch(
     default_timeout_ms: u64,
     task: Task,
 ) -> TaskResult {
-    let candidates = match &task.device_id {
+    let device = match &task.device_id {
         Some(id) => match store.get(id) {
-            Some(d) if d.online => vec![d],
-            Some(_) => return TaskResult::err(task.id, format!("device {id} is offline")),
+            Some(d) if d.state.is_available() => d,
+            Some(d) => {
+                return TaskResult::err(task.id, format!("device {id} is {}", d.state.as_str()));
+            }
             None => return TaskResult::err(task.id, format!("device {id} not found")),
         },
-        None => store.find_by_capability(&task.name),
-    };
-
-    let Some(device) = candidates.into_iter().next() else {
-        return TaskResult::err(
-            task.id,
-            format!("no online device for capability '{}'", task.name),
-        );
+        None => match store.find_by_capability(&task.name).into_iter().next() {
+            Some(d) => d,
+            None => {
+                return TaskResult::err(
+                    task.id,
+                    format!("no online device for capability '{}'", task.name),
+                );
+            }
+        },
     };
 
     let Some(cap) = device.capabilities.iter().find(|c| c.name == task.name) else {
@@ -104,14 +107,30 @@ pub async fn dispatch(
         );
     };
 
-    forward(
+    if store.acquire_for_task(&device.id, &task.id).is_err() {
+        return TaskResult::err(task.id, format!("device '{}' not available", device.id));
+    }
+
+    let result = forward(
         http_client,
         &device.service_url,
         cap,
         &task,
         default_timeout_ms,
     )
-    .await
+    .await;
+
+    if result.status >= 500 || (result.is_error && result.status == 0) {
+        let reason = result
+            .error_message()
+            .unwrap_or("unknown error")
+            .to_string();
+        let _ = store.mark_error(&device.id, reason);
+    } else {
+        let _ = store.release_from_task(&device.id);
+    }
+
+    result
 }
 
 async fn forward(
@@ -249,7 +268,7 @@ mod tests {
             capabilities: vec![cap("move")],
             last_heartbeat: now,
             registered_at: now,
-            online: false,
+            state: crate::store::DeviceState::Offline,
         };
         s.register(d).unwrap();
         let client = reqwest::Client::new();
@@ -270,9 +289,11 @@ mod tests {
             capabilities: vec![cap("move")],
             last_heartbeat: now,
             registered_at: now,
-            online: true,
+            state: crate::store::DeviceState::Ready,
         })
         .unwrap();
+        // Need to heartbeat to make it Ready (register forces Registering)
+        s.heartbeat("d1").unwrap();
         let client = reqwest::Client::new();
         let r = dispatch(&s, &client, 200, task("move")).await;
         assert!(r.is_error);

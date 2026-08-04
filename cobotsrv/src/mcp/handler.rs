@@ -85,7 +85,7 @@ async fn handle_tools_list(state: &AppState, id: Option<serde_json::Value>) -> J
 
     let mut seen: std::collections::HashMap<String, McpTool> = std::collections::HashMap::new();
     for device in &devices {
-        if !device.online {
+        if device.state != "ready" {
             continue;
         }
         let caps: Vec<Capability> =
@@ -161,7 +161,7 @@ async fn handle_tools_call(
         }
     };
 
-    let device = match devices.iter().find(|d| d.online) {
+    let device = match devices.iter().find(|d| d.state == "ready") {
         Some(d) => d,
         None => {
             let msg = match &cobotlet_alias_hint {

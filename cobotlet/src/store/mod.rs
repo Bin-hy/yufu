@@ -1,3 +1,3 @@
 pub mod device;
 
-pub use device::{Capability, Device, DeviceStore};
+pub use device::{Capability, Device, DeviceState, DeviceStore};

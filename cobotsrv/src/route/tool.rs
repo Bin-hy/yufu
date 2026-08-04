@@ -30,7 +30,7 @@ pub fn route() -> Router<AppState> {
 pub struct ToolProvider {
     pub cobotlet_alias: String,
     pub device_id: String,
-    pub online: bool,
+    pub state: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,7 +74,7 @@ pub(crate) fn aggregate_tools(devices: &[crate::entity::device::Model]) -> Vec<T
             entry.providers.push(ToolProvider {
                 cobotlet_alias: device.cobotlet_alias.clone(),
                 device_id: device.device_id.clone(),
-                online: device.online,
+                state: device.state.clone(),
             });
         }
     }
@@ -122,7 +122,7 @@ async fn get_tool(
             d.providers.push(ToolProvider {
                 cobotlet_alias: device.cobotlet_alias.clone(),
                 device_id: device.device_id.clone(),
-                online: device.online,
+                state: device.state.clone(),
             });
         }
     }
