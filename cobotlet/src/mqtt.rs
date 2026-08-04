@@ -98,6 +98,7 @@ pub struct MqttRuntime {
 pub async fn spawn(
     cfg: &MqttConfig,
     store: Arc<DeviceStore>,
+    task_store: Arc<crate::store::TaskStore>,
     http_client: reqwest::Client,
     request_timeout_ms: u64,
 ) -> Result<MqttRuntime> {
@@ -147,7 +148,8 @@ pub async fn spawn(
     });
 
     let task_sink = sink.clone();
-    let task_store = store;
+    let task_store_inner = store;
+    let task_record_store = task_store;
     let task_client = http_client;
     let task_topic_root = topic_root;
     tokio::spawn(async move {
@@ -157,7 +159,8 @@ pub async fn spawn(
                     handle_publish(
                         publish,
                         &task_topic_root,
-                        &task_store,
+                        &task_store_inner,
+                        &task_record_store,
                         &task_client,
                         request_timeout_ms,
                         &task_sink,
@@ -183,6 +186,7 @@ async fn handle_publish(
     publish: Publish,
     topic_root: &str,
     store: &Arc<DeviceStore>,
+    task_store: &Arc<crate::store::TaskStore>,
     http_client: &reqwest::Client,
     request_timeout_ms: u64,
     sink: &Arc<MqttSink>,
@@ -213,6 +217,9 @@ async fn handle_publish(
         }
     };
 
-    let result = dispatch(store, http_client, request_timeout_ms, task).await;
+    if let Err(e) = task_store.enqueue(&task) {
+        warn!(task_id = task.id, error = %e, "task enqueue failed");
+    }
+    let result = dispatch(store, task_store, http_client, request_timeout_ms, task).await;
     sink.publish_task_result(&result);
 }

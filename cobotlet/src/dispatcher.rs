@@ -5,7 +5,7 @@ use std::time::Duration;
 use http::{HeaderMap, HeaderName, HeaderValue, Method};
 use serde::{Deserialize, Serialize};
 
-use crate::store::{Capability, DeviceStore};
+use crate::store::{Capability, DeviceStore, TaskStore};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Task {
@@ -74,6 +74,7 @@ impl TaskResult {
 
 pub async fn dispatch(
     store: &Arc<DeviceStore>,
+    task_store: &TaskStore,
     http_client: &reqwest::Client,
     default_timeout_ms: u64,
     task: Task,
@@ -82,34 +83,42 @@ pub async fn dispatch(
         Some(id) => match store.get(id) {
             Some(d) if d.state.is_available() => d,
             Some(d) => {
-                return TaskResult::err(task.id, format!("device {id} is {}", d.state.as_str()));
+                let msg = format!("device {id} is {}", d.state.as_str());
+                let _ = task_store.fail(&task.id, msg.clone(), None);
+                return TaskResult::err(task.id, msg);
             }
-            None => return TaskResult::err(task.id, format!("device {id} not found")),
+            None => {
+                let msg = format!("device {id} not found");
+                let _ = task_store.fail(&task.id, msg.clone(), None);
+                return TaskResult::err(task.id, msg);
+            }
         },
         None => match store.find_by_capability(&task.name).into_iter().next() {
             Some(d) => d,
             None => {
-                return TaskResult::err(
-                    task.id,
-                    format!("no online device for capability '{}'", task.name),
-                );
+                let msg = format!("no online device for capability '{}'", task.name);
+                let _ = task_store.fail(&task.id, msg.clone(), None);
+                return TaskResult::err(task.id, msg);
             }
         },
     };
 
     let Some(cap) = device.capabilities.iter().find(|c| c.name == task.name) else {
-        return TaskResult::err(
-            task.id,
-            format!(
-                "device '{}' does not declare capability '{}'",
-                device.id, task.name
-            ),
+        let msg = format!(
+            "device '{}' does not declare capability '{}'",
+            device.id, task.name
         );
+        let _ = task_store.fail(&task.id, msg.clone(), None);
+        return TaskResult::err(task.id, msg);
     };
 
     if store.acquire_for_task(&device.id, &task.id).is_err() {
-        return TaskResult::err(task.id, format!("device '{}' not available", device.id));
+        let msg = format!("device '{}' not available", device.id);
+        let _ = task_store.fail(&task.id, msg.clone(), None);
+        return TaskResult::err(task.id, msg);
     }
+
+    let _ = task_store.mark_dispatched(&task.id, &device.id);
 
     let result = forward(
         http_client,
@@ -125,9 +134,11 @@ pub async fn dispatch(
             .error_message()
             .unwrap_or("unknown error")
             .to_string();
-        let _ = store.mark_error(&device.id, reason);
+        let _ = store.mark_error(&device.id, reason.clone());
+        let _ = task_store.fail(&task.id, reason, Some(&result));
     } else {
         let _ = store.release_from_task(&device.id);
+        let _ = task_store.complete(&task.id, &result);
     }
 
     result
@@ -207,13 +218,16 @@ async fn forward(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{Capability, Device, DeviceStore};
+    use crate::store::{Capability, Device, DeviceStore, TaskStore};
     use chrono::Utc;
+    use std::sync::Arc as StdArc;
 
-    fn store() -> (Arc<DeviceStore>, tempfile::TempDir) {
+    fn store() -> (Arc<DeviceStore>, StdArc<TaskStore>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("cobotlet.redb");
-        (Arc::new(DeviceStore::open(path).unwrap()), dir)
+        let db = StdArc::new(redb::Database::create(dir.path().join("cobotlet.redb")).unwrap());
+        let device_store = Arc::new(DeviceStore::new(db.clone()).unwrap());
+        let task_store = StdArc::new(TaskStore::new(db));
+        (device_store, task_store, dir)
     }
 
     fn task(cap: &str) -> Task {
@@ -240,27 +254,27 @@ mod tests {
 
     #[tokio::test]
     async fn no_device_for_capability() {
-        let (s, _g) = store();
+        let (s, ts, _g) = store();
         let client = reqwest::Client::new();
-        let r = dispatch(&s, &client, 5000, task("move")).await;
+        let r = dispatch(&s, &ts, &client, 5000, task("move")).await;
         assert!(r.is_error);
         assert!(r.error_message().unwrap().contains("no online device"));
     }
 
     #[tokio::test]
     async fn device_id_not_found() {
-        let (s, _g) = store();
+        let (s, ts, _g) = store();
         let client = reqwest::Client::new();
         let mut t = task("move");
         t.device_id = Some("missing".into());
-        let r = dispatch(&s, &client, 5000, t).await;
+        let r = dispatch(&s, &ts, &client, 5000, t).await;
         assert!(r.is_error);
         assert!(r.error_message().unwrap().contains("not found"));
     }
 
     #[tokio::test]
     async fn offline_device_rejected() {
-        let (s, _g) = store();
+        let (s, ts, _g) = store();
         let now = Utc::now();
         let d = Device {
             id: "d1".into(),
@@ -274,14 +288,14 @@ mod tests {
         let client = reqwest::Client::new();
         let mut t = task("move");
         t.device_id = Some("d1".into());
-        let r = dispatch(&s, &client, 5000, t).await;
+        let r = dispatch(&s, &ts, &client, 5000, t).await;
         assert!(r.is_error);
         assert!(r.error_message().unwrap().contains("offline"));
     }
 
     #[tokio::test]
     async fn forward_failure_surfaces_in_result() {
-        let (s, _g) = store();
+        let (s, ts, _g) = store();
         let now = Utc::now();
         s.register(Device {
             id: "d1".into(),
@@ -292,10 +306,9 @@ mod tests {
             state: crate::store::DeviceState::Ready,
         })
         .unwrap();
-        // Need to heartbeat to make it Ready (register forces Registering)
         s.heartbeat("d1").unwrap();
         let client = reqwest::Client::new();
-        let r = dispatch(&s, &client, 200, task("move")).await;
+        let r = dispatch(&s, &ts, &client, 200, task("move")).await;
         assert!(r.is_error);
         assert!(r.error_message().is_some());
         assert_eq!(r.id, "t1");

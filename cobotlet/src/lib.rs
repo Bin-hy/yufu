@@ -37,11 +37,24 @@ pub async fn serve(
         .map(|s| s.path.clone())
         .unwrap_or_else(|| String::from("data/cobotlet.redb"));
 
+    let db = store::open_database(&storage_path)
+        .unwrap_or_else(|e| panic!("failed to open database at {storage_path}: {e}"));
+    let db = Arc::new(db);
+
     let store = Arc::new(
-        store::DeviceStore::open(&storage_path)
-            .unwrap_or_else(|e| panic!("failed to open device store at {storage_path}: {e}")),
+        store::DeviceStore::new(db.clone())
+            .unwrap_or_else(|e| panic!("failed to init device store: {e}")),
     );
-    info!(path = storage_path, "device store opened");
+    let task_store = Arc::new(store::TaskStore::new(db));
+    info!(path = storage_path, "database opened");
+
+    let recovered = task_store.recover().unwrap_or_default();
+    if !recovered.is_empty() {
+        info!(
+            count = recovered.len(),
+            "recovered inflight tasks as failed"
+        );
+    }
 
     let http_client = reqwest::Client::new();
 
@@ -50,6 +63,7 @@ pub async fn serve(
             match mqtt::spawn(
                 mqtt_cfg,
                 store.clone(),
+                task_store.clone(),
                 http_client.clone(),
                 cfg.device.request_timeout_ms,
             )
@@ -80,6 +94,7 @@ pub async fn serve(
     let state = AppState {
         config: cfg.clone(),
         store,
+        task_store,
         http_client,
         events,
     };

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -94,7 +95,7 @@ pub struct Device {
 const TABLE: TableDefinition<&str, &str> = TableDefinition::new("devices");
 
 pub struct DeviceStore {
-    db: Database,
+    db: Arc<Database>,
     devices: DashMap<String, Device>,
     capability_index: DashMap<String, HashSet<String>>,
 }
@@ -108,6 +109,10 @@ impl DeviceStore {
             std::fs::create_dir_all(parent)?;
         }
         let db = Database::create(path)?;
+        Self::new(Arc::new(db))
+    }
+
+    pub fn new(db: Arc<Database>) -> Result<Self> {
         let store = Self {
             db,
             devices: DashMap::new(),

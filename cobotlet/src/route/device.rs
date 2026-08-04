@@ -182,10 +182,13 @@ mod tests {
 
     fn make_state() -> (AppState, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(DeviceStore::open(dir.path().join("test.redb")).unwrap());
+        let db = Arc::new(redb::Database::create(dir.path().join("test.redb")).unwrap());
+        let store = Arc::new(DeviceStore::new(db.clone()).unwrap());
+        let task_store = Arc::new(crate::store::TaskStore::new(db));
         let state = AppState {
             config: crate::config::Config::default(),
             store,
+            task_store,
             http_client: reqwest::Client::new(),
             events: Arc::new(NoopSink),
         };
