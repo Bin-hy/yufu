@@ -105,6 +105,7 @@ mod tests {
             } else {
                 crate::store::DeviceState::Offline
             },
+            control_preset: None,
         }
     }
 

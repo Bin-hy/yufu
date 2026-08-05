@@ -35,6 +35,26 @@ export interface DeviceVO {
   service_url: string
   capabilities: Capability[]
   online: boolean
+  state?: string
   last_heartbeat: string
   registered_at: string
+  control_preset?: ControlPreset | null
+}
+
+// ── Control Preset ──
+
+export type ControlTemplate = 'dpad' | 'dual_stick' | 'button_matrix'
+export type InteractionMode = 'press_release' | 'continuous' | 'fire_once'
+
+export interface ControlBinding {
+  capability: string
+  mode: InteractionMode
+  interval_ms?: number
+  params?: Record<string, unknown>
+  release_params?: Record<string, unknown>
+}
+
+export interface ControlPreset {
+  template: ControlTemplate
+  mapping: Record<string, ControlBinding>
 }

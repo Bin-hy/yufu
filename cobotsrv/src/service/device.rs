@@ -17,6 +17,7 @@ pub struct UpsertDevice<'a> {
     pub state: String,
     pub last_heartbeat: NaiveDateTime,
     pub registered_at: NaiveDateTime,
+    pub control_preset: Option<serde_json::Value>,
 }
 
 impl DeviceService {
@@ -33,6 +34,7 @@ impl DeviceService {
                 am.state = Set(input.state);
                 am.last_heartbeat = Set(input.last_heartbeat);
                 am.registered_at = Set(input.registered_at);
+                am.control_preset = Set(input.control_preset);
                 am.update_time = Set(now);
                 am.update(db).await
             }
@@ -46,6 +48,7 @@ impl DeviceService {
                     state: Set(input.state),
                     last_heartbeat: Set(input.last_heartbeat),
                     registered_at: Set(input.registered_at),
+                    control_preset: Set(input.control_preset),
                     update_time: Set(now),
                 };
                 am.insert(db).await

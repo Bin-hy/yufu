@@ -64,6 +64,7 @@ async fn register(
         last_heartbeat: now,
         registered_at: now,
         state: DeviceState::Registering,
+        control_preset: state.config.control_preset.clone(),
     };
     let device = state.store.register(device)?;
     state.events.publish_online(&device);
@@ -214,6 +215,7 @@ mod tests {
             last_heartbeat: now,
             registered_at: now,
             state: DeviceState::Ready,
+            control_preset: None,
         };
         state.store.register(device.clone()).unwrap();
         device
@@ -280,6 +282,7 @@ mod tests {
                 last_heartbeat: now,
                 registered_at: now,
                 state: DeviceState::Offline,
+                control_preset: None,
             })
             .unwrap();
 

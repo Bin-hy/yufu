@@ -5,6 +5,7 @@ mod m20260602_000001_create_easytier_network;
 mod m20260616_000001_create_mcp_call_log;
 mod m20260803_000001_device_state_field;
 mod m20260805_000001_call_log_add_fields;
+mod m20260805_000002_device_control_preset;
 
 pub struct Migrator;
 
@@ -17,6 +18,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260616_000001_create_mcp_call_log::Migration),
             Box::new(m20260803_000001_device_state_field::Migration),
             Box::new(m20260805_000001_call_log_add_fields::Migration),
+            Box::new(m20260805_000002_device_control_preset::Migration),
         ]
     }
 }

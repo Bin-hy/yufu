@@ -63,6 +63,8 @@ struct DeviceOnlinePayload {
     pub last_heartbeat: DateTime<Utc>,
     #[serde(default = "Utc::now")]
     pub registered_at: DateTime<Utc>,
+    #[serde(default)]
+    pub control_preset: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -390,6 +392,7 @@ async fn handle_device_event(
                     state: "ready".to_string(),
                     last_heartbeat: parsed.last_heartbeat.naive_utc(),
                     registered_at: parsed.registered_at.naive_utc(),
+                    control_preset: parsed.control_preset,
                 },
             )
             .await

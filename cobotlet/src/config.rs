@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
@@ -98,6 +99,44 @@ pub struct Net4mqtt {
     pub mqtt_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlTemplate {
+    #[default]
+    Dpad,
+    DualStick,
+    ButtonMatrix,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionMode {
+    #[default]
+    PressRelease,
+    Continuous,
+    FireOnce,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlBinding {
+    pub capability: String,
+    #[serde(default)]
+    pub mode: InteractionMode,
+    #[serde(default)]
+    pub interval_ms: Option<u64>,
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
+    #[serde(default)]
+    pub release_params: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ControlPreset {
+    pub template: ControlTemplate,
+    #[serde(default)]
+    pub mapping: HashMap<String, ControlBinding>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -112,6 +151,8 @@ pub struct Config {
     pub mqtt: Option<Mqtt>,
     #[serde(default)]
     pub net4mqtt: Option<Net4mqtt>,
+    #[serde(default)]
+    pub control_preset: Option<ControlPreset>,
     #[cfg(feature = "easytier")]
     #[serde(default)]
     pub easytier: Option<EasytierConfig>,
@@ -196,6 +237,7 @@ impl Default for Config {
             },
             mqtt: None,
             net4mqtt: None,
+            control_preset: None,
             #[cfg(feature = "easytier")]
             easytier: None,
         }

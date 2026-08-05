@@ -243,6 +243,7 @@ pub async fn insert_test_device(
             state: if online { "ready" } else { "offline" }.to_string(),
             last_heartbeat: now,
             registered_at: now,
+            control_preset: None,
         },
     )
     .await

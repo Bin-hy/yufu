@@ -90,6 +90,8 @@ pub struct Device {
     pub registered_at: DateTime<Utc>,
     #[serde(default)]
     pub state: DeviceState,
+    #[serde(default)]
+    pub control_preset: Option<crate::config::ControlPreset>,
 }
 
 const TABLE: TableDefinition<&str, &str> = TableDefinition::new("devices");
@@ -369,6 +371,7 @@ mod tests {
             last_heartbeat: now,
             registered_at: now,
             state: DeviceState::Ready,
+            control_preset: None,
         }
     }
 

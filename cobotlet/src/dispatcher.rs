@@ -283,6 +283,7 @@ mod tests {
             last_heartbeat: now,
             registered_at: now,
             state: crate::store::DeviceState::Offline,
+            control_preset: None,
         };
         s.register(d).unwrap();
         let client = reqwest::Client::new();
@@ -304,6 +305,7 @@ mod tests {
             last_heartbeat: now,
             registered_at: now,
             state: crate::store::DeviceState::Ready,
+            control_preset: None,
         })
         .unwrap();
         s.heartbeat("d1").unwrap();
