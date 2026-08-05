@@ -6,76 +6,31 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(McpCallLog::Table)
-                    .add_column(ColumnDef::new(McpCallLog::InputParams).json_binary().null())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(McpCallLog::Table)
-                    .add_column(ColumnDef::new(McpCallLog::StatusCode).integer().null())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(McpCallLog::Table)
-                    .add_column(ColumnDef::new(McpCallLog::DeviceId).string().null())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(McpCallLog::Table)
-                    .add_column(ColumnDef::new(McpCallLog::CobotletAlias).string().null())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .alter_table(
-                Table::alter()
-                    .table(McpCallLog::Table)
-                    .add_column(ColumnDef::new(McpCallLog::Source).string().null())
-                    .to_owned(),
-            )
-            .await?;
+        let db = manager.get_connection();
+        db.execute_unprepared(
+            "DO $$ BEGIN
+                ALTER TABLE mcp_call_log ADD COLUMN IF NOT EXISTS input_params JSONB;
+                ALTER TABLE mcp_call_log ADD COLUMN IF NOT EXISTS status_code INTEGER;
+                ALTER TABLE mcp_call_log ADD COLUMN IF NOT EXISTS device_id VARCHAR;
+                ALTER TABLE mcp_call_log ADD COLUMN IF NOT EXISTS cobotlet_alias VARCHAR;
+                ALTER TABLE mcp_call_log ADD COLUMN IF NOT EXISTS source VARCHAR;
+            END $$",
+        )
+        .await?;
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        for col in [
-            McpCallLog::Source,
-            McpCallLog::CobotletAlias,
-            McpCallLog::DeviceId,
-            McpCallLog::StatusCode,
-            McpCallLog::InputParams,
-        ] {
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(McpCallLog::Table)
-                        .drop_column(col)
-                        .to_owned(),
-                )
-                .await?;
-        }
+        let db = manager.get_connection();
+        db.execute_unprepared(
+            "ALTER TABLE mcp_call_log
+                DROP COLUMN IF EXISTS source,
+                DROP COLUMN IF EXISTS cobotlet_alias,
+                DROP COLUMN IF EXISTS device_id,
+                DROP COLUMN IF EXISTS status_code,
+                DROP COLUMN IF EXISTS input_params",
+        )
+        .await?;
         Ok(())
     }
-}
-
-#[derive(DeriveIden)]
-enum McpCallLog {
-    Table,
-    InputParams,
-    StatusCode,
-    DeviceId,
-    CobotletAlias,
-    Source,
 }
