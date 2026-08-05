@@ -142,6 +142,9 @@ export async function handleCallback(code: string, state: string): Promise<strin
     client_id: CLIENT_ID,
     code_verifier: verifier,
   })
+  if (CLIENT_SECRET) {
+    body.set('client_secret', CLIENT_SECRET)
+  }
 
   const resp = await fetch(`${COBOTSRV_BASE}/oidc/token`, {
     method: 'POST',
