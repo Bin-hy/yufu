@@ -90,6 +90,8 @@ struct LogQuery {
     tool: Option<String>,
     /// "ok" | "error" | omitted (all)
     result: Option<String>,
+    device_id: Option<String>,
+    source: Option<String>,
 }
 
 /// GET /mcp/admin/logs — paginated, filterable audit log.
@@ -109,6 +111,8 @@ async fn logs(
             Some("ok") => Some(false),
             _ => None,
         },
+        device_id: q.device_id.filter(|s| !s.is_empty()),
+        source: q.source.filter(|s| !s.is_empty()),
     };
     let res = audit::query(&state.database.connection, &page, &filter).await?;
     Ok(Json(res))

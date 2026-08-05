@@ -15,6 +15,9 @@ const totalPages = ref(1)
 const fSubject = ref('')
 const fTool = ref('')
 const fResult = ref<'' | 'ok' | 'error'>('')
+const fDeviceId = ref('')
+const fSource = ref<'' | 'mcp' | 'rest'>('')
+const expandedId = ref<number | null>(null)
 
 async function load() {
   loading.value = true
@@ -26,6 +29,8 @@ async function load() {
       subject: fSubject.value || undefined,
       tool: fTool.value || undefined,
       result: fResult.value || undefined,
+      device_id: fDeviceId.value || undefined,
+      source: fSource.value || undefined,
     })
     rows.value = res.data_list
     totalPages.value = Math.max(1, res.total_pages)
@@ -78,6 +83,22 @@ onMounted(load)
         <option value="ok">成功</option>
         <option value="error">失败</option>
       </select>
+      <input
+        v-model="fDeviceId"
+        type="text"
+        placeholder="设备 ID"
+        class="w-32 rounded-md border border-border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        @keyup.enter="applyFilters"
+      />
+      <select
+        v-model="fSource"
+        class="rounded-md border border-border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        @change="applyFilters"
+      >
+        <option value="">全部来源</option>
+        <option value="mcp">MCP</option>
+        <option value="rest">REST</option>
+      </select>
       <button
         class="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted transition-colors"
         @click="applyFilters"
@@ -107,18 +128,23 @@ onMounted(load)
           <tr class="border-b border-border text-left text-xs text-muted-foreground">
             <th class="px-3 py-2 font-medium">时间</th>
             <th class="px-3 py-2 font-medium">用户</th>
-            <th class="px-3 py-2 font-medium">方法</th>
+            <th class="px-3 py-2 font-medium">来源</th>
             <th class="px-3 py-2 font-medium">工具</th>
+            <th class="px-3 py-2 font-medium">目标设备</th>
             <th class="px-3 py-2 font-medium">结果</th>
             <th class="px-3 py-2 font-medium text-right">耗时</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
-          <tr v-for="r in rows" :key="r.id" class="hover:bg-muted/40">
+          <template v-for="r in rows" :key="r.id">
+            <tr class="hover:bg-muted/40 cursor-pointer" @click="expandedId = expandedId === r.id ? null : r.id">
             <td class="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">{{ formatTimestamp(r.created_at) }}</td>
             <td class="px-3 py-2 font-mono text-xs">{{ r.subject }}</td>
-            <td class="px-3 py-2 font-mono text-xs">{{ r.method }}</td>
+            <td class="px-3 py-2">
+              <span class="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[11px]">{{ r.source ?? 'mcp' }}</span>
+            </td>
             <td class="px-3 py-2 font-mono text-xs">{{ r.tool_name ?? '—' }}</td>
+            <td class="px-3 py-2 font-mono text-xs">{{ r.device_id ? `${r.cobotlet_alias}/${r.device_id}` : '—' }}</td>
             <td class="px-3 py-2">
               <span
                 v-if="!r.error_msg"
@@ -135,7 +161,13 @@ onMounted(load)
               </span>
             </td>
             <td class="px-3 py-2 text-xs text-muted-foreground text-right">{{ r.duration_ms }}ms</td>
-          </tr>
+            </tr>
+            <tr v-if="expandedId === r.id && r.input_params">
+              <td :colspan="7" class="px-3 py-2 bg-muted/20">
+                <div class="text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto">{{ JSON.stringify(r.input_params, null, 2) }}</div>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </div>

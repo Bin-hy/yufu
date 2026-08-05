@@ -139,9 +139,18 @@ async fn handle_post(
     } else {
         None
     };
+    let input_params_for_audit = if method == "tools/call" {
+        req.params
+            .as_ref()
+            .and_then(|p| p.get("arguments"))
+            .cloned()
+    } else {
+        None
+    };
 
     let started = Instant::now();
-    let resp = handler::dispatch(&state, req).await;
+    let dispatch_result = handler::dispatch(&state, req).await;
+    let resp = dispatch_result.response;
     let duration_ms = started.elapsed().as_millis() as i64;
 
     // Audit `tools/call` invocations (fire-and-forget, never blocks the response).
@@ -174,6 +183,15 @@ async fn handle_post(
             error_msg,
             duration_ms,
             request_id,
+            input_params: input_params_for_audit,
+            status_code: if resp.error.is_some() {
+                Some(0)
+            } else {
+                Some(200)
+            },
+            device_id: dispatch_result.device_id,
+            cobotlet_alias: dispatch_result.cobotlet_alias,
+            source: Some("mcp".to_string()),
         };
         // Bounded channel feeding a single background writer task (started in
         // lib.rs). When full we drop the record — audit loss under overload is
