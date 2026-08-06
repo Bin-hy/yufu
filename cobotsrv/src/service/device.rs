@@ -75,13 +75,17 @@ impl DeviceService {
         cobotlet_alias: &str,
         device_id: &str,
         ts: NaiveDateTime,
+        state: Option<String>,
     ) -> Result<Option<device::Model>, DbErr> {
         let Some(existing) = Self::find(db, cobotlet_alias, device_id).await? else {
             return Ok(None);
         };
         let mut am: device::ActiveModel = existing.into();
         am.last_heartbeat = Set(ts);
-        am.state = Set("ready".to_string());
+        // Heartbeats carry the cobotlet-side device state (ready / busy /
+        // maintenance / error / registering). Old cobotlets send none — keep
+        // the previous behavior of marking the device ready.
+        am.state = Set(state.unwrap_or_else(|| "ready".to_string()));
         am.update_time = Set(Utc::now().naive_utc());
         Ok(Some(am.update(db).await?))
     }

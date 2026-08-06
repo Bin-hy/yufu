@@ -299,7 +299,7 @@ mod tests {
         fn publish_online(&self, _device: &Device) {
             self.0.fetch_add(1, Ordering::SeqCst);
         }
-        fn publish_heartbeat(&self, _device_id: &str) {}
+        fn publish_heartbeat(&self, _device: &Device) {}
         fn publish_offline(&self, _device: &Device) {}
         fn publish_task_result(&self, _result: &crate::dispatcher::TaskResult) {}
     }

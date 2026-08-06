@@ -84,7 +84,7 @@ async fn heartbeat(
             if restored {
                 state.events.publish_online(&device);
             } else {
-                state.events.publish_heartbeat(&device.id);
+                state.events.publish_heartbeat(&device);
             }
             Ok(Json(HeartbeatResponse {
                 state: device.state.as_str(),

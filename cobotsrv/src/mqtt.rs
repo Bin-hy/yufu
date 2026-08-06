@@ -65,12 +65,19 @@ struct DeviceOnlinePayload {
     pub registered_at: DateTime<Utc>,
     #[serde(default)]
     pub control_preset: Option<serde_json::Value>,
+    /// cobotlet-side state machine state ("ready" / "registering" / ...).
+    /// `None` for old cobotlets — treated as "ready".
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct HeartbeatPayload {
     #[serde(default = "Utc::now")]
     pub ts: DateTime<Utc>,
+    /// Current device state on the cobotlet side; `None` for old cobotlets.
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 /// Snapshot of a known cobotlet's online state.
@@ -389,7 +396,7 @@ async fn handle_device_event(
                     device_id,
                     service_url: parsed.service_url,
                     capabilities: parsed.capabilities,
-                    state: "ready".to_string(),
+                    state: parsed.state.unwrap_or_else(|| "ready".to_string()),
                     last_heartbeat: parsed.last_heartbeat.naive_utc(),
                     registered_at: parsed.registered_at.naive_utc(),
                     control_preset: parsed.control_preset,
@@ -410,11 +417,21 @@ async fn handle_device_event(
             }
         }
         "heartbeat" => {
-            let ts = serde_json::from_slice::<HeartbeatPayload>(payload)
-                .map(|p| p.ts)
-                .unwrap_or_else(|_| Utc::now());
-            if let Err(e) =
-                DeviceService::update_heartbeat(db, alias, device_id, ts.naive_utc()).await
+            let parsed = serde_json::from_slice::<HeartbeatPayload>(payload).unwrap_or_else(|e| {
+                warn!(alias, device_id, error = %e, "decode heartbeat payload failed");
+                HeartbeatPayload {
+                    ts: Utc::now(),
+                    state: None,
+                }
+            });
+            if let Err(e) = DeviceService::update_heartbeat(
+                db,
+                alias,
+                device_id,
+                parsed.ts.naive_utc(),
+                parsed.state,
+            )
+            .await
             {
                 warn!(alias, device_id, error = %e, "heartbeat update failed");
             }

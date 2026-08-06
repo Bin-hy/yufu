@@ -52,11 +52,16 @@ impl EventSink for MqttSink {
         self.spawn_publish(off_topic, true, Vec::new());
     }
 
-    fn publish_heartbeat(&self, device_id: &str) {
-        let payload = serde_json::json!({ "ts": chrono::Utc::now() })
-            .to_string()
-            .into_bytes();
-        let topic = self.topic(&format!("devices/{device_id}/heartbeat"));
+    fn publish_heartbeat(&self, device: &Device) {
+        let payload = serde_json::json!({
+            "ts": chrono::Utc::now(),
+            // Carry the device state so cobotsrv can reflect maintenance /
+            // busy / error / registering without waiting for a full re-register.
+            "state": device.state.as_str(),
+        })
+        .to_string()
+        .into_bytes();
+        let topic = self.topic(&format!("devices/{}/heartbeat", device.id));
         self.spawn_publish(topic, false, payload);
     }
 
