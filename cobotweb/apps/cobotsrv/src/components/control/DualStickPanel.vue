@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import type { ControlPreset } from '@cobotweb/shared'
 
 const props = defineProps<{
@@ -18,18 +18,30 @@ const leftPos = ref({ x: 0, y: 0 })
 const rightPos = ref({ x: 0, y: 0 })
 
 const stickRadius = 50
-let activeDrag: 'left' | 'right' | null = null
-let sendTimer: ReturnType<typeof setInterval> | null = null
+// Track both sticks independently so the two can be dragged at the same time.
+const leftActive = ref(false)
+const rightActive = ref(false)
+
+function isActive(stick: 'left' | 'right'): boolean {
+  return stick === 'left' ? leftActive.value : rightActive.value
+}
+
+function setActive(stick: 'left' | 'right', active: boolean) {
+  if (stick === 'left') leftActive.value = active
+  else rightActive.value = active
+}
 
 function startDrag(stick: 'left' | 'right', e: PointerEvent) {
-  activeDrag = stick
+  setActive(stick, true)
   const el = e.currentTarget as HTMLElement
   el.setPointerCapture(e.pointerId)
-  startSending(stick)
+  // press() starts the per-key continuous timer when the binding is
+  // `continuous`; press_release / fire_once send one command immediately.
+  STICK_KEYS[stick].forEach((k) => props.press(k))
 }
 
 function onMove(stick: 'left' | 'right', e: PointerEvent) {
-  if (activeDrag !== stick) return
+  if (!isActive(stick)) return
   const el = e.currentTarget as HTMLElement
   const rect = el.getBoundingClientRect()
   const cx = rect.width / 2
@@ -47,32 +59,14 @@ function onMove(stick: 'left' | 'right', e: PointerEvent) {
 }
 
 function endDrag(stick: 'left' | 'right') {
-  if (activeDrag !== stick) return
-  activeDrag = null
+  if (!isActive(stick)) return
+  setActive(stick, false)
   if (stick === 'left') leftPos.value = { x: 0, y: 0 }
   else rightPos.value = { x: 0, y: 0 }
-  stopSending()
-  const keys = STICK_KEYS[stick]
-  keys.forEach((k) => props.release(k))
+  // release() stops the continuous timer and sends release_params for
+  // press_release bindings.
+  STICK_KEYS[stick].forEach((k) => props.release(k))
 }
-
-function startSending(stick: 'left' | 'right') {
-  const keys = STICK_KEYS[stick]
-  const interval = props.preset.mapping[keys[0]]?.interval_ms ?? 200
-  keys.forEach((k) => props.press(k))
-  sendTimer = setInterval(() => {
-    keys.forEach((k) => props.press(k))
-  }, interval)
-}
-
-function stopSending() {
-  if (sendTimer) {
-    clearInterval(sendTimer)
-    sendTimer = null
-  }
-}
-
-onUnmounted(stopSending)
 
 function stickStyle(pos: { x: number; y: number }) {
   return { transform: `translate(${pos.x * stickRadius}px, ${-pos.y * stickRadius}px)` }
