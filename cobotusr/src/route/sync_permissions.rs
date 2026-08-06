@@ -22,6 +22,17 @@ struct SyncReq {
     client_secret: String,
     #[serde(default)]
     permissions: Vec<PermEntry>,
+    /// Which application the permissions belong to. Defaults to the
+    /// authenticating client's own `client_id` (legacy behaviour).
+    ///
+    /// A service whose SPA client is public (PKCE, no secret) — and can
+    /// therefore never authenticate here — may authenticate with a dedicated
+    /// confidential machine client and declare `app_key = "<spa client_id>"`,
+    /// so its permissions keep living under the application its PDP/`require_perm!`
+    /// checks. The target application must already exist (e.g. via
+    /// `[[oidc.bootstrap_clients]]`); it is never created implicitly.
+    #[serde(default)]
+    app_key: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -51,10 +62,22 @@ async fn sync_permissions(
         OidcService::authenticate_client(db, Some(&req.client_id), Some(&req.client_secret))
             .await?;
 
-    // Find or create application row for this client
-    let app = match application::Entity::get_by_app_key(db, &client.client_id).await? {
+    // Permissions belong to `app_key`, which may differ from the
+    // authenticating client (machine-client proxy pattern). When unset,
+    // fall back to the client's own client_id (legacy behaviour).
+    let app_key = req.app_key.as_deref().unwrap_or(&client.client_id);
+
+    // Find application row for the app_key. Explicit app_keys must already
+    // exist (bootstrap-created); only the legacy implicit path creates one.
+    let app = match application::Entity::get_by_app_key(db, app_key).await? {
         Some(a) => a,
         None => {
+            if req.app_key.is_some() {
+                return Err(crate::error::AppError::BadRequest(format!(
+                    "application not found for app_key '{app_key}'; \
+                     register it via [[oidc.bootstrap_clients]] first"
+                )));
+            }
             let now = chrono::Utc::now().naive_utc();
             application::ActiveModel {
                 id: ActiveValue::NotSet,
@@ -101,6 +124,8 @@ async fn sync_permissions(
 
     tracing::info!(
         client_id = %client.client_id,
+        app_key = %app_key,
+        proxy = req.app_key.is_some(),
         synced,
         "permissions synced for application"
     );
