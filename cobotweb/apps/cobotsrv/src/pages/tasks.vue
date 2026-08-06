@@ -28,7 +28,7 @@ const result = ref<TaskResult | null>(null)
 const advError = ref<string | null>(null)
 
 // Derived
-const onlineDevices = computed(() => devices.value.filter((d) => d.state === 'ready' || d.online))
+const onlineDevices = computed(() => devices.value.filter((d) => d.state === 'ready'))
 const cobotletAliases = computed(() => [...new Set(onlineDevices.value.map((d) => d.cobotlet_alias))].sort())
 const devicesForCobotlet = computed(() => onlineDevices.value.filter((d) => d.cobotlet_alias === cobotletAlias.value))
 const selectedDevice = computed(() => devicesForCobotlet.value.find((d) => d.device_id === deviceId.value))

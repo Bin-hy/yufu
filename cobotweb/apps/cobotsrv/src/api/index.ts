@@ -56,7 +56,7 @@ export function getTaskResult(taskId: string) {
 export interface ToolProvider {
   cobotlet_alias: string
   device_id: string
-  online: boolean
+  state: string
 }
 
 export interface ToolDescriptor {

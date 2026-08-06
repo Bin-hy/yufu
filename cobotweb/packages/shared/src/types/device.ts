@@ -34,8 +34,7 @@ export interface DeviceVO {
   device_id: string
   service_url: string
   capabilities: Capability[]
-  online: boolean
-  state?: string
+  state: string
   last_heartbeat: string
   registered_at: string
   control_preset?: ControlPreset | null
