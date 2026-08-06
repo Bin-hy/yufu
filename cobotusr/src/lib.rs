@@ -1,7 +1,7 @@
 use axum::body::Body;
 use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
-use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE};
+use http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, SET_COOKIE};
 use http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
@@ -80,13 +80,37 @@ fn redact_sensitive_headers(mut headers: HeaderMap) -> HeaderMap {
     headers
 }
 
-fn should_skip_body_logging(uri: &http::Uri, headers: &HeaderMap) -> bool {
-    matches!(uri.path(), "/oidc/token" | "/oidc/revoke")
-        || uri.path() == "/api/v1/im/files"
+/// Endpoints whose request/response bodies carry credentials (passwords,
+/// tokens, client secrets) or large binary payloads are logged as status
+/// lines only. Paths under the API prefix are derived from the configured
+/// `http.api_prefix` instead of being hard-coded.
+fn should_skip_body_logging(uri: &http::Uri, headers: &HeaderMap, api_prefix: &str) -> bool {
+    let path = uri.path();
+    matches!(path, "/oidc/token" | "/oidc/revoke" | "/oidc/introspect")
+        || [
+            format!("{api_prefix}/login"),
+            format!("{api_prefix}/register"),
+            format!("{api_prefix}/refresh"),
+            format!("{api_prefix}/im/files"),
+        ]
+        .iter()
+        .any(|skip| skip == path)
         || headers
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.starts_with("multipart/"))
+}
+
+/// Bodies larger than this are never buffered for logging — only the status
+/// line is recorded (e.g. paginated message history responses).
+const MAX_LOGGED_BODY_BYTES: u64 = 256 * 1024;
+
+fn body_exceeds_log_limit(headers: &HeaderMap) -> bool {
+    headers
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|len| len > MAX_LOGGED_BODY_BYTES)
 }
 
 fn log_http_exchange(method: &Method, uri: &str, status: StatusCode, duration: Duration) {
@@ -120,13 +144,15 @@ fn log_http_exchange(method: &Method, uri: &str, status: StatusCode, duration: D
 }
 
 async fn print_request_response(
+    State(api_prefix): State<String>,
     req: Request,
     next: middleware::Next,
 ) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
     let start = Instant::now();
     let method = req.method().clone();
     let uri = redact_access_token(req.uri());
-    let skip_body_logging = should_skip_body_logging(req.uri(), req.headers());
+    let skip_body_logging = should_skip_body_logging(req.uri(), req.headers(), &api_prefix)
+        || body_exceeds_log_limit(req.headers());
 
     if skip_body_logging {
         let response = next.run(req).await;
@@ -144,6 +170,12 @@ async fn print_request_response(
     let request = Request::from_parts(request_parts, Body::from(request_bytes));
 
     let response = next.run(request).await;
+    // Large responses (e.g. paginated message history) skip body buffering
+    // and only record the status line.
+    if body_exceeds_log_limit(response.headers()) {
+        log_http_exchange(&method, &uri, response.status(), start.elapsed());
+        return Ok(response);
+    }
     let response_headers = redact_sensitive_headers(response.headers().clone());
     let (response_parts, response_body) = response.into_parts();
     let response_bytes = http_log::buffer_and_print("response", response_headers, response_body)
@@ -269,11 +301,19 @@ where
     // routes don't need auth, public routes
     let sub_public_router = route::get_public_routes();
 
+    // Service-to-service routes: Bearer JWT verified, but no user load / URI-RBAC,
+    // so machine callers (cobotsrv revocation introspection) always get JSON or 401.
+    let sub_service_router = route::get_service_routes().layer(middleware::from_fn_with_state(
+        id_token_signer.clone(),
+        access_middleware_local_rs256,
+    ));
+
     let api_prefix = &cfg.http.api_prefix;
     #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
     let mut app = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
+        .nest(api_prefix, sub_service_router)
         .merge(get_no_prefix_routes())
         .layer({
             let origins: Vec<String> = app_state.clone().config.auth.origins;
@@ -309,7 +349,10 @@ where
             }
         })
         .with_state(app_state.clone())
-        .layer(axum::middleware::from_fn(print_request_response))
+        .layer(axum::middleware::from_fn_with_state(
+            cfg.http.api_prefix.clone(),
+            print_request_response,
+        ))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request<_>| {
                 let span = info_span!(
@@ -474,6 +517,16 @@ impl AppState {
         scope: &str,
     ) -> result::Result<String> {
         let iss = self.issuer();
+        // Resolve the user's roles + permissions for the target application
+        // (`aud` is the app_key) so they travel in the JWT. This lets resource
+        // servers enforce locally via `require_perm!`'s JWT-fallback mode without
+        // a PDP round-trip. Superadmin gets all of the app's permissions.
+        let (roles, permissions) = crate::service::permission::resolve_user_permissions(
+            &self.database.connection,
+            sub,
+            aud,
+        )
+        .await?;
         self.id_token_signer
             .sign_access_token(
                 &sub.to_string(),
@@ -481,8 +534,41 @@ impl AppState {
                 aud,
                 scope,
                 self.oidc_access_token_exp(),
-                vec![],
-                vec![],
+                roles,
+                permissions,
+            )
+            .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
+    }
+
+    /// Configured upper bound (days) for long-lived MCP access tokens.
+    pub fn mcp_token_max_ttl_days(&self) -> u32 {
+        self.config.oidc.mcp_token_max_ttl_days
+    }
+
+    /// Mint an access token with an explicit TTL, `jti`, and pre-resolved
+    /// roles/permissions. Used for long-lived MCP access tokens
+    /// (`POST /api/v1/oidc/mcp-tokens`); the caller persists a revocable record keyed
+    /// by the same `jti` so the token can later be revoked.
+    pub fn mint_access_token(
+        &self,
+        sub: IdType,
+        aud: &str,
+        ttl_seconds: i64,
+        roles: Vec<String>,
+        permissions: Vec<String>,
+        jti: &str,
+    ) -> result::Result<String> {
+        let iss = self.issuer();
+        self.id_token_signer
+            .sign_access_token_with_jti(
+                &sub.to_string(),
+                &iss,
+                aud,
+                "",
+                ttl_seconds,
+                roles,
+                permissions,
+                jti,
             )
             .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
     }
@@ -787,27 +873,99 @@ mod tests {
 
         assert!(should_skip_body_logging(
             &"/oidc/token".parse().unwrap(),
-            &headers
+            &headers,
+            "/api/v1"
         ));
         assert!(should_skip_body_logging(
             &"/oidc/revoke".parse().unwrap(),
-            &headers
+            &headers,
+            "/api/v1"
         ));
         assert!(should_skip_body_logging(
             &"/api/v1/im/files".parse().unwrap(),
-            &headers
+            &headers,
+            "/api/v1"
         ));
         assert!(!should_skip_body_logging(
             &"/something-im/files".parse().unwrap(),
-            &headers
+            &headers,
+            "/api/v1"
         ));
         assert!(!should_skip_body_logging(
             &"/api/v1/im/users".parse().unwrap(),
-            &headers
+            &headers,
+            "/api/v1"
         ));
         assert!(should_skip_body_logging(
             &"/api/v1/im/messages".parse().unwrap(),
-            &multipart_headers
+            &multipart_headers,
+            "/api/v1"
         ));
+    }
+
+    #[test]
+    fn test_should_skip_body_logging_for_credential_endpoints() {
+        let headers = HeaderMap::new();
+
+        // OIDC introspection carries token + client_secret in the form body;
+        // legacy auth endpoints carry plaintext passwords / access tokens.
+        assert!(should_skip_body_logging(
+            &"/oidc/introspect".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+        for path in ["/api/v1/login", "/api/v1/register", "/api/v1/refresh"] {
+            assert!(should_skip_body_logging(
+                &path.parse().unwrap(),
+                &headers,
+                "/api/v1"
+            ));
+        }
+        assert!(!should_skip_body_logging(
+            &"/api/v1/users".parse().unwrap(),
+            &headers,
+            "/api/v1"
+        ));
+    }
+
+    #[test]
+    fn test_should_skip_body_logging_follows_configured_api_prefix() {
+        let headers = HeaderMap::new();
+
+        assert!(should_skip_body_logging(
+            &"/custom/login".parse().unwrap(),
+            &headers,
+            "/custom"
+        ));
+        assert!(should_skip_body_logging(
+            &"/custom/im/files".parse().unwrap(),
+            &headers,
+            "/custom"
+        ));
+        assert!(!should_skip_body_logging(
+            &"/api/v1/login".parse().unwrap(),
+            &headers,
+            "/custom"
+        ));
+    }
+
+    #[test]
+    fn test_body_exceeds_log_limit_checks_content_length() {
+        let mut over_limit = HeaderMap::new();
+        over_limit.insert(
+            CONTENT_LENGTH,
+            HeaderValue::from_static("262145"), // 256 KiB + 1
+        );
+        assert!(body_exceeds_log_limit(&over_limit));
+
+        let mut at_limit = HeaderMap::new();
+        at_limit.insert(CONTENT_LENGTH, HeaderValue::from_static("262144")); // 256 KiB
+        assert!(!body_exceeds_log_limit(&at_limit));
+
+        let mut invalid = HeaderMap::new();
+        invalid.insert(CONTENT_LENGTH, HeaderValue::from_static("not-a-number"));
+        assert!(!body_exceeds_log_limit(&invalid));
+
+        assert!(!body_exceeds_log_limit(&HeaderMap::new()));
     }
 }

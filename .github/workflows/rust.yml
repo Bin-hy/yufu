@@ -21,6 +21,13 @@ jobs:
         steps:
             - name: Checkout source code
               uses: actions/checkout@v6
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  toolchain: stable
+                  components: rustfmt, clippy
+            - name: Cache cargo registry and build
+              uses: Swatinem/rust-cache@v2
             - name: Install protoc
               uses: arduino/setup-protoc@v3
               # 【新增】专为 Windows 系统下载 Npcap SDK，并配置链接器环境变量

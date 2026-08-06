@@ -29,24 +29,36 @@ export const useAuthStore = defineStore("auth", () => {
   const userId = ref(extractUserId(accessToken.value));
   const isLoggedIn = computed(() => Boolean(accessToken.value));
 
+  // Skip userinfo requests when a fresh profile was loaded recently, so every
+  // route navigation does not fire a fire-and-forget loadUserInfo call.
+  const USER_INFO_TTL_MS = 60_000;
+  let userInfoFetchedAt = 0;
+
   function syncToken(token: string | null = getAccessToken()) {
     accessToken.value = token ?? "";
     userId.value = token ? extractUserId(token) : 0;
   }
 
-  async function loadUserInfo(): Promise<boolean> {
+  async function loadUserInfo(force = false): Promise<boolean> {
+    if (!force && userInfoFetchedAt && Date.now() - userInfoFetchedAt < USER_INFO_TTL_MS) {
+      return true;
+    }
     const user = await fetchUserInfo();
     if (!user) return false;
     username.value = user.preferred_username ?? "";
     nickname.value = user.nickname ?? user.name ?? username.value;
     const id = Number(user.sub);
     if (Number.isFinite(id)) userId.value = id;
+    userInfoFetchedAt = Date.now();
     return true;
   }
 
   async function ensureAuthenticated(): Promise<boolean> {
     let token = getAccessToken();
-    if (!token) token = await refreshAccessToken();
+    if (!token) {
+      const result = await refreshAccessToken();
+      token = result.status === "ok" ? result.token : null;
+    }
     syncToken(token);
     if (!token) {
       username.value = "";
@@ -63,7 +75,7 @@ export const useAuthStore = defineStore("auth", () => {
   async function completeSignIn(): Promise<boolean> {
     syncToken();
     if (!accessToken.value) return false;
-    void loadUserInfo();
+    void loadUserInfo(true);
     return true;
   }
 
@@ -72,6 +84,7 @@ export const useAuthStore = defineStore("auth", () => {
     syncToken(null);
     username.value = "";
     nickname.value = "";
+    userInfoFetchedAt = 0;
   }
 
   async function logout() {
@@ -81,6 +94,7 @@ export const useAuthStore = defineStore("auth", () => {
       syncToken(null);
       username.value = "";
       nickname.value = "";
+      userInfoFetchedAt = 0;
       // A revoke request can fail independently (for example due to a network
       // error), but explicit logout must still clear the IdP browser session.
       redirectToIdpLogout();

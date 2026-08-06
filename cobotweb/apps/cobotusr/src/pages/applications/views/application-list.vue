@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { emitToast } from '@/utils/toast'
 import * as appApi from '../api'
@@ -18,6 +18,7 @@ interface AppEntry {
 }
 
 const loading = ref(false)
+const loadError = ref(false)
 const entries = ref<AppEntry[]>([])
 const pageNumber = ref(1)
 const pageSize = ref(10)
@@ -41,6 +42,7 @@ async function copyText(text: string) {
 
 async function loadData() {
   loading.value = true
+  loadError.value = false
   try {
     const [appPage, clients] = await Promise.all([
       appApi.getApplicationsByPage(pageNumber.value, pageSize.value),
@@ -54,6 +56,7 @@ async function loadData() {
     }))
   } catch (e) {
     console.error('加载应用列表失败', e)
+    loadError.value = true
     emitToast({ type: 'error', message: '加载应用列表失败' })
   } finally {
     loading.value = false
@@ -123,7 +126,13 @@ function toggleGrant(g: string) {
   else form.value.grant_types.push(g)
 }
 
+// 编辑已有 public client 时不允许转回 confidential（后端不支持 public→confidential）
+const publicClientLocked = computed(() =>
+  isEditing.value && (editingApp.value?.client?.public_client ?? false) && form.value.public_client
+)
+
 function togglePublicClient() {
+  if (publicClientLocked.value) return
   form.value.public_client = !form.value.public_client
   if (form.value.public_client) {
     form.value.grant_types = form.value.grant_types.filter(g => g !== 'client_credentials')
@@ -137,6 +146,7 @@ function toggleScope(s: string) {
 }
 
 async function submitForm() {
+  if (submitting.value) return
   if (!isEditing.value && showSecret.value && newSecret.value) {
     dialogOpen.value = false
     newSecret.value = ''
@@ -202,7 +212,9 @@ async function submitForm() {
     await loadData()
   } catch (e) {
     console.error('保存应用失败', e)
-    emitToast({ type: 'error', message: '保存应用失败' })
+    // 透传后端返回的错误信息（response.data 为纯文本），否则回退到通用提示
+    const backendMessage = (e as any)?.response?.data
+    emitToast({ type: 'error', message: typeof backendMessage === 'string' && backendMessage ? backendMessage : '保存应用失败' })
   } finally {
     submitting.value = false
   }
@@ -344,7 +356,12 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div v-if="!loading && entries.length === 0" class="bg-card rounded-lg border border-border shadow-sm text-center py-16">
+      <div v-if="!loading && loadError" class="bg-card rounded-lg border border-border shadow-sm text-center py-16">
+        <h3 class="text-lg font-medium text-foreground mb-2">加载应用列表失败</h3>
+        <p class="text-muted-foreground mb-4">请检查网络连接后重试</p>
+        <UiButton @click="loadData">重试</UiButton>
+      </div>
+      <div v-else-if="!loading && entries.length === 0" class="bg-card rounded-lg border border-border shadow-sm text-center py-16">
         <svg class="w-16 h-16 text-muted-foreground mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
         </svg>
@@ -369,6 +386,7 @@ onMounted(async () => {
       v-model:open="dialogOpen"
       :title="isEditing ? '编辑应用' : '注册新应用'"
       :confirm-text="showSecret && newSecret ? '关闭' : '确认'"
+      :confirm-disabled="submitting"
       :close-on-confirm="false"
       @confirm="submitForm"
       @cancel="onDialogClose"
@@ -389,14 +407,18 @@ onMounted(async () => {
         <label class="flex items-start gap-3 rounded-md border border-border p-3 text-sm">
           <input
             type="checkbox"
-            class="mt-1 h-4 w-4"
+            class="mt-1 h-4 w-4 disabled:opacity-50"
             :checked="form.public_client"
+            :disabled="publicClientLocked"
             @change="togglePublicClient"
           />
           <span>
             <span class="block font-medium text-foreground">Public client (PKCE)</span>
             <span class="block text-xs text-muted-foreground">
               浏览器客户端不分配 client secret；切换为 Public 会立即清空已有密钥。
+            </span>
+            <span v-if="publicClientLocked" class="block text-xs text-yellow-500 mt-1">
+              Public client 不支持转回 confidential
             </span>
           </span>
         </label>

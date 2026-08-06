@@ -8,6 +8,7 @@ pub mod authority_role;
 pub mod conversation;
 pub mod conversation_member;
 pub mod group;
+pub mod mcp_token;
 pub mod message;
 pub mod oauth_authorization_code;
 pub mod oauth_client;

@@ -49,3 +49,17 @@ resource_type = "task"
 name = "remote:proxy"
 action = "proxy"
 resource_type = "remote"
+
+[[permissions]]
+name = "mcp:access"
+action = "access"
+resource_type = "mcp"
+
+[[permissions]]
+name = "mcp:admin"
+action = "admin"
+resource_type = "mcp"
+
+# MCP Server 运行参数
+[mcp]
+call_timeout_ms = 30000

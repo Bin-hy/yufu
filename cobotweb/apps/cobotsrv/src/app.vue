@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { LayoutDashboard, MonitorSmartphone, ListChecks, LogOut, Bot } from '@lucide/vue'
+import { LayoutDashboard, MonitorSmartphone, ListChecks, Plug, LogOut, Bot } from '@lucide/vue'
 import { logout as authLogout, fetchUserInfo, type UserInfo } from './auth'
 
 const route = useRoute()
@@ -26,6 +26,7 @@ const navItems = [
   { to: '/dashboard', label: '总览', icon: LayoutDashboard },
   { to: '/devices', label: '设备', icon: MonitorSmartphone },
   { to: '/tasks', label: '任务', icon: ListChecks },
+  { to: '/mcp', label: 'MCP', icon: Plug },
 ]
 
 function logout() {

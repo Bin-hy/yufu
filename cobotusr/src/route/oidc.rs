@@ -367,8 +367,20 @@ async fn handle_authorization_code(
     let client = if code_client.public_client {
         code_client
     } else {
-        OidcService::authenticate_client(db, req.client_id.as_deref(), req.client_secret.as_deref())
-            .await?
+        // Verify the secret against the client row we already loaded instead
+        // of querying it again via authenticate_client.
+        let secret = req
+            .client_secret
+            .as_deref()
+            .ok_or(crate::error::AppError::BadRequest(
+                "missing client_secret".to_string(),
+            ))?;
+        if !OidcService::client_verify_secret(&code_client, secret) {
+            return Err(crate::error::AppError::Unauthorized(
+                "invalid client_secret".to_string(),
+            ));
+        }
+        code_client
     };
 
     // Validate consistency
@@ -636,6 +648,16 @@ async fn userinfo(
     }))
 }
 
+/// Read a single cookie value from the Cookie header. Returns None when the
+/// request carries no cookies — logout may arrive unauthenticated.
+fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    let header = headers.get(http::header::COOKIE)?.to_str().ok()?;
+    header.split(';').map(str::trim).find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == name).then_some(value)
+    })
+}
+
 /// Clear the browser-local IdP session and return to a registered client.
 ///
 /// cobotusr's management SPA stores its access token at the IdP origin, so an
@@ -644,6 +666,7 @@ async fn userinfo(
 async fn end_session(
     State(state): State<AppState>,
     Query(query): Query<EndSessionQuery>,
+    headers: HeaderMap,
 ) -> Result<(HeaderMap, Html<String>)> {
     let db = &state.database.connection;
     let client = oauth_client::Entity::get_by_client_id(db, &query.client_id)
@@ -655,6 +678,26 @@ async fn end_session(
         return Err(crate::error::AppError::BadRequest(
             "invalid post_logout_redirect_uri".to_string(),
         ));
+    }
+
+    // Best-effort server-side revocation: logout is usually an unauthenticated
+    // browser redirect, so credentials may be absent. When the browser still
+    // carries an access_token cookie we resolve the user from the stored token
+    // and revoke their tokens for this client; otherwise we degrade to the
+    // browser-storage cleanup below.
+    if let Some(access_token) = cookie_value(&headers, "access_token") {
+        match crate::entity::oauth_token::Entity::find_by_access_token(db, access_token).await {
+            Ok(Some(token)) => {
+                if let Err(err) =
+                    OidcService::revoke_tokens_for_user_client(db, token.user_id, &client.client_id)
+                        .await
+                {
+                    tracing::warn!("logout: failed to revoke tokens: {err:?}");
+                }
+            }
+            Ok(None) => {}
+            Err(err) => tracing::warn!("logout: failed to look up access token: {err}"),
+        }
     }
 
     let redirect_uri = serde_json::to_string(&query.post_logout_redirect_uri)

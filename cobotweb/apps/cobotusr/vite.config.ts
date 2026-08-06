@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
 
     // 代理目标：VITE_BASE_URL 为绝对 URL（如 http://localhost:4000/api/v1）时直接使用；
     // 为相对路径（如 /api/v1）时，开发代理需要指向后端服务器地址。
-    const API_TARGET = (env.VITE_BASE_URL?.startsWith('http') && env.VITE_BASE_URL) || 'http://localhost:4000'
+    const API_TARGET = (env.VITE_BASE_URL?.startsWith('http') && env.VITE_BASE_URL) || 'http://127.0.0.1:4000'
 
     return {
         plugins: [
@@ -24,7 +24,6 @@ export default defineConfig(({ mode }) => {
                     target: API_TARGET,
                     changeOrigin: true,
                     secure: false,
-                    rewrite: (path) => path.replace(/^\/api\/v1/, ''),
                 },
                 '/oidc/token': {
                     target: API_TARGET,

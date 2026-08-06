@@ -71,6 +71,11 @@ async fn test_oidc_authorization_code_pkce_exchange() {
 
     let mut config = Config::default();
     config.database.url = database_url;
+    // Config::default() derives zero token lifetimes (the `serde(default = ...)`
+    // fallbacks only apply to file-based configs); set explicit values so
+    // issued refresh tokens do not expire immediately.
+    config.auth.exp_seconds = 7200;
+    config.auth.refresh_exp_seconds = 604800;
     config.oidc.bootstrap_clients.push(BootstrapClient {
         client_id: CLIENT_ID.to_string(),
         name: "IM OIDC integration test".to_string(),
@@ -188,6 +193,38 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         confidential_without_secret.status(),
         StatusCode::BAD_REQUEST
     );
+    let confidential_without_secret_body = confidential_without_secret
+        .text()
+        .await
+        .expect("confidential error response should be text");
+    assert!(
+        confidential_without_secret_body.contains("client_secret"),
+        "error should mention client_secret, got: {confidential_without_secret_body}"
+    );
+
+    // Positive path: confidential client + PKCE + correct secret succeeds.
+    let confidential_code_ok =
+        authorize_code_for_client(&client, &base_url, &access_token, CONFIDENTIAL_CLIENT_ID).await;
+    let confidential_exchanged = client
+        .post(format!("{base_url}/oidc/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", confidential_code_ok.as_str()),
+            ("redirect_uri", REDIRECT_URI),
+            ("client_id", CONFIDENTIAL_CLIENT_ID),
+            ("client_secret", CONFIDENTIAL_CLIENT_SECRET),
+            ("code_verifier", CODE_VERIFIER),
+        ])
+        .send()
+        .await
+        .expect("confidential token exchange should complete");
+    assert_eq!(confidential_exchanged.status(), StatusCode::OK);
+    let confidential_json = confidential_exchanged
+        .json::<serde_json::Value>()
+        .await
+        .expect("confidential token response should be valid JSON");
+    assert!(confidential_json["access_token"].as_str().is_some());
+    assert!(confidential_json["id_token"].as_str().is_some());
 
     let code = authorize_code(&client, &base_url, &access_token).await;
     let exchanged = client

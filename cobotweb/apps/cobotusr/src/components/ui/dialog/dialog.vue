@@ -9,6 +9,7 @@ const props = withDefaults(
     hideFooter?: boolean
     confirmText?: string
     cancelText?: string
+    confirmDisabled?: boolean
     closeOnConfirm?: boolean
   }>(),
   {
@@ -18,6 +19,7 @@ const props = withDefaults(
     hideFooter: false,
     confirmText: '确认',
     cancelText: '取消',
+    confirmDisabled: false,
     closeOnConfirm: true,
   }
 )
@@ -88,7 +90,8 @@ const sizeClass = computed(() => {
                 {{ props.cancelText }}
               </button>
               <button
-                class="inline-flex h-9 items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                class="inline-flex h-9 items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                :disabled="props.confirmDisabled"
                 @click="onConfirm"
               >
                 {{ props.confirmText }}

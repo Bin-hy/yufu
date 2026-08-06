@@ -49,6 +49,10 @@ refresh_token_expire_seconds = 604800
 # HS256 falls back to auth.secret (handy for tests / no-key dev clusters).
 # signing_algorithm = "RS256"
 
+# Maximum lifetime (days) for long-lived MCP access tokens minted via
+# POST /api/v1/oidc/mcp-tokens. Requested ttl_days is clamped to this. Default 90.
+# mcp_token_max_ttl_days = 90
+
 [[oidc.bootstrap_clients]]
 client_id = "cobotsrv"
 name = "CoBotrix Device Management Server"

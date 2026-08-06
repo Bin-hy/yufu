@@ -34,19 +34,21 @@ http.interceptors.response.use(
       !hasExplicitlySignedOut()
     ) {
       original._retry = true;
-      try {
-        const token = await refreshAccessToken();
-        if (token) {
-          original.headers.Authorization = `Bearer ${token}`;
-          return http(original);
+      const result = await refreshAccessToken();
+      if (result.status === "ok") {
+        original.headers.Authorization = `Bearer ${result.token}`;
+        return http(original);
+      }
+      if (result.status === "invalid") {
+        // Credentials are conclusively rejected: clear local OIDC state and
+        // start a new sign-in flow.
+        clearAuth();
+        if (!hasExplicitlySignedOut()) {
+          void redirectToLogin(window.location.pathname + window.location.search);
         }
-      } catch {
-        // The common unauthorized path below clears local OIDC state and starts a new flow.
       }
-      clearAuth();
-      if (!hasExplicitlySignedOut()) {
-        void redirectToLogin(window.location.pathname + window.location.search);
-      }
+      // "error" is transient (network/server): keep the stored tokens and
+      // only reject the current request.
     }
     return Promise.reject(error);
   },

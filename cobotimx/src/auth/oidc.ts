@@ -30,12 +30,20 @@ function readOidcIssuer(): string {
   return (issuer ?? "http://127.0.0.1:4000").replace(/\/$/, "");
 }
 
-const OIDC_ISSUER = readOidcIssuer();
+// Resolved lazily so importing this module never throws; a production build
+// missing VITE_OIDC_ISSUER fails with a clear error on first use instead of
+// silently falling back to a loopback address.
+let cachedOidcIssuer: string | null = null;
+function oidcIssuer(): string {
+  if (!cachedOidcIssuer) cachedOidcIssuer = readOidcIssuer();
+  return cachedOidcIssuer;
+}
+
 const CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? "cobotimx";
 const SCOPE = "openid profile email";
 const EXPIRY_SKEW_MS = 30_000;
 
-let refreshInFlight: Promise<string | null> | null = null;
+let refreshInFlight: Promise<RefreshTokenResult> | null = null;
 let callbackInFlight: {
   code: string;
   state: string;
@@ -128,7 +136,7 @@ export async function createAuthorizationUrl(currentPath?: string): Promise<stri
     code_challenge: challenge,
     code_challenge_method: "S256",
   });
-  return `${OIDC_ISSUER}/oidc/authorize?${params}`;
+  return `${oidcIssuer()}/oidc/authorize?${params}`;
 }
 
 export async function redirectToLogin(currentPath?: string): Promise<void> {
@@ -151,7 +159,7 @@ async function exchangeAuthorizationCode(code: string, state: string): Promise<s
     client_id: CLIENT_ID,
     code_verifier: verifier,
   });
-  const response = await fetch(`${OIDC_ISSUER}/oidc/token`, {
+  const response = await fetch(`${oidcIssuer()}/oidc/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -190,9 +198,19 @@ export function handleCallback(code: string, state: string): Promise<string> {
   return promise;
 }
 
-async function refreshAccessTokenInner(): Promise<string | null> {
+export type RefreshTokenResult =
+  // "ok": a fresh access token is available.
+  | { status: "ok"; token: string }
+  // "invalid": the stored credentials are conclusively rejected (or absent)
+  // and local auth state has been cleared; the user must sign in again.
+  | { status: "invalid" }
+  // "error": a transient network or server failure; stored tokens are kept
+  // so the session can recover once the identity provider is reachable.
+  | { status: "error" };
+
+async function refreshAccessTokenInner(): Promise<RefreshTokenResult> {
   const refreshToken = getRefreshToken();
-  if (!refreshToken) return null;
+  if (!refreshToken) return { status: "invalid" };
 
   try {
     const body = new URLSearchParams({
@@ -200,7 +218,7 @@ async function refreshAccessTokenInner(): Promise<string | null> {
       refresh_token: refreshToken,
       client_id: CLIENT_ID,
     });
-    const response = await fetch(`${OIDC_ISSUER}/oidc/token`, {
+    const response = await fetch(`${oidcIssuer()}/oidc/token`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
@@ -209,22 +227,25 @@ async function refreshAccessTokenInner(): Promise<string | null> {
       // Only 400/401 conclusively mean the stored refresh token is invalid.
       // Keep tokens on transient server errors so the session can recover
       // after the identity provider comes back.
-      if (response.status === 400 || response.status === 401) clearAuth();
-      return null;
+      if (response.status === 400 || response.status === 401) {
+        clearAuth();
+        return { status: "invalid" };
+      }
+      return { status: "error" };
     }
     const tokens = (await response.json()) as OidcTokens;
     if (!tokens.access_token) {
       clearAuth();
-      return null;
+      return { status: "invalid" };
     }
     storeTokens(tokens);
-    return tokens.access_token;
+    return { status: "ok", token: tokens.access_token };
   } catch {
-    return null;
+    return { status: "error" };
   }
 }
 
-export function refreshAccessToken(): Promise<string | null> {
+export function refreshAccessToken(): Promise<RefreshTokenResult> {
   if (!refreshInFlight) {
     refreshInFlight = refreshAccessTokenInner().finally(() => {
       refreshInFlight = null;
@@ -237,7 +258,7 @@ export async function revokeAndClearAuth(): Promise<void> {
   const refreshToken = getRefreshToken();
   try {
     if (refreshToken) {
-      await fetch(`${OIDC_ISSUER}/oidc/revoke`, {
+      await fetch(`${oidcIssuer()}/oidc/revoke`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -258,14 +279,14 @@ export function redirectToIdpLogout(): void {
     client_id: CLIENT_ID,
     post_logout_redirect_uri: `${window.location.origin}/login`,
   });
-  window.location.replace(`${OIDC_ISSUER}/oidc/logout?${params}`);
+  window.location.replace(`${oidcIssuer()}/oidc/logout?${params}`);
 }
 
 export async function fetchUserInfo(): Promise<UserInfo | null> {
   const token = getAccessToken();
   if (!token) return null;
   try {
-    const response = await fetch(`${OIDC_ISSUER}/api/v1/oidc/userinfo`, {
+    const response = await fetch(`${oidcIssuer()}/api/v1/oidc/userinfo`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) return null;

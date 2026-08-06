@@ -246,3 +246,105 @@ export async function fetchUserInfo(): Promise<UserInfo | null> {
     return null
   }
 }
+
+// ── MCP access tokens (long-lived, persisted + revocable) ──
+//
+// These hit cobotusr (the IdP) at `COBOTSRV_BASE`, authenticated with the current session
+// token. Each issued token is persisted server-side; the full token value is only returned
+// once (on create/refresh) and never listed afterward.
+
+/** Returned once on create/refresh — carries the actual token value. */
+export interface McpTokenResponse {
+  id: number
+  name: string
+  access_token: string
+  token_type: string
+  expires_in: number
+  expires_at: string
+  aud: string
+}
+
+/** Listed metadata — never includes the token value. */
+export interface McpTokenInfo {
+  id: number
+  name: string
+  aud: string
+  created_at: string
+  expires_at: string
+}
+
+/** Authenticated fetch against the IdP; throws with a readable message on non-2xx. */
+async function idpFetch(path: string, init: RequestInit, action: string): Promise<Response> {
+  const doFetch = (tok: string) =>
+    fetch(`${COBOTSRV_BASE}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tok}`,
+        ...(init.headers ?? {}),
+      },
+    })
+
+  // Access token missing or within the expiry buffer — try one refresh first.
+  let tok = getAccessToken()
+  if (!tok) tok = await refreshAccessToken()
+  if (!tok) throw new Error('未登录或会话已过期，请重新登录')
+
+  let resp = await doFetch(tok)
+  if (resp.status === 401) {
+    // Single refresh-and-retry on 401 (e.g. token rejected early server-side).
+    const newTok = await refreshAccessToken()
+    if (newTok) resp = await doFetch(newTok)
+  }
+  if (!resp.ok) {
+    throw new Error(`${action}失败: ${resp.status} ${await resp.text()}`)
+  }
+  return resp
+}
+
+/**
+ * Create a long-lived MCP access token. The IdP signs a token scoped to `aud` carrying the
+ * caller's resolved permissions (must include mcp:access) and persists a revocable record.
+ */
+export async function issueMcpToken(
+  aud: string,
+  ttlDays: number,
+  name?: string,
+): Promise<McpTokenResponse> {
+  const resp = await idpFetch(
+    '/api/v1/oidc/mcp-tokens',
+    { method: 'POST', body: JSON.stringify({ aud, ttl_days: ttlDays, name }) },
+    '生成令牌',
+  )
+  return (await resp.json()) as McpTokenResponse
+}
+
+/** List the caller's active (non-revoked) MCP tokens (metadata only). */
+export async function listMcpTokens(): Promise<McpTokenInfo[]> {
+  const resp = await idpFetch('/api/v1/oidc/mcp-tokens', { method: 'GET' }, '获取令牌列表')
+  return (await resp.json()) as McpTokenInfo[]
+}
+
+/** Rename one of the caller's tokens. */
+export async function renameMcpToken(id: number, name: string): Promise<void> {
+  await idpFetch(
+    `/api/v1/oidc/mcp-tokens/${id}`,
+    { method: 'PATCH', body: JSON.stringify({ name }) },
+    '重命名令牌',
+  )
+}
+
+/** Rotate one of the caller's tokens: mints a new value, revokes the old one. */
+export async function refreshMcpToken(id: number, ttlDays: number): Promise<McpTokenResponse> {
+  const resp = await idpFetch(
+    `/api/v1/oidc/mcp-tokens/${id}/refresh`,
+    { method: 'POST', body: JSON.stringify({ ttl_days: ttlDays }) },
+    '刷新令牌',
+  )
+  return (await resp.json()) as McpTokenResponse
+}
+
+/** Revoke (delete) one of the caller's tokens. */
+export async function deleteMcpToken(id: number): Promise<void> {
+  await idpFetch(`/api/v1/oidc/mcp-tokens/${id}`, { method: 'DELETE' }, '删除令牌')
+}

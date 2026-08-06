@@ -1,4 +1,4 @@
-import { onUnmounted, type Ref } from "vue";
+import { onUnmounted, watch, type Ref } from "vue";
 import { hasExplicitlySignedOut } from "@/auth/oidc";
 import { useChatStore } from "@/stores/chat";
 
@@ -17,6 +17,8 @@ export function useChatPolling(wsConnected: Ref<boolean>) {
 
   async function pollConversations() {
     if (destroyed || hasExplicitlySignedOut() || loadingConversations) return;
+    // Pause while the page is hidden; visibilitychange triggers a catch-up poll.
+    if (document.visibilityState === "hidden") return;
     loadingConversations = true;
     conversationAbort = new AbortController();
     try {
@@ -37,7 +39,7 @@ export function useChatPolling(wsConnected: Ref<boolean>) {
     loadingMessages = true;
     messageAbort = new AbortController();
     try {
-      await chat.loadMessages(conversationId, undefined, messageAbort.signal);
+      await chat.mergePolledMessages(conversationId, messageAbort.signal);
     } catch {
       // WebSocket is the primary channel. Polling is only a fallback.
     } finally {
@@ -46,8 +48,23 @@ export function useChatPolling(wsConnected: Ref<boolean>) {
     }
   }
 
+  // A reconnecting WebSocket makes an in-flight poll snapshot stale; abort it
+  // so it cannot overwrite messages that already arrived via chat.push.
+  const stopConnectedWatch = watch(
+    wsConnected,
+    (connected) => {
+      if (connected) messageAbort?.abort();
+    },
+    { flush: "sync" },
+  );
+
+  function onVisibilityChange() {
+    if (document.visibilityState === "visible") void pollConversations();
+  }
+
   function start() {
     if (destroyed) return;
+    document.addEventListener("visibilitychange", onVisibilityChange);
     if (!conversationTimer) {
       conversationTimer = setInterval(pollConversations, CONVERSATION_POLL_INTERVAL);
     }
@@ -61,6 +78,8 @@ export function useChatPolling(wsConnected: Ref<boolean>) {
 
   function stop() {
     destroyed = true;
+    stopConnectedWatch();
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     conversationAbort?.abort();
     messageAbort?.abort();
     conversationAbort = null;

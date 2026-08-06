@@ -130,11 +130,11 @@ describe("IM OIDC PKCE flow", () => {
     localStorage.setItem(REFRESH_KEY, "refresh-token");
     vi.stubGlobal("fetch", vi.fn(async () => tokenResponse({ access_token: "new-access", expires_in: 3600 })));
 
-    await expect(refreshAccessToken()).resolves.toBe("new-access");
+    await expect(refreshAccessToken()).resolves.toEqual({ status: "ok", token: "new-access" });
     expect(getAccessToken()).toBe("new-access");
 
     vi.stubGlobal("fetch", vi.fn(async () => new Response("invalid", { status: 401 })));
-    await expect(refreshAccessToken()).resolves.toBeNull();
+    await expect(refreshAccessToken()).resolves.toEqual({ status: "invalid" });
     expect(localStorage.getItem(ACCESS_KEY)).toBeNull();
     expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
     expect(localStorage.getItem(EXPIRY_KEY)).toBeNull();
@@ -148,7 +148,7 @@ describe("IM OIDC PKCE flow", () => {
       throw new TypeError("network error");
     }));
 
-    await expect(refreshAccessToken()).resolves.toBeNull();
+    await expect(refreshAccessToken()).resolves.toEqual({ status: "error" });
 
     expect(localStorage.getItem(ACCESS_KEY)).toBe("old-access");
     expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-token");

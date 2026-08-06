@@ -36,6 +36,20 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./pages/tasks.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/mcp',
+    component: () => import('./pages/mcp/index.vue'),
+    meta: { requiresAuth: true },
+    redirect: '/mcp/overview',
+    children: [
+      { path: 'overview', name: 'mcp-overview', component: () => import('./pages/mcp/overview.vue') },
+      { path: 'tools', name: 'mcp-tools', component: () => import('./pages/mcp/tools.vue') },
+      { path: 'sessions', name: 'mcp-sessions', component: () => import('./pages/mcp/sessions.vue') },
+      { path: 'audit', name: 'mcp-audit', component: () => import('./pages/mcp/audit.vue') },
+      { path: 'connect', name: 'mcp-connect', component: () => import('./pages/mcp/connect.vue') },
+      { path: 'tokens', name: 'mcp-tokens', component: () => import('./pages/mcp/tokens.vue') },
+    ],
+  },
 ]
 
 export const router = createRouter({

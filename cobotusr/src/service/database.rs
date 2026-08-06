@@ -28,7 +28,7 @@ impl DatabaseService {
 
 fn redact_database_url(raw: &str) -> String {
     let Ok(mut url) = url::Url::parse(raw) else {
-        return raw.to_string();
+        return "<redacted database url>".to_string();
     };
     if url.password().is_some() {
         let _ = url.set_password(Some("REDACTED"));
@@ -56,5 +56,13 @@ mod tests {
         let url = "postgres://postgres@localhost:5432/cobotrix";
 
         assert_eq!(redact_database_url(url), url);
+    }
+
+    #[test]
+    fn test_redact_database_url_hides_unparseable_url() {
+        let raw = "not a url: with secret";
+
+        assert_eq!(redact_database_url(raw), "<redacted database url>");
+        assert!(!redact_database_url(raw).contains("secret"));
     }
 }

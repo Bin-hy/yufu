@@ -119,6 +119,14 @@ impl OidcService {
         grant_types: Vec<String>,
         public_client: bool,
     ) -> Result<(oauth_client::Model, Option<String>)> {
+        // Dirty-data guard: a public client proves possession with PKCE and has
+        // no secret, so the client_credentials grant can never succeed for it.
+        if public_client && grant_types.iter().any(|g| g == "client_credentials") {
+            return Err(AppError::BadRequest(
+                "public clients cannot use the client_credentials grant".to_string(),
+            ));
+        }
+
         let now = Utc::now().naive_utc();
 
         let client_secret = if public_client {
@@ -213,6 +221,31 @@ impl OidcService {
     ) -> Result<oauth_client::Model> {
         let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
         let was_public = client.public_client;
+        if public_client == Some(false) && was_public {
+            return Err(AppError::BadRequest(
+                "converting a public client back to confidential is not supported".to_string(),
+            ));
+        }
+        // Dirty-data guard on the effective combination: a public client has no
+        // secret, so the client_credentials grant can never succeed for it.
+        let effective_public = public_client.unwrap_or(was_public);
+        let effective_grant_types = grant_types.clone().unwrap_or_else(|| {
+            client
+                .grant_types
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        });
+        if effective_public
+            && effective_grant_types
+                .iter()
+                .any(|g| g == "client_credentials")
+        {
+            return Err(AppError::BadRequest(
+                "public clients cannot use the client_credentials grant".to_string(),
+            ));
+        }
         let mut am: oauth_client::ActiveModel = client.into();
         if let Some(v) = name {
             am.name = Set(v);
@@ -229,10 +262,6 @@ impl OidcService {
         if let Some(true) = public_client {
             am.public_client = Set(true);
             am.client_secret_hash = Set(String::new());
-        } else if public_client == Some(false) && was_public {
-            return Err(AppError::BadRequest(
-                "a confidential client requires a regenerated client_secret".to_string(),
-            ));
         }
         am.update_time = Set(Utc::now().naive_utc());
         let updated = am.update(db).await?;
@@ -628,9 +657,18 @@ impl OidcService {
         oauth_consent::Entity::delete_by_id_and_user(db, consent_id, user_id).await?;
 
         // Revoke all tokens for this user+client
+        Self::revoke_tokens_for_user_client(db, user_id, &client_id).await
+    }
+
+    /// Revoke all active tokens for a user+client pair.
+    pub async fn revoke_tokens_for_user_client(
+        db: &DatabaseConnection,
+        user_id: IdType,
+        client_id: &str,
+    ) -> Result<()> {
         let tokens = oauth_token::Entity::find()
             .filter(oauth_token::Column::UserId.eq(user_id))
-            .filter(oauth_token::Column::ClientId.eq(&client_id))
+            .filter(oauth_token::Column::ClientId.eq(client_id))
             .filter(oauth_token::Column::Revoked.eq(false))
             .all(db)
             .await?;
