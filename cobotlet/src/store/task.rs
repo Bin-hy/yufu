@@ -41,6 +41,11 @@ impl TaskStore {
         Self { db }
     }
 
+    /// Persist a task record as JSON. The task lifecycle is a *log*: every
+    /// submission is recorded immediately as `Queued`, then moved through
+    /// `Dispatched` → `Completed`/`Failed` by [`Self::mark_dispatched`] /
+    /// [`Self::complete`] / [`Self::fail`]. There is deliberately no queueing
+    /// or retry — a task that cannot be dispatched right now fails at once.
     fn persist(&self, record: &TaskRecord) -> Result<()> {
         let json = serde_json::to_string(record)?;
         let write_txn = self.db.begin_write()?;
@@ -153,7 +158,37 @@ impl TaskStore {
         Ok(existed)
     }
 
-    pub fn delete_completed(&self) -> Result<u64> {
+    /// Fail every task currently dispatched to `device_id`. Used when the
+    /// device goes offline (heartbeat timeout) so in-flight tasks don't stay
+    /// `Dispatched` until the next process restart. Returns the affected ids.
+    pub fn fail_inflight_for_device(&self, device_id: &str, reason: &str) -> Result<Vec<String>> {
+        let read_txn = self.db.begin_read()?;
+        let table = match read_txn.open_table(TABLE) {
+            Ok(t) => t,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut affected = Vec::new();
+        for entry in table.iter()? {
+            let (k, v) = entry?;
+            let record: TaskRecord = serde_json::from_str(v.value())?;
+            if matches!(record.state, TaskState::Dispatched)
+                && record.device_id.as_deref() == Some(device_id)
+            {
+                affected.push(k.value().to_string());
+            }
+        }
+        drop(table);
+        drop(read_txn);
+
+        for id in &affected {
+            self.fail(id, reason.to_string(), None)?;
+        }
+        Ok(affected)
+    }
+
+    /// Delete all terminal records (`Completed` and `Failed`).
+    pub fn delete_finished(&self) -> Result<u64> {
         let read_txn = self.db.begin_read()?;
         let table = match read_txn.open_table(TABLE) {
             Ok(t) => t,
@@ -366,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_completed_only() {
+    fn delete_finished_only() {
         let (ts, _d) = make_store();
         ts.enqueue(&sample_task("t1")).unwrap(); // queued
         ts.enqueue(&sample_task("t2")).unwrap();
@@ -383,12 +418,34 @@ mod tests {
         )
         .unwrap(); // completed
 
-        let deleted = ts.delete_completed().unwrap();
+        let deleted = ts.delete_finished().unwrap();
         assert_eq!(deleted, 2); // t2 (failed) + t3 (completed)
 
         // t1 (queued) remains
         assert!(ts.get("t1").unwrap().is_some());
         assert!(ts.get("t2").unwrap().is_none());
         assert!(ts.get("t3").unwrap().is_none());
+    }
+
+    #[test]
+    fn fail_inflight_for_device() {
+        let (ts, _d) = make_store();
+        ts.enqueue(&sample_task("t1")).unwrap();
+        ts.mark_dispatched("t1", "dev-1").unwrap();
+        ts.enqueue(&sample_task("t2")).unwrap();
+        ts.mark_dispatched("t2", "dev-2").unwrap();
+        ts.enqueue(&sample_task("t3")).unwrap(); // queued, untouched
+
+        let affected = ts
+            .fail_inflight_for_device("dev-1", "device offline")
+            .unwrap();
+        assert_eq!(affected, vec!["t1"]);
+
+        let t1 = ts.get("t1").unwrap().unwrap();
+        assert_eq!(t1.state, TaskState::Failed);
+        assert_eq!(t1.fail_reason.as_deref(), Some("device offline"));
+        // Other tasks unaffected.
+        assert_eq!(ts.get("t2").unwrap().unwrap().state, TaskState::Dispatched);
+        assert_eq!(ts.get("t3").unwrap().unwrap().state, TaskState::Queued);
     }
 }

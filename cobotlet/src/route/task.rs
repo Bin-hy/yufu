@@ -52,7 +52,10 @@ async fn list_tasks(
         "failed" => Some(TaskState::Failed),
         _ => None,
     });
-    let limit = q.limit.unwrap_or(100);
+    // Cap the page size — the store scans the whole table in memory, so an
+    // unbounded limit from an unauthenticated local HTTP client would be a
+    // cheap amplification vector.
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
     let offset = q.offset.unwrap_or(0);
     let records = state.task_store.list(filter.as_ref(), limit, offset)?;
     Ok(Json(records))
@@ -74,7 +77,7 @@ struct DeleteResponse {
 }
 
 async fn delete_all(State(state): State<AppState>) -> Result<Json<DeleteResponse>> {
-    let deleted = state.task_store.delete_completed()?;
+    let deleted = state.task_store.delete_finished()?;
     Ok(Json(DeleteResponse { deleted }))
 }
 

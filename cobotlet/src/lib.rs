@@ -71,7 +71,7 @@ pub async fn serve(
             {
                 Ok(rt) => {
                     info!(alias = mqtt_cfg.alias, "mqtt connected");
-                    republish_loaded_online(store.clone(), rt.sink.as_ref());
+                    republish_loaded_online(&store, rt.sink.as_ref());
                     rt.sink
                 }
                 Err(e) => {
@@ -86,6 +86,7 @@ pub async fn serve(
     if cfg.mqtt.is_some() {
         heartbeat::spawn_watchdog(
             store.clone(),
+            task_store.clone(),
             events.clone(),
             cfg.device.watchdog_interval_secs,
             cfg.device.heartbeat_timeout_secs,
@@ -274,7 +275,7 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
 /// the register path, which also announces them as `ready` immediately.
 /// `Offline`/`Busy`/`Error`/`Maintenance` devices are left alone — they
 /// still need a heartbeat to come back.
-fn republish_loaded_online(store: Arc<crate::store::DeviceStore>, sink: &dyn EventSink) {
+fn republish_loaded_online(store: &crate::store::DeviceStore, sink: &dyn EventSink) {
     for device in store.list() {
         if matches!(
             device.state,
@@ -341,7 +342,7 @@ mod tests {
 
         let count = Arc::new(AtomicUsize::new(0));
         let sink = CountingSink(count.clone());
-        republish_loaded_online(store, &sink);
+        republish_loaded_online(&store, &sink);
 
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }

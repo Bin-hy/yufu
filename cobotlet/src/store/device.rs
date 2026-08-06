@@ -47,20 +47,20 @@ impl DeviceState {
         matches!(
             (self, target),
             (Self::Registering, Self::Ready)
-                | (Self::Registering, Self::Offline { .. })
+                | (Self::Registering, Self::Offline)
                 | (Self::Ready, Self::Busy { .. })
                 | (Self::Ready, Self::Maintenance)
-                | (Self::Ready, Self::Offline { .. })
+                | (Self::Ready, Self::Offline)
                 | (Self::Busy { .. }, Self::Ready)
                 | (Self::Busy { .. }, Self::Error { .. })
-                | (Self::Busy { .. }, Self::Offline { .. })
+                | (Self::Busy { .. }, Self::Offline)
                 | (Self::Error { .. }, Self::Ready)
                 | (Self::Error { .. }, Self::Maintenance)
-                | (Self::Error { .. }, Self::Offline { .. })
+                | (Self::Error { .. }, Self::Offline)
                 | (Self::Maintenance, Self::Ready)
-                | (Self::Maintenance, Self::Offline { .. })
-                | (Self::Offline { .. }, Self::Ready)
-                | (Self::Offline { .. }, Self::Registering)
+                | (Self::Maintenance, Self::Offline)
+                | (Self::Offline, Self::Ready)
+                | (Self::Offline, Self::Registering)
         )
     }
 

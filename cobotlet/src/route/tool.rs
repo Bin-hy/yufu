@@ -43,7 +43,7 @@ pub(crate) async fn list_tools(State(state): State<AppState>) -> Json<ToolListRe
                 });
             entry.providers.push(ToolProvider {
                 device_id: device.id.clone(),
-                state: device.state.as_str().to_string(),
+                state: device.state.as_str().to_owned(),
             });
         }
     }
