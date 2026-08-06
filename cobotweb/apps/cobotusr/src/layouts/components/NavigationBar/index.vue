@@ -75,6 +75,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
 })
 
+const imUrl = import.meta.env.VITE_IM_URL ?? '/im/'
+
 const handleLogout = async () => {
   await logoutAndRedirect(router)
 }
@@ -127,6 +129,7 @@ const handleLogout = async () => {
           </button>
           <div v-if="menuOpen" class="absolute right-0 top-full mt-2 w-40 rounded-md border border-border bg-popover text-popover-foreground shadow-lg">
             <router-link to="/profile" class="block px-3 py-2 hover:bg-muted transition-colors" @click="closeMenu">个人中心</router-link>
+            <a :href="imUrl" target="_blank" class="block px-3 py-2 hover:bg-muted transition-colors" @click="closeMenu">即时通讯</a>
             <button class="block w-full text-left px-3 py-2 hover:bg-muted transition-colors" @click="handleLogout">退出登录</button>
           </div>
         </div>
