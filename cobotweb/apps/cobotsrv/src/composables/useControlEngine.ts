@@ -51,6 +51,7 @@ export function useControlEngine(
   function press(key: string) {
     const binding = getBinding(key)
     if (!binding) return
+    if (activeKeys.value.has(key)) return
     activeKeys.value.add(key)
     activeKeys.value = new Set(activeKeys.value)
 
@@ -77,6 +78,7 @@ export function useControlEngine(
   }
 
   function release(key: string) {
+    if (!activeKeys.value.has(key)) return
     const binding = getBinding(key)
     if (!binding) return
     activeKeys.value.delete(key)

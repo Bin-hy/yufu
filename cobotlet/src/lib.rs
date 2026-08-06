@@ -23,7 +23,7 @@ pub mod store;
 #[folder = "../assets/cobotlet/"]
 struct Assets;
 
-use crate::events::NoopSink;
+use crate::events::{EventSink, NoopSink};
 use crate::route::AppState;
 
 pub async fn serve(
@@ -71,6 +71,7 @@ pub async fn serve(
             {
                 Ok(rt) => {
                     info!(alias = mqtt_cfg.alias, "mqtt connected");
+                    republish_loaded_online(store.clone(), rt.sink.as_ref());
                     rt.sink
                 }
                 Err(e) => {
@@ -262,4 +263,86 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 #[cfg(not(feature = "webui"))]
 async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
+}
+
+/// Re-broadcast `online` for devices loaded from disk (persisted across
+/// restarts) whose state is `Registering` or `Ready`. When this cobotlet
+/// restarts, devices that the local watchdog already flipped to `Offline`
+/// have had their retained `online` marker cleared (`publish_offline`), so
+/// without this a restart would leave cobotsrv showing them offline until
+/// their next heartbeat. `Registering` devices are included for parity with
+/// the register path, which also announces them as `ready` immediately.
+/// `Offline`/`Busy`/`Error`/`Maintenance` devices are left alone — they
+/// still need a heartbeat to come back.
+fn republish_loaded_online(store: Arc<crate::store::DeviceStore>, sink: &dyn EventSink) {
+    for device in store.list() {
+        if matches!(
+            device.state,
+            crate::store::DeviceState::Registering | crate::store::DeviceState::Ready
+        ) {
+            sink.publish_online(&device);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::store::{Device, DeviceState, DeviceStore};
+
+    #[derive(Clone)]
+    struct CountingSink(Arc<AtomicUsize>);
+
+    impl EventSink for CountingSink {
+        fn publish_online(&self, _device: &Device) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+        fn publish_heartbeat(&self, _device_id: &str) {}
+        fn publish_offline(&self, _device: &Device) {}
+        fn publish_task_result(&self, _result: &crate::dispatcher::TaskResult) {}
+    }
+
+    fn device(id: &str, state: DeviceState) -> Device {
+        Device {
+            id: id.to_string(),
+            service_url: "http://127.0.0.1:9900".into(),
+            capabilities: vec![],
+            last_heartbeat: chrono::Utc::now(),
+            registered_at: chrono::Utc::now(),
+            state,
+            control_preset: None,
+        }
+    }
+
+    #[test]
+    fn republish_only_ready_or_registering() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            DeviceStore::new(Arc::new(
+                store::open_database(dir.path().join("t.redb")).unwrap(),
+            ))
+            .unwrap(),
+        );
+        store.register(device("ready", DeviceState::Ready)).unwrap();
+        store
+            .register(device("reg", DeviceState::Registering))
+            .unwrap();
+        store.register(device("off", DeviceState::Offline)).unwrap();
+        store
+            .register(device(
+                "busy",
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+            ))
+            .unwrap();
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let sink = CountingSink(count.clone());
+        republish_loaded_online(store, &sink);
+
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
 }

@@ -1,6 +1,9 @@
 [http]
 listen = "127.0.0.1:3000"
 
+[storage]
+path = "data/cobotlet-0.redb"
+
 
 # Default enabled `--features=net4mqtt`
 [net4mqtt]
@@ -9,3 +12,35 @@ alias = "cobotlet-0"
 # `client_id={alias}` use alias as MQTT `client_id`
 mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
 
+# ── Control Preset: D-pad 方向控制 ──
+[control_preset]
+template = "dpad"
+
+[control_preset.mapping.forward]
+capability = "move"
+mode = "press_release"
+params = { direction = "forward", speed = 1.0 }
+release_params = { direction = "forward", speed = 0.0 }
+
+[control_preset.mapping.backward]
+capability = "move"
+mode = "press_release"
+params = { direction = "backward", speed = 1.0 }
+release_params = { direction = "backward", speed = 0.0 }
+
+[control_preset.mapping.left]
+capability = "move"
+mode = "press_release"
+params = { direction = "left", speed = 1.0 }
+release_params = { direction = "left", speed = 0.0 }
+
+[control_preset.mapping.right]
+capability = "move"
+mode = "press_release"
+params = { direction = "right", speed = 1.0 }
+release_params = { direction = "right", speed = 0.0 }
+
+[control_preset.mapping.stop]
+capability = "emergency_stop"
+mode = "fire_once"
+params = {}
