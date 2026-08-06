@@ -9,8 +9,9 @@ export default defineConfig(({ mode }) => {
     // 读取环境变量
     const env = loadEnv(mode, process.cwd(), '')
 
-    // 目标地址，优先使用环境变量，否则使用默认值
-    const API_TARGET = env.VITE_BASE_URL || 'http://localhost:4000'
+    // 代理目标：VITE_BASE_URL 为绝对 URL（如 http://localhost:4000/api/v1）时直接使用；
+    // 为相对路径（如 /api/v1）时，开发代理需要指向后端服务器地址。
+    const API_TARGET = (env.VITE_BASE_URL?.startsWith('http') && env.VITE_BASE_URL) || 'http://localhost:4000'
 
     return {
         plugins: [
