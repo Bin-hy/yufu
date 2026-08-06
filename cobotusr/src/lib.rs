@@ -639,6 +639,21 @@ impl AppState {
             })?;
 
         for entry in bootstrap {
+            // Dirty-data guard (mirrors OidcService::register_client): a public
+            // client proves possession with PKCE and has no secret, so the
+            // client_credentials grant can never succeed for it. Rejecting at
+            // startup beats a silent 401 in every downstream machine call.
+            if entry.public_client && entry.grant_types.iter().any(|g| g == "client_credentials") {
+                return Err(crate::error::AppError::InternalServerError(
+                    anyhow::anyhow!(
+                        "bootstrap client '{}' is public_client but requests the \
+                     client_credentials grant — public clients cannot authenticate \
+                     with a secret; use a separate confidential machine client",
+                        entry.client_id
+                    ),
+                ));
+            }
+
             // ── 1. OIDC client ──
             let oidc_client_id = match oauth_client::Entity::get_by_client_id(db, &entry.client_id)
                 .await?
