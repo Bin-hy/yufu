@@ -80,6 +80,28 @@ impl DeviceState {
     }
 }
 
+/// Error produced by [`DeviceStore::transition`].
+#[derive(Debug)]
+pub enum TransitionError {
+    /// The requested transition is rejected by the state machine.
+    Invalid { from: String, to: String },
+    /// Persistence (redb) failure — the in-memory state was not changed.
+    Store(anyhow::Error),
+}
+
+impl std::fmt::Display for TransitionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransitionError::Invalid { from, to } => {
+                write!(f, "invalid transition: {from} → {to}")
+            }
+            TransitionError::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for TransitionError {}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
     pub id: String,
@@ -215,22 +237,21 @@ impl DeviceStore {
         Ok(Some((device, old_state)))
     }
 
-    pub fn transition(&self, id: &str, to: DeviceState) -> Result<Option<Device>> {
+    pub fn transition(&self, id: &str, to: DeviceState) -> Result<Option<Device>, TransitionError> {
         let mut entry = match self.devices.get_mut(id) {
             Some(e) => e,
             None => return Ok(None),
         };
         if !entry.state.can_transition_to(&to) {
-            anyhow::bail!(
-                "invalid transition: {} → {}",
-                entry.state.as_str(),
-                to.as_str()
-            );
+            return Err(TransitionError::Invalid {
+                from: entry.state.as_str().to_string(),
+                to: to.as_str().to_string(),
+            });
         }
         entry.state = to;
         let device = entry.clone();
         drop(entry);
-        self.persist(&device)?;
+        self.persist(&device).map_err(TransitionError::Store)?;
         Ok(Some(device))
     }
 

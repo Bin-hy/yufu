@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::Result;
 use redb::Database;
 
-pub use device::{Capability, Device, DeviceState, DeviceStore};
+pub use device::{Capability, Device, DeviceState, DeviceStore, TransitionError};
 pub use task::{TaskRecord, TaskState, TaskStore};
 
 pub fn open_database(path: impl AsRef<Path>) -> Result<Database> {

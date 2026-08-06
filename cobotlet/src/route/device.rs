@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::error::AppError;
 use crate::result::Result;
-use crate::store::{Capability, Device, DeviceState};
+use crate::store::{Capability, Device, DeviceState, TransitionError};
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
@@ -157,12 +157,19 @@ pub async fn set_state(
     let target = match req.state.as_str() {
         "maintenance" => DeviceState::Maintenance,
         "ready" => DeviceState::Ready,
-        _ => return Err(AppError::throw("state must be 'maintenance' or 'ready'")),
+        _ => {
+            return Err(AppError::bad_request(
+                "state must be 'maintenance' or 'ready'",
+            ));
+        }
     };
     match state.store.transition(&id, target) {
         Ok(Some(device)) => Ok(Json(device)),
         Ok(None) => Err(AppError::not_found(format!("device '{id}' not found"))),
-        Err(e) => Err(AppError::throw(e.to_string())),
+        Err(TransitionError::Invalid { from, to }) => Err(AppError::bad_request(format!(
+            "invalid state transition: {from} → {to}"
+        ))),
+        Err(TransitionError::Store(e)) => Err(e.into()),
     }
 }
 
@@ -321,5 +328,69 @@ mod tests {
         let devices = json.as_array().unwrap();
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0]["id"], "d-move");
+    }
+
+    #[tokio::test]
+    async fn set_state_maintenance_and_back() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "d1", &["move"]);
+        let app = Router::new().merge(route()).with_state(state);
+
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/state")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"state":"maintenance"}"#))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["state"], "maintenance");
+
+        // maintenance → ready is a legal transition.
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/state")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"state":"ready"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn set_state_invalid_transition_returns_400() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "d1", &["move"]); // starts Ready
+        let app = Router::new().merge(route()).with_state(state);
+
+        // ready → ready is not a legal transition.
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/state")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"state":"ready"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn set_state_invalid_value_returns_400() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "d1", &["move"]);
+        let app = Router::new().merge(route()).with_state(state);
+
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/state")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"state":"flying"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }
