@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::error::AppError;
 use crate::result::Result;
-use crate::store::{Capability, Device};
+use crate::store::{Capability, Device, DeviceState, TransitionError};
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
@@ -29,16 +29,13 @@ pub struct RegisterResponse {
 
 #[derive(Debug, Serialize)]
 pub struct HeartbeatResponse {
-    pub online: bool,
-    /// True when this heartbeat transitioned the device from offline → online.
+    pub state: &'static str,
     pub restored: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ListQuery {
-    /// If set, filter by online status.
-    pub online: Option<bool>,
-    /// If set, filter to devices that declare this capability name.
+    pub state: Option<String>,
     pub capability: Option<String>,
 }
 
@@ -48,6 +45,7 @@ pub fn route() -> Router<AppState> {
         .route("/devices/{id}", get(get_device).delete(unregister))
         .route("/devices/{id}/heartbeat", put(heartbeat))
         .route("/devices/{id}/capabilities", patch(update_capabilities))
+        .route("/devices/{id}/state", patch(set_state))
 }
 
 async fn register(
@@ -65,7 +63,8 @@ async fn register(
         capabilities: req.capabilities,
         last_heartbeat: now,
         registered_at: now,
-        online: true,
+        state: DeviceState::Registering,
+        control_preset: state.config.control_preset.clone(),
     };
     let device = state.store.register(device)?;
     state.events.publish_online(&device);
@@ -77,15 +76,19 @@ async fn heartbeat(
     Path(id): Path<String>,
 ) -> Result<Json<HeartbeatResponse>> {
     match state.store.heartbeat(&id)? {
-        Some((device, was_offline)) => {
-            if was_offline {
+        Some((device, old_state)) => {
+            let restored = matches!(
+                old_state,
+                DeviceState::Registering | DeviceState::Offline | DeviceState::Error { .. }
+            );
+            if restored {
                 state.events.publish_online(&device);
             } else {
-                state.events.publish_heartbeat(&device.id);
+                state.events.publish_heartbeat(&device);
             }
             Ok(Json(HeartbeatResponse {
-                online: true,
-                restored: was_offline,
+                state: device.state.as_str(),
+                restored,
             }))
         }
         None => Err(AppError::not_found(format!("device '{id}' not found"))),
@@ -96,7 +99,11 @@ async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>) -> Json
     let devices = state.store.list();
     let filtered = devices
         .into_iter()
-        .filter(|d| q.online.is_none_or(|o| d.online == o))
+        .filter(|d| {
+            q.state
+                .as_ref()
+                .is_none_or(|s| d.state.as_str() == s.as_str())
+        })
         .filter(|d| {
             q.capability
                 .as_ref()
@@ -137,6 +144,35 @@ async fn unregister(State(state): State<AppState>, Path(id): Path<String>) -> Re
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SetStateRequest {
+    pub state: String,
+}
+
+pub async fn set_state(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<SetStateRequest>,
+) -> Result<Json<Device>> {
+    let target = match req.state.as_str() {
+        "maintenance" => DeviceState::Maintenance,
+        "ready" => DeviceState::Ready,
+        _ => {
+            return Err(AppError::bad_request(
+                "state must be 'maintenance' or 'ready'",
+            ));
+        }
+    };
+    match state.store.transition(&id, target) {
+        Ok(Some(device)) => Ok(Json(device)),
+        Ok(None) => Err(AppError::not_found(format!("device '{id}' not found"))),
+        Err(TransitionError::Invalid { from, to }) => Err(AppError::bad_request(format!(
+            "invalid state transition: {from} → {to}"
+        ))),
+        Err(TransitionError::Store(e)) => Err(e.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,14 +186,17 @@ mod tests {
 
     use crate::events::NoopSink;
     use crate::route::AppState;
-    use crate::store::{Capability, Device, DeviceStore};
+    use crate::store::{Capability, Device, DeviceState, DeviceStore};
 
     fn make_state() -> (AppState, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(DeviceStore::open(dir.path().join("test.redb")).unwrap());
+        let db = Arc::new(redb::Database::create(dir.path().join("test.redb")).unwrap());
+        let store = Arc::new(DeviceStore::new(db.clone()).unwrap());
+        let task_store = Arc::new(crate::store::TaskStore::new(db));
         let state = AppState {
             config: crate::config::Config::default(),
             store,
+            task_store,
             http_client: reqwest::Client::new(),
             events: Arc::new(NoopSink),
         };
@@ -182,7 +221,8 @@ mod tests {
                 .collect(),
             last_heartbeat: now,
             registered_at: now,
-            online: true,
+            state: DeviceState::Ready,
+            control_preset: None,
         };
         state.store.register(device.clone()).unwrap();
         device
@@ -236,10 +276,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_devices_filters_by_online() {
+    async fn list_devices_filters_by_state() {
         let (state, _dir) = make_state();
-        registered_device(&state, "online-dev", &["move"]);
-        // Register an offline device directly.
+        registered_device(&state, "ready-dev", &["move"]);
         let now = Utc::now();
         state
             .store
@@ -249,13 +288,14 @@ mod tests {
                 capabilities: vec![],
                 last_heartbeat: now,
                 registered_at: now,
-                online: false,
+                state: DeviceState::Offline,
+                control_preset: None,
             })
             .unwrap();
 
         let app = Router::new().merge(route()).with_state(state);
         let req = Request::builder()
-            .uri("/devices?online=true")
+            .uri("/devices?state=ready")
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
@@ -266,7 +306,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let devices = json.as_array().unwrap();
         assert_eq!(devices.len(), 1);
-        assert_eq!(devices[0]["id"], "online-dev");
+        assert_eq!(devices[0]["id"], "ready-dev");
     }
 
     #[tokio::test]
@@ -288,5 +328,69 @@ mod tests {
         let devices = json.as_array().unwrap();
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0]["id"], "d-move");
+    }
+
+    #[tokio::test]
+    async fn set_state_maintenance_and_back() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "d1", &["move"]);
+        let app = Router::new().merge(route()).with_state(state);
+
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/state")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"state":"maintenance"}"#))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["state"], "maintenance");
+
+        // maintenance → ready is a legal transition.
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/state")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"state":"ready"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn set_state_invalid_transition_returns_400() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "d1", &["move"]); // starts Ready
+        let app = Router::new().merge(route()).with_state(state);
+
+        // ready → ready is not a legal transition.
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/state")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"state":"ready"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn set_state_invalid_value_returns_400() {
+        let (state, _dir) = make_state();
+        registered_device(&state, "d1", &["move"]);
+        let app = Router::new().merge(route()).with_state(state);
+
+        let req = Request::builder()
+            .method(Method::PATCH)
+            .uri("/devices/d1/state")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"state":"flying"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }

@@ -23,7 +23,7 @@ pub mod store;
 #[folder = "../assets/cobotlet/"]
 struct Assets;
 
-use crate::events::NoopSink;
+use crate::events::{EventSink, NoopSink};
 use crate::route::AppState;
 
 pub async fn serve(
@@ -37,11 +37,24 @@ pub async fn serve(
         .map(|s| s.path.clone())
         .unwrap_or_else(|| String::from("data/cobotlet.redb"));
 
+    let db = store::open_database(&storage_path)
+        .unwrap_or_else(|e| panic!("failed to open database at {storage_path}: {e}"));
+    let db = Arc::new(db);
+
     let store = Arc::new(
-        store::DeviceStore::open(&storage_path)
-            .unwrap_or_else(|e| panic!("failed to open device store at {storage_path}: {e}")),
+        store::DeviceStore::new(db.clone())
+            .unwrap_or_else(|e| panic!("failed to init device store: {e}")),
     );
-    info!(path = storage_path, "device store opened");
+    let task_store = Arc::new(store::TaskStore::new(db));
+    info!(path = storage_path, "database opened");
+
+    let recovered = task_store.recover().unwrap_or_default();
+    if !recovered.is_empty() {
+        info!(
+            count = recovered.len(),
+            "recovered inflight tasks as failed"
+        );
+    }
 
     let http_client = reqwest::Client::new();
 
@@ -50,6 +63,7 @@ pub async fn serve(
             match mqtt::spawn(
                 mqtt_cfg,
                 store.clone(),
+                task_store.clone(),
                 http_client.clone(),
                 cfg.device.request_timeout_ms,
             )
@@ -57,6 +71,7 @@ pub async fn serve(
             {
                 Ok(rt) => {
                     info!(alias = mqtt_cfg.alias, "mqtt connected");
+                    republish_loaded_online(&store, rt.sink.as_ref());
                     rt.sink
                 }
                 Err(e) => {
@@ -71,6 +86,7 @@ pub async fn serve(
     if cfg.mqtt.is_some() {
         heartbeat::spawn_watchdog(
             store.clone(),
+            task_store.clone(),
             events.clone(),
             cfg.device.watchdog_interval_secs,
             cfg.device.heartbeat_timeout_secs,
@@ -80,6 +96,7 @@ pub async fn serve(
     let state = AppState {
         config: cfg.clone(),
         store,
+        task_store,
         http_client,
         events,
     };
@@ -247,4 +264,86 @@ async fn static_handler(uri: Uri) -> impl IntoResponse {
 #[cfg(not(feature = "webui"))]
 async fn static_handler(_: Uri) -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "feature webui not enable")
+}
+
+/// Re-broadcast `online` for devices loaded from disk (persisted across
+/// restarts) whose state is `Registering` or `Ready`. When this cobotlet
+/// restarts, devices that the local watchdog already flipped to `Offline`
+/// have had their retained `online` marker cleared (`publish_offline`), so
+/// without this a restart would leave cobotsrv showing them offline until
+/// their next heartbeat. `Registering` devices are included for parity with
+/// the register path, which also announces them as `ready` immediately.
+/// `Offline`/`Busy`/`Error`/`Maintenance` devices are left alone — they
+/// still need a heartbeat to come back.
+fn republish_loaded_online(store: &crate::store::DeviceStore, sink: &dyn EventSink) {
+    for device in store.list() {
+        if matches!(
+            device.state,
+            crate::store::DeviceState::Registering | crate::store::DeviceState::Ready
+        ) {
+            sink.publish_online(&device);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::store::{Device, DeviceState, DeviceStore};
+
+    #[derive(Clone)]
+    struct CountingSink(Arc<AtomicUsize>);
+
+    impl EventSink for CountingSink {
+        fn publish_online(&self, _device: &Device) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+        fn publish_heartbeat(&self, _device: &Device) {}
+        fn publish_offline(&self, _device: &Device) {}
+        fn publish_task_result(&self, _result: &crate::dispatcher::TaskResult) {}
+    }
+
+    fn device(id: &str, state: DeviceState) -> Device {
+        Device {
+            id: id.to_string(),
+            service_url: "http://127.0.0.1:9900".into(),
+            capabilities: vec![],
+            last_heartbeat: chrono::Utc::now(),
+            registered_at: chrono::Utc::now(),
+            state,
+            control_preset: None,
+        }
+    }
+
+    #[test]
+    fn republish_only_ready_or_registering() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            DeviceStore::new(Arc::new(
+                store::open_database(dir.path().join("t.redb")).unwrap(),
+            ))
+            .unwrap(),
+        );
+        store.register(device("ready", DeviceState::Ready)).unwrap();
+        store
+            .register(device("reg", DeviceState::Registering))
+            .unwrap();
+        store.register(device("off", DeviceState::Offline)).unwrap();
+        store
+            .register(device(
+                "busy",
+                DeviceState::Busy {
+                    task_id: "t1".into(),
+                },
+            ))
+            .unwrap();
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let sink = CountingSink(count.clone());
+        republish_loaded_online(&store, &sink);
+
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
 }

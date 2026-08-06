@@ -7,7 +7,7 @@ export interface LocalDevice {
   capabilities: Capability[]
   last_heartbeat: string
   registered_at: string
-  online: boolean
+  state: string
 }
 
 export interface LocalTaskResult {

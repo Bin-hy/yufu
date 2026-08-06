@@ -13,15 +13,17 @@ pub struct CallRecord {
     pub subject: String,
     pub method: String,
     pub tool_name: Option<String>,
-    /// Error message if failed, `None` if success.
     pub error_msg: Option<String>,
     pub duration_ms: i64,
     pub request_id: Option<String>,
+    pub input_params: Option<serde_json::Value>,
+    pub status_code: Option<i32>,
+    pub device_id: Option<String>,
+    pub cobotlet_alias: Option<String>,
+    pub source: Option<String>,
 }
 
-/// Insert one audit record. Errors are logged, not propagated — auditing must
-/// never break the request path (callers typically run this in a background
-/// writer task fed by a bounded channel).
+/// Insert one audit record. Errors are logged, not propagated.
 pub async fn record(db: &DatabaseConnection, rec: CallRecord) {
     let row = mcp_call_log::ActiveModel {
         id: NotSet,
@@ -32,6 +34,11 @@ pub async fn record(db: &DatabaseConnection, rec: CallRecord) {
         error_msg: Set(rec.error_msg),
         duration_ms: Set(rec.duration_ms),
         request_id: Set(rec.request_id),
+        input_params: Set(rec.input_params),
+        status_code: Set(rec.status_code),
+        device_id: Set(rec.device_id),
+        cobotlet_alias: Set(rec.cobotlet_alias),
+        source: Set(rec.source),
     };
     if let Err(e) = mcp_call_log::Entity::insert(row).exec(db).await {
         tracing::warn!(error = %e, "failed to write MCP audit log");
@@ -55,6 +62,8 @@ pub struct LogFilter {
     pub tool: Option<String>,
     /// Some(true) → only errors, Some(false) → only successes, None → all.
     pub is_error: Option<bool>,
+    pub device_id: Option<String>,
+    pub source: Option<String>,
 }
 
 /// Paginated, newest-first query of audit records.
@@ -77,6 +86,12 @@ pub async fn query(
         } else {
             q = q.filter(mcp_call_log::Column::ErrorMsg.is_null());
         }
+    }
+    if let Some(d) = &filter.device_id {
+        q = q.filter(mcp_call_log::Column::DeviceId.eq(d.clone()));
+    }
+    if let Some(s) = &filter.source {
+        q = q.filter(mcp_call_log::Column::Source.eq(s.clone()));
     }
 
     // Newest first; `id` breaks `created_at` ties so pagination is stable.

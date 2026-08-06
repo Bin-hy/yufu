@@ -60,7 +60,10 @@ redirect_uris = ["http://localhost:5174/oauth/callback"]
 allowed_scopes = ["openid", "profile", "email"]
 grant_types = ["authorization_code", "refresh_token", "client_credentials"]
 # 与 conf/cobotrix/cobotsrv.toml [auth].client_secret 保持一致
+# 该 secret 仅用于后端 client_credentials 流程;SPA 是 public client,
+# 授权码交换用 PKCE (S256),不把 secret 打进前端 bundle。
 client_secret = "dev-cobotsrv-secret-change-me"
+public_client = true
 
 # Cobotrix IM is a public SPA client. PKCE (S256) proves possession during
 # authorization-code exchange, so no client secret is exposed in the browser.

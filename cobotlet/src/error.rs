@@ -7,6 +7,7 @@ use serde_json::json;
 pub enum AppError {
     NotFound(String),
     AlreadyExists(String),
+    BadRequest(String),
     Throw(String),
     InternalServerError(anyhow::Error),
 }
@@ -20,6 +21,10 @@ impl AppError {
         AppError::AlreadyExists(t.to_string())
     }
 
+    pub fn bad_request<T: ToString>(t: T) -> Self {
+        AppError::BadRequest(t.to_string())
+    }
+
     pub fn throw<T: ToString>(t: T) -> Self {
         AppError::Throw(t.to_string())
     }
@@ -30,6 +35,7 @@ impl IntoResponse for AppError {
         let (status, msg) = match self {
             AppError::NotFound(e) => (StatusCode::NOT_FOUND, e),
             AppError::AlreadyExists(e) => (StatusCode::CONFLICT, e),
+            AppError::BadRequest(e) => (StatusCode::BAD_REQUEST, e),
             AppError::Throw(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
             AppError::InternalServerError(e) => {
                 tracing::error!(?e, "internal server error");

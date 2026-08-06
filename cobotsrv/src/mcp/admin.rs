@@ -51,7 +51,7 @@ struct McpInfo {
 /// GET /mcp/admin/info — server status + read-only settings + today's stats.
 async fn info(State(state): State<AppState>) -> Result<Json<McpInfo>> {
     let db = &state.database.connection;
-    let online = DeviceService::list_filtered(db, None, Some(true), None).await?;
+    let online = DeviceService::list_filtered(db, None, Some("ready"), None).await?;
     let online_tools = crate::route::tool::aggregate_tools(&online).len();
 
     let (calls_today, success_today) = audit::today_stats(db).await?;
@@ -90,6 +90,8 @@ struct LogQuery {
     tool: Option<String>,
     /// "ok" | "error" | omitted (all)
     result: Option<String>,
+    device_id: Option<String>,
+    source: Option<String>,
 }
 
 /// GET /mcp/admin/logs — paginated, filterable audit log.
@@ -109,6 +111,8 @@ async fn logs(
             Some("ok") => Some(false),
             _ => None,
         },
+        device_id: q.device_id.filter(|s| !s.is_empty()),
+        source: q.source.filter(|s| !s.is_empty()),
     };
     let res = audit::query(&state.database.connection, &page, &filter).await?;
     Ok(Json(res))

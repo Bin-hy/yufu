@@ -14,9 +14,10 @@ pub struct UpsertDevice<'a> {
     pub device_id: &'a str,
     pub service_url: String,
     pub capabilities: serde_json::Value,
-    pub online: bool,
+    pub state: String,
     pub last_heartbeat: NaiveDateTime,
     pub registered_at: NaiveDateTime,
+    pub control_preset: Option<serde_json::Value>,
 }
 
 impl DeviceService {
@@ -30,9 +31,10 @@ impl DeviceService {
                 let mut am: device::ActiveModel = existing.into();
                 am.service_url = Set(input.service_url);
                 am.capabilities = Set(input.capabilities);
-                am.online = Set(input.online);
+                am.state = Set(input.state);
                 am.last_heartbeat = Set(input.last_heartbeat);
                 am.registered_at = Set(input.registered_at);
+                am.control_preset = Set(input.control_preset);
                 am.update_time = Set(now);
                 am.update(db).await
             }
@@ -43,9 +45,10 @@ impl DeviceService {
                     device_id: Set(input.device_id.to_string()),
                     service_url: Set(input.service_url),
                     capabilities: Set(input.capabilities),
-                    online: Set(input.online),
+                    state: Set(input.state),
                     last_heartbeat: Set(input.last_heartbeat),
                     registered_at: Set(input.registered_at),
+                    control_preset: Set(input.control_preset),
                     update_time: Set(now),
                 };
                 am.insert(db).await
@@ -62,7 +65,7 @@ impl DeviceService {
             return Ok(None);
         };
         let mut am: device::ActiveModel = existing.into();
-        am.online = Set(false);
+        am.state = Set("offline".to_string());
         am.update_time = Set(Utc::now().naive_utc());
         Ok(Some(am.update(db).await?))
     }
@@ -72,13 +75,17 @@ impl DeviceService {
         cobotlet_alias: &str,
         device_id: &str,
         ts: NaiveDateTime,
+        state: Option<String>,
     ) -> Result<Option<device::Model>, DbErr> {
         let Some(existing) = Self::find(db, cobotlet_alias, device_id).await? else {
             return Ok(None);
         };
         let mut am: device::ActiveModel = existing.into();
         am.last_heartbeat = Set(ts);
-        am.online = Set(true);
+        // Heartbeats carry the cobotlet-side device state (ready / busy /
+        // maintenance / error / registering). Old cobotlets send none — keep
+        // the previous behavior of marking the device ready.
+        am.state = Set(state.unwrap_or_else(|| "ready".to_string()));
         am.update_time = Set(Utc::now().naive_utc());
         Ok(Some(am.update(db).await?))
     }
@@ -102,21 +109,21 @@ impl DeviceService {
             .await
     }
 
-    /// List devices with optional server-side filters for alias and online status.
+    /// List devices with optional server-side filters for alias and state.
     /// The `capability` filter is applied in memory after the DB query because
     /// the capabilities column is unindexed JSON.
     pub async fn list_filtered(
         db: &DatabaseConnection,
         alias: Option<&str>,
-        online: Option<bool>,
+        state: Option<&str>,
         capability: Option<&str>,
     ) -> Result<Vec<device::Model>, DbErr> {
         let mut cond = Condition::all();
         if let Some(a) = alias {
             cond = cond.add(device::Column::CobotletAlias.eq(a));
         }
-        if let Some(o) = online {
-            cond = cond.add(device::Column::Online.eq(o));
+        if let Some(s) = state {
+            cond = cond.add(device::Column::State.eq(s));
         }
         let mut rows = device::Entity::find()
             .filter(cond)

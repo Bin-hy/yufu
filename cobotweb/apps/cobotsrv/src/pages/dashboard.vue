@@ -29,7 +29,7 @@ onMounted(async () => {
 
 const stats = computed(() => {
   const total = devices.value.length
-  const online = devices.value.filter((d) => d.online).length
+  const online = devices.value.filter((d) => d.state === 'ready' || d.state === 'busy').length
   const cobotlets = new Set(devices.value.map((d) => d.cobotlet_alias)).size
   const totalCapabilities = devices.value.reduce(
     (sum, d) => sum + (d.capabilities?.length ?? 0),
@@ -59,8 +59,8 @@ function formatRelativeTime(ts: string | null): string {
   return `${Math.floor(diff / 86_400_000)}天前`
 }
 
-// Quick task form
-const onlineDevices = computed(() => devices.value.filter((d) => d.online))
+// Quick task form (only devices that can accept new tasks)
+const onlineDevices = computed(() => devices.value.filter((d) => d.state === 'ready'))
 const cobotletAliases = computed(() =>
   [...new Set(onlineDevices.value.map((d) => d.cobotlet_alias))].sort(),
 )
@@ -199,9 +199,9 @@ const statCards = computed(() => [
           >
             <div class="flex items-center gap-2 min-w-0">
               <component
-                :is="d.online ? CircleDot : Circle"
+                :is="d.state === 'ready' || d.state === 'busy' ? CircleDot : Circle"
                 class="w-3.5 h-3.5 shrink-0"
-                :class="d.online ? 'text-green-500' : 'text-muted-foreground'"
+                :class="d.state === 'ready' || d.state === 'busy' ? 'text-green-500' : 'text-muted-foreground'"
               />
               <span class="font-mono text-xs truncate">{{ d.cobotlet_alias }}/{{ d.device_id }}</span>
             </div>

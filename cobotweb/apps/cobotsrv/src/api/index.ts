@@ -56,7 +56,7 @@ export function getTaskResult(taskId: string) {
 export interface ToolProvider {
   cobotlet_alias: string
   device_id: string
-  online: boolean
+  state: string
 }
 
 export interface ToolDescriptor {
@@ -97,6 +97,11 @@ export interface McpCallLog {
   error_msg?: string | null
   duration_ms: number
   request_id?: string | null
+  input_params?: object | null
+  status_code?: number | null
+  device_id?: string | null
+  cobotlet_alias?: string | null
+  source?: string | null
 }
 
 export interface McpLogQuery {
@@ -105,6 +110,8 @@ export interface McpLogQuery {
   subject?: string
   tool?: string
   result?: 'ok' | 'error'
+  device_id?: string
+  source?: string
 }
 
 /** 工具目录（= 设备能力聚合），走 mcp:admin 保护的聚合视图（与 GET /tools 同形，

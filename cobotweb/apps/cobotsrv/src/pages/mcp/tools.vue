@@ -30,7 +30,7 @@ function toggle(name: string) {
 }
 
 function isOnline(t: ToolDescriptor): boolean {
-  return t.providers.some((p) => p.online)
+  return t.providers.some((p) => p.state === 'ready' || p.state === 'busy')
 }
 
 const filtered = computed(() => {
@@ -105,9 +105,9 @@ onMounted(load)
                 v-for="p in t.providers"
                 :key="`${p.cobotlet_alias}/${p.device_id}`"
                 class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono"
-                :class="p.online ? 'text-green-600' : 'text-muted-foreground'"
+                :class="p.state === 'ready' || p.state === 'busy' ? 'text-green-600' : 'text-muted-foreground'"
               >
-                <component :is="p.online ? CircleDot : Circle" class="w-2.5 h-2.5" />
+                <component :is="p.state === 'ready' || p.state === 'busy' ? CircleDot : Circle" class="w-2.5 h-2.5" />
                 {{ p.cobotlet_alias }}
               </span>
             </div>

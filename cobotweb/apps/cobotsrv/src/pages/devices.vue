@@ -181,9 +181,9 @@ function formatTimestamp(ts: string | null): string {
                 >{{ c.name }}</span>
               </td>
               <td class="px-3 py-2.5">
-                <span class="inline-flex items-center gap-1 text-xs" :class="d.online ? 'text-green-600' : 'text-muted-foreground'">
-                  <component :is="d.online ? CircleDot : Circle" class="w-3 h-3" />
-                  {{ d.online ? '在线' : '离线' }}
+                <span class="inline-flex items-center gap-1 text-xs" :class="d.state === 'ready' || d.state === 'busy' ? 'text-green-600' : 'text-muted-foreground'">
+                  <component :is="d.state === 'ready' || d.state === 'busy' ? CircleDot : Circle" class="w-3 h-3" />
+                  {{ d.state }}
                 </span>
               </td>
               <td class="px-3 py-2.5 text-xs text-muted-foreground">

@@ -21,6 +21,11 @@ pub struct Model {
     pub error_msg: Option<String>,
     pub duration_ms: i64,
     pub request_id: Option<String>,
+    pub input_params: Option<Json>,
+    pub status_code: Option<i32>,
+    pub device_id: Option<String>,
+    pub cobotlet_alias: Option<String>,
+    pub source: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -30,10 +35,14 @@ pub struct McpCallLogVO {
     pub subject: String,
     pub method: String,
     pub tool_name: Option<String>,
-    /// Error message if failed, `None` if success.
     pub error_msg: Option<String>,
     pub duration_ms: i64,
     pub request_id: Option<String>,
+    pub input_params: Option<serde_json::Value>,
+    pub status_code: Option<i32>,
+    pub device_id: Option<String>,
+    pub cobotlet_alias: Option<String>,
+    pub source: Option<String>,
 }
 
 impl From<Model> for McpCallLogVO {
@@ -50,6 +59,11 @@ impl From<Model> for McpCallLogVO {
             error_msg: m.error_msg,
             duration_ms: m.duration_ms,
             request_id: m.request_id,
+            input_params: m.input_params,
+            status_code: m.status_code,
+            device_id: m.device_id,
+            cobotlet_alias: m.cobotlet_alias,
+            source: m.source,
         }
     }
 }

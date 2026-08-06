@@ -240,9 +240,10 @@ pub async fn insert_test_device(
                 "path": format!("/{}", capability_name),
                 "input_schema": {"type": "object", "properties": {"x": {"type": "number"}}},
             }]),
-            online,
+            state: if online { "ready" } else { "offline" }.to_string(),
             last_heartbeat: now,
             registered_at: now,
+            control_preset: None,
         },
     )
     .await

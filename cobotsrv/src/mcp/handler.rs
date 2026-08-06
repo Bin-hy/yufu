@@ -14,24 +14,50 @@ use super::protocol::{
     ServerCapabilities, ToolsCapability, error_codes,
 };
 
-pub async fn dispatch(state: &AppState, req: JsonRpcRequest) -> JsonRpcResponse {
+pub struct DispatchResult {
+    pub response: JsonRpcResponse,
+    pub device_id: Option<String>,
+    pub cobotlet_alias: Option<String>,
+}
+
+pub async fn dispatch(state: &AppState, req: JsonRpcRequest) -> DispatchResult {
     if req.jsonrpc != "2.0" {
-        return JsonRpcResponse::err(
-            req.id,
-            error_codes::INVALID_REQUEST,
-            format!("jsonrpc must be \"2.0\", got \"{}\"", req.jsonrpc),
-        );
+        return DispatchResult {
+            response: JsonRpcResponse::err(
+                req.id,
+                error_codes::INVALID_REQUEST,
+                format!("jsonrpc must be \"2.0\", got \"{}\"", req.jsonrpc),
+            ),
+            device_id: None,
+            cobotlet_alias: None,
+        };
     }
     match req.method.as_str() {
-        "initialize" => handle_initialize(req.id, req.params),
-        "ping" => JsonRpcResponse::ok(req.id, json!({})),
-        "tools/list" => handle_tools_list(state, req.id).await,
+        "initialize" => DispatchResult {
+            response: handle_initialize(req.id, req.params),
+            device_id: None,
+            cobotlet_alias: None,
+        },
+        "ping" => DispatchResult {
+            response: JsonRpcResponse::ok(req.id, json!({})),
+            device_id: None,
+            cobotlet_alias: None,
+        },
+        "tools/list" => DispatchResult {
+            response: handle_tools_list(state, req.id).await,
+            device_id: None,
+            cobotlet_alias: None,
+        },
         "tools/call" => handle_tools_call(state, req.id, req.params).await,
-        other => JsonRpcResponse::err(
-            req.id,
-            error_codes::METHOD_NOT_FOUND,
-            format!("method not found: {other}"),
-        ),
+        other => DispatchResult {
+            response: JsonRpcResponse::err(
+                req.id,
+                error_codes::METHOD_NOT_FOUND,
+                format!("method not found: {other}"),
+            ),
+            device_id: None,
+            cobotlet_alias: None,
+        },
     }
 }
 
@@ -85,7 +111,7 @@ async fn handle_tools_list(state: &AppState, id: Option<serde_json::Value>) -> J
 
     let mut seen: std::collections::HashMap<String, McpTool> = std::collections::HashMap::new();
     for device in &devices {
-        if !device.online {
+        if device.state != "ready" {
             continue;
         }
         let caps: Vec<Capability> =
@@ -118,19 +144,27 @@ async fn handle_tools_call(
     state: &AppState,
     id: Option<serde_json::Value>,
     params: Option<serde_json::Value>,
-) -> JsonRpcResponse {
+) -> DispatchResult {
     let Some(params) = params else {
-        return JsonRpcResponse::err(
-            id,
-            error_codes::INVALID_PARAMS,
-            "params required for tools/call",
-        );
+        return DispatchResult {
+            response: JsonRpcResponse::err(
+                id,
+                error_codes::INVALID_PARAMS,
+                "params required for tools/call",
+            ),
+            device_id: None,
+            cobotlet_alias: None,
+        };
     };
 
     let mut call_params: CallToolParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
-            return JsonRpcResponse::err(id, error_codes::INVALID_PARAMS, e.to_string());
+            return DispatchResult {
+                response: JsonRpcResponse::err(id, error_codes::INVALID_PARAMS, e.to_string()),
+                device_id: None,
+                cobotlet_alias: None,
+            };
         }
     };
 
@@ -157,11 +191,15 @@ async fn handle_tools_call(
     {
         Ok(d) => d,
         Err(e) => {
-            return JsonRpcResponse::err(id, error_codes::INTERNAL_ERROR, e.to_string());
+            return DispatchResult {
+                response: JsonRpcResponse::err(id, error_codes::INTERNAL_ERROR, e.to_string()),
+                device_id: None,
+                cobotlet_alias: None,
+            };
         }
     };
 
-    let device = match devices.iter().find(|d| d.online) {
+    let device = match devices.iter().find(|d| d.state == "ready") {
         Some(d) => d,
         None => {
             let msg = match &cobotlet_alias_hint {
@@ -171,22 +209,30 @@ async fn handle_tools_call(
                 ),
                 None => format!("no online provider for tool '{}'", call_params.name),
             };
-            return JsonRpcResponse::ok(
-                id,
-                CallToolResult {
-                    content: vec![json!({"type": "text", "text": msg})],
-                    is_error: true,
-                },
-            );
+            return DispatchResult {
+                response: JsonRpcResponse::ok(
+                    id,
+                    CallToolResult {
+                        content: vec![json!({"type": "text", "text": msg})],
+                        is_error: true,
+                    },
+                ),
+                device_id: None,
+                cobotlet_alias: cobotlet_alias_hint,
+            };
         }
     };
 
     let Some(mqtt) = &state.mqtt else {
-        return JsonRpcResponse::err(
-            id,
-            error_codes::INTERNAL_ERROR,
-            "mqtt not configured on this server",
-        );
+        return DispatchResult {
+            response: JsonRpcResponse::err(
+                id,
+                error_codes::INTERNAL_ERROR,
+                "mqtt not configured on this server",
+            ),
+            device_id: Some(device.device_id.clone()),
+            cobotlet_alias: Some(device.cobotlet_alias.clone()),
+        };
     };
 
     // list_filtered already confirmed this device has the requested capability.
@@ -208,6 +254,9 @@ async fn handle_tools_call(
         "mcp: tools/call dispatch"
     );
 
+    let selected_device_id = device.device_id.clone();
+    let selected_alias = device.cobotlet_alias.clone();
+
     match mqtt
         .submit(
             &device.cobotlet_alias,
@@ -222,14 +271,22 @@ async fn handle_tools_call(
                 .iter()
                 .map(|b| json!({"type": b.r#type, "text": b.text}))
                 .collect();
-            JsonRpcResponse::ok(
-                id,
-                CallToolResult {
-                    content,
-                    is_error: result.is_error,
-                },
-            )
+            DispatchResult {
+                response: JsonRpcResponse::ok(
+                    id,
+                    CallToolResult {
+                        content,
+                        is_error: result.is_error,
+                    },
+                ),
+                device_id: Some(selected_device_id),
+                cobotlet_alias: Some(selected_alias),
+            }
         }
-        Err(e) => JsonRpcResponse::err(id, error_codes::INTERNAL_ERROR, e.to_string()),
+        Err(e) => DispatchResult {
+            response: JsonRpcResponse::err(id, error_codes::INTERNAL_ERROR, e.to_string()),
+            device_id: Some(selected_device_id),
+            cobotlet_alias: Some(selected_alias),
+        },
     }
 }

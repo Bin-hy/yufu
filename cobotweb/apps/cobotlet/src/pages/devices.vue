@@ -61,7 +61,7 @@ async function removeSingle(id: string, evt: Event) {
   }
 }
 
-const offlineDevices = computed(() => devices.value.filter((d) => !d.online))
+const offlineDevices = computed(() => devices.value.filter((d) => d.state === 'offline'))
 
 async function clearOffline() {
   if (offlineDevices.value.length === 0) return
@@ -191,10 +191,10 @@ function formatRelativeTime(ts: string | null): string {
               <td class="px-3 py-2.5">
                 <span
                   class="inline-flex items-center gap-1 text-xs"
-                  :class="d.online ? 'text-green-600' : 'text-muted-foreground'"
+                  :class="d.state === 'ready' || d.state === 'busy' ? 'text-green-600' : 'text-muted-foreground'"
                 >
-                  <component :is="d.online ? CircleDot : Circle" class="w-3 h-3" />
-                  {{ d.online ? '在线' : '离线' }}
+                  <component :is="d.state === 'ready' || d.state === 'busy' ? CircleDot : Circle" class="w-3 h-3" />
+                  {{ d.state }}
                 </span>
               </td>
               <td class="px-3 py-2.5 text-xs text-muted-foreground">

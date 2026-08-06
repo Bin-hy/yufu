@@ -63,7 +63,7 @@ watch(selectedCapability, (cap) => {
 onMounted(async () => {
   try {
     devices.value = await listDevices()
-    const first = devices.value.find((d) => d.online)
+    const first = devices.value.find((d) => d.state === 'ready')
     if (first) {
       deviceId.value = first.id
       capabilityName.value = first.capabilities[0]?.name ?? ''
@@ -174,8 +174,8 @@ function inputType(prop: JsonSchemaProperty): string {
             class="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
             <option value="">— 按能力自动选择 —</option>
-            <option v-for="d in devices" :key="d.id" :value="d.id" :disabled="!d.online">
-              {{ d.id }}{{ d.online ? '' : ' (离线)' }}
+            <option v-for="d in devices" :key="d.id" :value="d.id" :disabled="d.state !== 'ready'">
+              {{ d.id }}{{ d.state === 'ready' ? '' : ` (${d.state})` }}
             </option>
           </select>
         </div>
