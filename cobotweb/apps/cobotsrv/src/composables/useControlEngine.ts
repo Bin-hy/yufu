@@ -97,10 +97,6 @@ export function useControlEngine(
     }
   }
 
-  function fire(key: string) {
-    press(key)
-  }
-
   function destroy() {
     for (const timer of timers.values()) {
       clearInterval(timer)
@@ -109,5 +105,5 @@ export function useControlEngine(
     activeKeys.value.clear()
   }
 
-  return { press, release, fire, destroy, feedbackLog, activeKeys }
+  return { press, release, destroy, feedbackLog, activeKeys }
 }

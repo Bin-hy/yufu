@@ -40,8 +40,18 @@ const schema = computed(() => selectedCapability.value?.input_schema ?? null)
 // Control engine
 const engine = useControlEngine(cobotletAlias, deviceId, preset)
 
-// Auto-select mode based on preset
-watch(hasPreset, (v) => { mode.value = v ? 'control' : 'advanced' })
+// Auto-select a sensible mode on first load / device switch, but never
+// override a mode the user picked manually.
+const modeTouched = ref(false)
+watch(hasPreset, (v) => {
+  if (modeTouched.value) return
+  mode.value = v ? 'control' : 'advanced'
+})
+
+function switchMode(m: Mode) {
+  modeTouched.value = true
+  mode.value = m
+}
 
 // Init formData when capability changes
 watch(selectedCapability, (cap) => {
@@ -148,14 +158,14 @@ function inputType(prop: JsonSchemaProperty): string {
           class="px-3 py-1.5 flex items-center gap-1.5 transition-colors"
           :class="mode === 'control' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'"
           :disabled="!hasPreset"
-          @click="mode = 'control'"
+          @click="switchMode('control')"
         >
           <Gamepad2 class="w-3.5 h-3.5" /> 控制面板
         </button>
         <button
           class="px-3 py-1.5 flex items-center gap-1.5 transition-colors"
           :class="mode === 'advanced' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'"
-          @click="mode = 'advanced'"
+          @click="switchMode('advanced')"
         >
           <Terminal class="w-3.5 h-3.5" /> 高级模式
         </button>
