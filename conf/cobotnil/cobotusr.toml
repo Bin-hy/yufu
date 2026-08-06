@@ -31,6 +31,8 @@ redirect_uris = ["http://localhost:5174/oauth/callback", "http://localhost:4001/
 allowed_scopes = ["openid", "profile", "email"]
 grant_types = ["authorization_code", "refresh_token", "client_credentials"]
 client_secret = "dev-cobotsrv-secret-change-me"
+# SPA 用 PKCE (S256) 认证,不传 secret;该 secret 仅供后端 client_credentials。
+public_client = true
 
 [[oidc.bootstrap_clients]]
 client_id = "cobotimx"

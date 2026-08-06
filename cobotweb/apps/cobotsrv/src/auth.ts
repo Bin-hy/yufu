@@ -15,7 +15,6 @@ const STORAGE_KEYS = {
 
 const COBOTSRV_BASE = (import.meta.env.VITE_COBOTSRV_URL ?? '').replace(/\/$/, '')
 const CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID ?? 'cobotsrv'
-const CLIENT_SECRET = import.meta.env.VITE_OIDC_CLIENT_SECRET ?? ''
 const REDIRECT_URI =
   import.meta.env.VITE_OIDC_REDIRECT_URI ?? `${window.location.origin}/oauth/callback`
 const SCOPE = 'openid profile email'
@@ -135,6 +134,9 @@ export async function handleCallback(code: string, state: string): Promise<strin
   const verifier = sessionStorage.getItem(STORAGE_KEYS.pkceVerifier)
   if (!verifier) throw new Error('Missing PKCE verifier — re-login required')
 
+  // cobotsrv is a public OIDC client: PKCE proves possession, so no
+  // client_secret is sent — embedding a secret in the SPA bundle would
+  // expose it to anyone loading the page.
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
@@ -142,9 +144,6 @@ export async function handleCallback(code: string, state: string): Promise<strin
     client_id: CLIENT_ID,
     code_verifier: verifier,
   })
-  if (CLIENT_SECRET) {
-    body.set('client_secret', CLIENT_SECRET)
-  }
 
   const resp = await fetch(`${COBOTSRV_BASE}/oidc/token`, {
     method: 'POST',
@@ -180,7 +179,6 @@ export async function refreshAccessToken(): Promise<string | null> {
     refresh_token: rt,
     client_id: CLIENT_ID,
   })
-  if (CLIENT_SECRET) body.set('client_secret', CLIENT_SECRET)
 
   try {
     const resp = await fetch(`${COBOTSRV_BASE}/oidc/token`, {
