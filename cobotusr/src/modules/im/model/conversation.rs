@@ -396,7 +396,14 @@ pub async fn list_user_conversations(
             if m.msg_type == MessageType::Text {
                 m.content.unwrap_or_default()
             } else {
-                format!("[msg_type:{}]", i16::from(m.msg_type))
+                match m.msg_type {
+                    MessageType::Image => "[图片]".to_string(),
+                    MessageType::Audio => "[语音]".to_string(),
+                    MessageType::Video => "[视频]".to_string(),
+                    MessageType::File => "[文件]".to_string(),
+                    MessageType::System => "[系统消息]".to_string(),
+                    _ => format!("[msg_type:{}]", i16::from(m.msg_type)),
+                }
             }
         });
 

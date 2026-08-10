@@ -4,10 +4,15 @@ import { useChatStore } from "@/stores/chat";
 import { messageApi } from "@/api/messages";
 import { fileApi } from "@/api/files";
 import type { MsgType, MediaExtra } from "@/types/models";
+import VoiceRecordButton from "@/components/recording/VoiceRecordButton.vue";
+import VideoRecorderModal from "@/components/recording/VideoRecorderModal.vue";
+import PhotoCaptureModal from "@/components/recording/PhotoCaptureModal.vue";
 
 const chat = useChatStore();
 const text = ref("");
 const sending = ref(false);
+const showVideoRecorder = ref(false);
+const showPhotoCapture = ref(false);
 
 // Emoji palette
 const showEmoji = ref(false);
@@ -46,7 +51,7 @@ async function sendText() {
   }
 }
 
-async function sendMedia(file: File, msgType: MsgType) {
+async function sendMedia(file: File, msgType: MsgType, extraFields?: Partial<MediaExtra>) {
   if (!chat.activeConversationId) return;
   sending.value = true;
   try {
@@ -58,6 +63,7 @@ async function sendMedia(file: File, msgType: MsgType) {
       storage_path: path,
       size: file.size,
       name: file.name,
+      ...extraFields,
     };
     if (msgType === 2) {
       try {
@@ -76,7 +82,12 @@ async function sendMedia(file: File, msgType: MsgType) {
     const res = await messageApi.send(chat.activeConversationId, req);
     if (res.data.data) {
       chat.addSentMessage(res.data.data, req);
-      chat.upsertConversationFromPush(chat.activeConversationId!, "[媒体]", false);
+      const previewText =
+        msgType === 2 ? "[图片]" :
+        msgType === 3 ? "[语音]" :
+        msgType === 4 ? "[视频]" :
+        "[媒体]";
+      chat.upsertConversationFromPush(chat.activeConversationId!, previewText, false);
     }
   } catch (e: unknown) {
     const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -91,6 +102,24 @@ function onFileChange(event: Event, type: MsgType) {
   const file = input.files?.[0];
   if (file) sendMedia(file, type);
   input.value = "";
+}
+
+function onVoiceRecorded(file: File, durationSec: number) {
+  sendMedia(file, 3, { duration: durationSec });
+}
+
+function onVideoRecorded(file: File, durationSec: number) {
+  showVideoRecorder.value = false;
+  sendMedia(file, 4, { duration: durationSec });
+}
+
+function onPhotoCaptured(file: File) {
+  showPhotoCapture.value = false;
+  sendMedia(file, 2);
+}
+
+function onRecordError(msg: string) {
+  alert(msg);
 }
 </script>
 
@@ -108,31 +137,44 @@ function onFileChange(event: Event, type: MsgType) {
       </button>
     </div>
 
-    <!-- Toolbar -->
+    <!-- Toolbar: icon + text below -->
     <div class="flex items-center gap-1 mb-2">
       <button
         @click="showEmoji = !showEmoji"
-        class="text-lg px-2 py-0.5 rounded hover:bg-gray-100 transition-colors"
+        class="flex flex-col items-center px-2 py-1 rounded hover:bg-gray-100 transition-colors text-gray-600"
         title="表情"
       >
-        😊
+        <span class="text-lg leading-none mb-0.5">😊</span>
+        <span class="text-xs leading-tight">表情</span>
       </button>
-      <label class="text-lg px-2 py-0.5 rounded hover:bg-gray-100 transition-colors cursor-pointer" title="发送图片">
-        🖼
-        <input type="file" accept="image/*" class="hidden" @change="onFileChange($event, 2)" />
-      </label>
-      <label class="text-lg px-2 py-0.5 rounded hover:bg-gray-100 transition-colors cursor-pointer" title="发送文件">
-        📎
+      <button
+        class="flex flex-col items-center px-2 py-1 rounded hover:bg-gray-100 transition-colors text-gray-600 disabled:opacity-50"
+        title="拍照"
+        :disabled="sending"
+        @click="showPhotoCapture = true"
+      >
+        <span class="text-lg leading-none mb-0.5">📷</span>
+        <span class="text-xs leading-tight">拍照</span>
+      </button>
+      <label class="flex flex-col items-center px-2 py-1 rounded hover:bg-gray-100 transition-colors cursor-pointer text-gray-600" title="发送文件">
+        <span class="text-lg leading-none mb-0.5">📎</span>
+        <span class="text-xs leading-tight">文件</span>
         <input type="file" class="hidden" @change="onFileChange($event, 5)" />
       </label>
-      <label class="text-lg px-2 py-0.5 rounded hover:bg-gray-100 transition-colors cursor-pointer" title="发送视频">
-        🎬
-        <input type="file" accept="video/*" class="hidden" @change="onFileChange($event, 4)" />
-      </label>
-      <label class="text-lg px-2 py-0.5 rounded hover:bg-gray-100 transition-colors cursor-pointer" title="发送音频">
-        🎵
-        <input type="file" accept="audio/*" class="hidden" @change="onFileChange($event, 3)" />
-      </label>
+      <VoiceRecordButton
+        :disabled="sending"
+        @recorded="onVoiceRecorded"
+        @error="onRecordError"
+      />
+      <button
+        class="flex flex-col items-center px-2 py-1 rounded hover:bg-gray-100 transition-colors text-gray-600 disabled:opacity-50"
+        title="录制视频"
+        :disabled="sending"
+        @click="showVideoRecorder = true"
+      >
+        <span class="text-lg leading-none mb-0.5">📹</span>
+        <span class="text-xs leading-tight">录制视频</span>
+      </button>
     </div>
 
     <!-- Input row -->
@@ -152,5 +194,19 @@ function onFileChange(event: Event, type: MsgType) {
         发送
       </button>
     </div>
+
+    <!-- Video recorder modal -->
+    <VideoRecorderModal
+      :visible="showVideoRecorder"
+      @close="showVideoRecorder = false"
+      @recorded="onVideoRecorded"
+    />
+
+    <!-- Photo capture modal -->
+    <PhotoCaptureModal
+      :visible="showPhotoCapture"
+      @close="showPhotoCapture = false"
+      @captured="onPhotoCaptured"
+    />
   </div>
 </template>

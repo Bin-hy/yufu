@@ -91,6 +91,8 @@ fn mime_matches(extension_mime: &Mime, detected_mime: &Mime) -> bool {
         (ext_type, ext_subtype, detected_type, detected_subtype),
         (mime::AUDIO, "wave", mime::AUDIO, "wav")
             | (mime::AUDIO, "x-wav", mime::AUDIO, "wav")
+            | (mime::AUDIO, "wav", mime::AUDIO, "x-wav")
+            | (mime::AUDIO, "wav", mime::AUDIO, "wave")
             | (mime::AUDIO, "ogg", mime::APPLICATION, "ogg")
             | (mime::VIDEO, "ogg", mime::APPLICATION, "ogg")
             | (mime::AUDIO, "mp4", mime::APPLICATION, "mp4")
@@ -102,14 +104,25 @@ fn mime_matches(extension_mime: &Mime, detected_mime: &Mime) -> bool {
 fn resolve_upload_type(
     file_name: Option<&str>,
     data: &[u8],
+    upload_content_type: Option<&str>,
 ) -> Result<(MediaKind, String), String> {
     let magic =
         detect_magic_mime(data).ok_or_else(|| "unsupported or unknown file type".to_string())?;
     let ext = file_name_extension(file_name);
 
+    // Determine the "intended" kind from the multipart Content-Type header.
+    // This is critical for audio-only WebM files: both `infer` and `mime_guess`
+    // return video/webm for all .webm files regardless of whether they contain
+    // only an audio track. The browser's MediaRecorder sets audio/webm for
+    // voice recordings, so we use that to pick the correct storage folder.
+    let upload_kind = upload_content_type
+        .and_then(|ct| ct.parse::<Mime>().ok())
+        .and_then(|m| MediaKind::from_mime(&m));
+
     if let Some(ext) = ext {
         let ext_mime = extension_mime(&ext);
-        let ext_kind = MediaKind::from_mime(&ext_mime)
+        let ext_kind = upload_kind
+            .or_else(|| MediaKind::from_mime(&ext_mime))
             .ok_or_else(|| format!("unsupported file extension MIME type: {ext_mime}"))?;
         if !ext_kind.is_allowed() {
             return Err(format!("unsupported file extension MIME type: {ext_mime}"));
@@ -121,8 +134,8 @@ fn resolve_upload_type(
             ));
         }
 
-        let detected_kind = magic.kind.unwrap_or(ext_kind);
-        if detected_kind != ext_kind {
+        let detected_kind = upload_kind.or(magic.kind).unwrap_or(ext_kind);
+        if upload_kind.is_none() && detected_kind != ext_kind {
             return Err(format!(
                 "file extension MIME type {ext_mime} does not match detected content type {}",
                 magic.mime
@@ -132,8 +145,8 @@ fn resolve_upload_type(
         return Ok((ext_kind, ext));
     }
 
-    let kind = magic
-        .kind
+    let kind = upload_kind
+        .or(magic.kind)
         .ok_or_else(|| "file extension is required for container formats".to_string())?;
     Ok((kind, magic.ext))
 }
@@ -145,9 +158,14 @@ pub async fn upload_file(
     match multipart.next_field().await {
         Ok(Some(field)) => {
             let file_name = field.file_name().map(str::to_string);
+            let content_type = field.content_type().map(|ct| ct.to_string());
             match field.bytes().await {
                 Ok(data) => {
-                    let (kind, ext) = match resolve_upload_type(file_name.as_deref(), &data) {
+                    let (kind, ext) = match resolve_upload_type(
+                        file_name.as_deref(),
+                        &data,
+                        content_type.as_deref(),
+                    ) {
                         Ok(v) => v,
                         Err(e) => {
                             return super::bad_request::<UploadFileResponse>(e);
@@ -226,7 +244,7 @@ mod tests {
     #[test]
     fn detects_image_with_matching_extension() {
         let data = [0xff, 0xd8, 0xff, 0xdb];
-        let (kind, ext) = resolve_upload_type(Some("avatar.jpg"), &data).unwrap();
+        let (kind, ext) = resolve_upload_type(Some("avatar.jpg"), &data, None).unwrap();
         assert_eq!(kind, MediaKind::Image);
         assert_eq!(ext, "jpg");
     }
@@ -234,14 +252,14 @@ mod tests {
     #[test]
     fn rejects_extension_magic_mismatch() {
         let data = [0xff, 0xd8, 0xff, 0xdb];
-        let err = resolve_upload_type(Some("voice.mp3"), &data).unwrap_err();
+        let err = resolve_upload_type(Some("voice.mp3"), &data, None).unwrap_err();
         assert!(err.contains("does not match"));
     }
 
     #[test]
     fn uses_magic_extension_when_file_name_has_no_extension() {
         let data = b"\x89PNG\r\n\x1a\nrest";
-        let (kind, ext) = resolve_upload_type(Some("avatar"), data).unwrap();
+        let (kind, ext) = resolve_upload_type(Some("avatar"), data, None).unwrap();
         assert_eq!(kind, MediaKind::Image);
         assert_eq!(ext, "png");
     }
@@ -249,8 +267,18 @@ mod tests {
     #[test]
     fn uses_extension_kind_for_mp4_container() {
         let data = b"\0\0\0\x18ftypmp42";
-        let (kind, ext) = resolve_upload_type(Some("clip.mp4"), data).unwrap();
+        let (kind, ext) = resolve_upload_type(Some("clip.mp4"), data, None).unwrap();
         assert_eq!(kind, MediaKind::Video);
         assert_eq!(ext, "mp4");
+    }
+
+    #[test]
+    fn audio_webm_stored_as_audio_when_upload_content_type_is_audio() {
+        // Minimal WebM/EBML header: 0x1A 0x45 0xDF 0xA3
+        let data = [0x1A, 0x45, 0xDF, 0xA3, 0x00, 0x00, 0x00, 0x00];
+        let (kind, ext) =
+            resolve_upload_type(Some("voice.webm"), &data, Some("audio/webm;codecs=opus")).unwrap();
+        assert_eq!(kind, MediaKind::Audio);
+        assert_eq!(ext, "webm");
     }
 }

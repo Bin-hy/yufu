@@ -113,7 +113,21 @@ pub fn sanitize_relative_storage_path(root_dir: &str, relative_path: &str) -> Op
 }
 
 pub fn guess_content_type(path: &str) -> mime_guess::Mime {
-    mime_guess::from_path(path).first_or_octet_stream()
+    let guessed = mime_guess::from_path(path).first_or_octet_stream();
+
+    // Audio-only WebM files: mime_guess maps .webm → video/webm, but if the
+    // file is stored under the audio/ folder we know it's really audio.
+    if guessed.subtype().as_str() == "webm" && guessed.type_() == mime_guess::mime::VIDEO {
+        // Check if the file is in the audio directory
+        let normalized = path.replace('\\', "/");
+        if normalized.contains("/audio/") {
+            if let Ok(audio_webm) = "audio/webm".parse::<mime_guess::Mime>() {
+                return audio_webm;
+            }
+        }
+    }
+
+    guessed
 }
 
 #[cfg(test)]

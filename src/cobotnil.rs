@@ -13,7 +13,8 @@ mod utils;
 
 const COBOTUSR_NAME: &str = "cobotusr";
 const COBOTSRV_NAME: &str = "cobotsrv";
-const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
+// const MQTT_BROKER_ADDR: &str = "0.0.0.0:1883";
+const MQTT_BROKER_ADDR: &str = "127.0.0.1:1883";
 
 #[derive(Parser)]
 #[command(name = "cobotnil", version)]
@@ -68,7 +69,6 @@ async fn main() -> Result<()> {
     let broker_addr = MQTT_BROKER_ADDR.parse()?;
     thread::spawn(move || broker::up_mqtt_broker(broker_addr));
     broker::wait_for_port_availabilty(broker_addr).await;
-
     // Scan config directory for cobotlet configs (files not named cobotusr/cobotsrv)
     let mut cobotlet_nodes: Vec<cobotsrv::config::Node> = Vec::new();
     let mut dir_entries = tokio::fs::read_dir(&args.config).await?;

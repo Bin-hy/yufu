@@ -35,7 +35,14 @@ client_secret = "dev-cobotsrv-secret-change-me"
 [[oidc.bootstrap_clients]]
 client_id = "cobotimx"
 name = "CoBotrix IM (dev)"
-redirect_uris = ["http://localhost:5174/oauth/callback"]
+redirect_uris = ["http://localhost:5174/oauth/callback", "http://localhost:5174/login"]
 allowed_scopes = ["openid", "profile", "email"]
 grant_types = ["authorization_code", "refresh_token"]
 public_client = true
+
+# CORS origins 列表
+origins = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://example.com"
+]
