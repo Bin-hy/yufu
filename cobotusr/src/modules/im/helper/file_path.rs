@@ -120,10 +120,10 @@ pub fn guess_content_type(path: &str) -> mime_guess::Mime {
     if guessed.subtype().as_str() == "webm" && guessed.type_() == mime_guess::mime::VIDEO {
         // Check if the file is in the audio directory
         let normalized = path.replace('\\', "/");
-        if normalized.contains("/audio/") {
-            if let Ok(audio_webm) = "audio/webm".parse::<mime_guess::Mime>() {
-                return audio_webm;
-            }
+        if normalized.contains("/audio/")
+            && let Ok(audio_webm) = "audio/webm".parse::<mime_guess::Mime>()
+        {
+            return audio_webm;
         }
     }
 
