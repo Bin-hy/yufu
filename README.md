@@ -823,6 +823,59 @@ POST /api/v1/enforce
 → { "allow": true, "reason": "matched permission #17" }
 ```
 
+### 部署注意事项:SPA public client 与后端 machine client 拆分
+
+> 说明:本小节以当前代码的实际命名编写 — **cobotusr** 是 IdP/OIDC 提供方,**cobotsrv** 是接入 OIDC 的设备管理服务(本文档其余章节沿用旧命名)。
+
+**背景**:SPA 前端是 **public client**(授权码 + PKCE S256,secret 不进浏览器 bundle),而启动时的权限同步用 **client_credentials** 授权,必须由 **confidential client**(持 secret)认证。OAuth 规定一个 client 不能兼任两者 — public client 的 secret 校验恒失败,`client_credentials` 对它必然 401。因此拆成两个 client:
+
+| client | 类型 | grant | 用途 |
+|--------|------|-------|------|
+| `cobotsrv` | public | `authorization_code` + `refresh_token` | SPA 登录/token 交换(PKCE) |
+| `cobotsrv-sync` | confidential | `client_credentials` | 后端启动时同步权限(机器间调用) |
+
+**cobotusr 侧配置**(`conf/cobotrix/cobotusr.toml` / `conf/cobotusr.example.toml`):
+
+```toml
+[[oidc.bootstrap_clients]]
+client_id = "cobotsrv"                       # SPA:public,无 secret
+name = "CoBotrix Device Management Server"
+redirect_uris = ["http://localhost:5174/oauth/callback"]
+allowed_scopes = ["openid", "profile", "email"]
+grant_types = ["authorization_code", "refresh_token"]
+public_client = true
+
+[[oidc.bootstrap_clients]]                   # 后端机器间调用:confidential
+client_id = "cobotsrv-sync"
+name = "CoBotrix Device Management Server (machine)"
+redirect_uris = []
+allowed_scopes = ["openid", "profile", "email"]
+grant_types = ["client_credentials"]
+client_secret = "<sync-secret>"
+```
+
+**cobotsrv 侧配置**(`conf/cobotrix/cobotsrv.toml`):
+
+```toml
+[auth]
+client_id = "cobotsrv"                       # SPA client,也作为 PDP app_key
+sync_client_id = "cobotsrv-sync"             # 专用 machine client
+sync_client_secret = "<sync-secret>"         # 与上方 bootstrap secret 一致
+```
+
+权限同步时,cobotsrv 用 `sync_client_*` 认证,并声明 `app_key = "cobotsrv"`(`POST /api/v1/application/sync-permissions` 新增的 `app_key` 字段),使权限仍注册在 SPA client 的 application 下 — PDP/`require_perm!` 的归属不变。
+
+**升级现有部署步骤**:
+
+1. 按上表更新 `cobotusr.toml` 的 `[[oidc.bootstrap_clients]]`(SPA client 去掉 `client_credentials` 与 `client_secret`;新增 `cobotsrv-sync` 段)。
+   - ⚠️ bootstrap 启动时会校验配置:`public_client = true` 且 grant_types 含 `client_credentials` 的组合会**拒绝启动**(快速失败,防止再配出必然 401 的组合)。
+2. 更新 `cobotsrv.toml`:`[auth]` 增加 `sync_client_id` / `sync_client_secret`。
+3. 先启动 cobotusr,再启动 cobotsrv;检查日志:
+   - `OIDC bootstrap client upgraded` — 旧 client 自动 public 化(无需手动 SQL)
+   - `permissions synced to cobotusr` — 权限同步成功
+
+**自动迁移**:bootstrap 对已存在的 client 不会覆盖 secret,但若配置标为 `public_client = true` 会自动升级该 client 并清空其 secret hash(`public_upgrade`)。因此从旧版升级**不需要**手动执行 `UPDATE oauth_client SET public_client = true`。旧部署若暂未配置 `sync_client_*`,cobotsrv 会回退使用 `client_id`/`client_secret` 并在日志中告警(仅在 SPA client 仍为 confidential 时可用)。
+
 ### 新增管理 API 端点
 
 | 方法 | 路径 | 认证 | 作用 |

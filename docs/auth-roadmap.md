@@ -158,7 +158,13 @@ user_permission   (user_id, permission_id, allow) PK
   ABAC 风格 explicit allow/deny override
 ```
 
-`init_oidc_bootstrap_clients` 自动 upsert：每注册一个 OIDC client，同时建一个 `app_key = client_id` 的 application 行（即使 oauth_client 已存在也补建，方便升级）。
+`init_oidc_bootstrap_clients` 自动 upsert：每注册一个 OIDC client，同时建一个 `app_key = client_id` 的 application 行（即使 oauth_client 已存在也补建，方便升级）。若配置把已存在的 confidential client 标为 `public_client = true`，启动时自动升级（public_upgrade）并清空其 secret hash——因此升级部署**无需手动 SQL**。
+
+> **public client 与 client_credentials 互斥**：public client（PKCE、无 secret）无法通过 secret 校验，`client_credentials` 授权对它必然失败。bootstrap 启动时若检测到 `public_client = true` 且 grant_types 含 `client_credentials` 会直接报错拒绝启动。需要后端机器间调用（如 cobotsrv 启动时同步权限）的服务应拆两个 client：
+> - SPA 用 public client（授权码 + PKCE）
+> - 后端用独立 confidential machine client（如 `cobotsrv-sync`，仅 `client_credentials`）
+>
+> `POST /api/v1/application/sync-permissions` 支持 `app_key` 字段：machine client 认证后把权限注册到 `app_key` 指定的 application（须已存在），实现"认证 client ≠ 权限归属 client"的解耦（cobotsrv 传 `app_key = "cobotsrv"`）。
 
 ### 2.2 access_token 携带 roles + permissions（粗粒度）
 

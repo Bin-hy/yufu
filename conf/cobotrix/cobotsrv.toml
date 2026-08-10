@@ -24,7 +24,12 @@ connect_timeout = 30
 # client_secret 须与 conf/cobotrix/cobotusr.toml [oidc.bootstrap_clients].client_secret 一致。
 [auth]
 client_id = "cobotsrv"
-client_secret = "dev-cobotsrv-secret-change-me"
+# 仅供旧版回退;新版权限同步改用下方 machine client,此处可留空。
+# client_secret = ""
+# 专用 machine client(confidential),与 cobotusr 的 cobotsrv-sync
+# bootstrap client 保持一致;用于启动时 client_credentials 权限同步。
+sync_client_id = "cobotsrv-sync"
+sync_client_secret = "dev-cobotsrv-sync-secret-change-me"
 jwks_url = "http://127.0.0.1:4000/.well-known/jwks.json"
 expected_audience = "cobotsrv"
 require_permissions = true

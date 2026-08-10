@@ -8,8 +8,10 @@ listen = "[::]:4001"
 # JWT 验签配置。cobotsrv 作为 cobotusr 的 OIDC client，启动时从 cobotusr 的 JWKS
 # 端点拉取公钥用于验签 Bearer token。无需共享密钥。
 [auth]
-# client_id = "cobotsrv"           # OIDC client_id，对应 cobotusr 的 bootstrap_clients
-# client_secret = ""               # OIDC client_secret，用于 refresh_token + permission sync
+# client_id = "cobotsrv"           # OIDC client_id，对应 cobotusr 的 bootstrap_clients（SPA public client）
+# client_secret = ""               # 旧版回退用；新版权限同步走下方 sync_client_*，可留空
+# sync_client_id = "cobotsrv-sync" # 专用 confidential machine client（client_credentials 权限同步）
+# sync_client_secret = ""          # 与 cobotusr 的 cobotsrv-sync bootstrap secret 一致
 # jwks_url = "http://127.0.0.1:4000/.well-known/jwks.json"  # 或环境变量 COBOTSRV_JWKS_URL
 # jwks_refresh_secs = 300
 # expected_audience = "cobotsrv"  # 只接受 aud=cobotsrv 的 token

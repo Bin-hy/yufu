@@ -493,8 +493,11 @@ async fn static_handler(_: Uri) -> impl IntoResponse {
 }
 
 /// Sync required permissions to cobotusr at startup.
-/// POSTs to cobotusr's `/api/v1/application/sync-permissions` with
-/// client_id + client_secret (idempotent upsert).
+/// POSTs to cobotusr's `/api/v1/application/sync-permissions` (idempotent
+/// upsert). Authenticates with the dedicated confidential machine client
+/// (`sync_client_id`/`sync_client_secret`) via the client_credentials grant,
+/// while declaring `app_key = client_id` so permissions stay registered under
+/// the SPA client's application — the app PDP/`require_perm!` checks.
 async fn sync_permissions(cfg: &Config) {
     let perms = &cfg.permissions;
     if perms.is_empty() {
@@ -503,11 +506,21 @@ async fn sync_permissions(cfg: &Config) {
 
     let cobotusr_base = cfg.auth.cobotusr_base_url();
 
+    let (sync_client_id, sync_client_secret) = cfg.auth.sync_credentials();
+    if cfg.auth.sync_client_id.is_empty() || cfg.auth.sync_client_secret.is_empty() {
+        tracing::warn!(
+            "[auth] sync_client_id/sync_client_secret not configured — falling back to \
+             legacy client_id/client_secret; this only succeeds while the SPA client is \
+             still confidential (not public_client)",
+        );
+    }
+
     let client = reqwest::Client::new();
 
     let body = serde_json::json!({
-        "client_id": cfg.auth.client_id,
-        "client_secret": cfg.auth.client_secret,
+        "client_id": sync_client_id,
+        "client_secret": sync_client_secret,
+        "app_key": cfg.auth.client_id,
         "permissions": perms.iter().map(|p| serde_json::json!({
             "name": p.name,
             "action": p.action,

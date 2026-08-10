@@ -58,5 +58,7 @@ jobs:
 
             - name: Cargo Test (only on Ubuntu)
               if: matrix.os == 'ubuntu-latest'
-              run: cargo test --workspace --all-targets --all-features
+              # 限制并发:testcontainers(Postgres) 在完全并发下会端口冲突/资源耗尽 flake,
+              # 与 CLAUDE.md「Run all tests (reduced concurrency)」保持一致。
+              run: cargo test --workspace --all-targets --all-features -- --test-threads=4
 

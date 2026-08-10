@@ -23,16 +23,24 @@ connect_timeout = 30
 [oidc]
 # Auto-register cobotsrv as an OIDC client on first start so the dev frontend
 # can run Authorization Code + PKCE without manual registration.
-# Stable secret is OK here because this file is only used by the dev cluster.
 [[oidc.bootstrap_clients]]
 client_id = "cobotsrv"
 name = "CoBotrix Device Management Server (dev)"
 redirect_uris = ["http://localhost:5174/oauth/callback", "http://localhost:4001/oauth/callback"]
 allowed_scopes = ["openid", "profile", "email"]
-grant_types = ["authorization_code", "refresh_token", "client_credentials"]
-client_secret = "dev-cobotsrv-secret-change-me"
-# SPA 用 PKCE (S256) 认证,不传 secret;该 secret 仅供后端 client_credentials。
+grant_types = ["authorization_code", "refresh_token"]
+# SPA 用 PKCE (S256) 认证,不传 secret。权限同步由下方 cobotsrv-sync machine client 完成。
 public_client = true
+
+# cobotsrv 后端专用 machine client(confidential):仅用于 client_credentials
+# 权限同步,secret 与 conf/cobotnil/cobotsrv.toml [auth].sync_client_secret 一致。
+[[oidc.bootstrap_clients]]
+client_id = "cobotsrv-sync"
+name = "CoBotrix Device Management Server (dev, machine)"
+redirect_uris = []
+allowed_scopes = ["openid", "profile", "email"]
+grant_types = ["client_credentials"]
+client_secret = "dev-cobotsrv-sync-secret-change-me"
 
 [[oidc.bootstrap_clients]]
 client_id = "cobotimx"

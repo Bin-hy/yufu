@@ -354,14 +354,26 @@ fn default_log_level() -> String {
 /// roadmap.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Auth {
-    /// OIDC client_id registered at cobotusr. Used for client_credentials grant
-    /// when syncing permissions at startup. Default: `"cobotsrv"`.
+    /// OIDC client_id of the SPA client registered at cobotusr (public client,
+    /// PKCE). Also identifies this service's application in PDP enforce calls.
+    /// Default: `"cobotsrv"`.
     #[serde(default = "default_client_id")]
     pub client_id: String,
-    /// OIDC client_secret matching cobotusr's bootstrap client config.
-    /// Required for client_credentials grant.
+    /// OIDC client_secret matching the SPA client. Legacy: was used for the
+    /// client_credentials grant before the machine client existed. Kept for
+    /// backward compatibility only — new deployments should configure
+    /// `sync_client_id`/`sync_client_secret` and leave this empty.
     #[serde(default)]
     pub client_secret: String,
+    /// Dedicated confidential machine client (e.g. `cobotsrv-sync`) used ONLY
+    /// for the client_credentials grant when syncing permissions at startup.
+    /// Must NOT be the public SPA client — public clients cannot authenticate
+    /// with a secret. Empty => fall back to `client_id`/`client_secret`.
+    #[serde(default)]
+    pub sync_client_id: String,
+    /// Client secret of the machine client above.
+    #[serde(default)]
+    pub sync_client_secret: String,
     /// JWKS endpoint URL. Default: `{cobotusr_base}/.well-known/jwks.json`.
     #[serde(default = "default_jwks_url")]
     pub jwks_url: String,
@@ -387,6 +399,19 @@ impl Auth {
             .trim_end_matches("/.well-known/jwks.json")
             .to_string()
     }
+
+    /// Credentials for the client_credentials grant (startup permission sync).
+    /// Prefers the dedicated confidential machine client; falls back to the
+    /// legacy `client_id`/`client_secret` for backward compatibility (callers
+    /// should warn on fallback, since the SPA client must not be public in
+    /// that case).
+    pub fn sync_credentials(&self) -> (&str, &str) {
+        if !self.sync_client_id.is_empty() && !self.sync_client_secret.is_empty() {
+            (&self.sync_client_id, &self.sync_client_secret)
+        } else {
+            (&self.client_id, &self.client_secret)
+        }
+    }
 }
 
 impl Default for Auth {
@@ -394,6 +419,8 @@ impl Default for Auth {
         Self {
             client_id: default_client_id(),
             client_secret: String::new(),
+            sync_client_id: String::new(),
+            sync_client_secret: String::new(),
             jwks_url: default_jwks_url(),
             expected_audience: default_expected_audience(),
             jwks_refresh_secs: default_jwks_refresh_secs(),
@@ -454,4 +481,43 @@ fn default_db_max_connections() -> u32 {
 
 fn default_db_connect_timeout() -> u64 {
     30
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_credentials_prefers_machine_client_when_fully_configured() {
+        let auth = Auth {
+            client_id: "cobotsrv".to_string(),
+            client_secret: "legacy-secret".to_string(),
+            sync_client_id: "cobotsrv-sync".to_string(),
+            sync_client_secret: "machine-secret".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(auth.sync_credentials(), ("cobotsrv-sync", "machine-secret"));
+    }
+
+    #[test]
+    fn sync_credentials_falls_back_to_legacy_when_machine_unconfigured() {
+        let auth = Auth {
+            client_id: "cobotsrv".to_string(),
+            client_secret: "legacy-secret".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(auth.sync_credentials(), ("cobotsrv", "legacy-secret"));
+    }
+
+    #[test]
+    fn sync_credentials_falls_back_when_machine_half_configured() {
+        // 只配了 id 忘了 secret —— 视为未配置,回退 legacy 而不是用半套凭证。
+        let auth = Auth {
+            client_id: "cobotsrv".to_string(),
+            client_secret: "legacy-secret".to_string(),
+            sync_client_id: "cobotsrv-sync".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(auth.sync_credentials(), ("cobotsrv", "legacy-secret"));
+    }
 }

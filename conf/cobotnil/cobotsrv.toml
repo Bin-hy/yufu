@@ -14,7 +14,9 @@ connect_timeout = 30
 # so the dev cluster works without explicit jwks_url config.
 [auth]
 client_id = "cobotsrv"
-client_secret = "dev-cobotsrv-secret-change-me"
+# client_secret 仅旧版回退用;新版权限同步走下方 machine client。
+sync_client_id = "cobotsrv-sync"
+sync_client_secret = "dev-cobotsrv-sync-secret-change-me"
 
 # Permissions cobotsrv requires — automatically synced to cobotusr at startup.
 # Admin assigns these to roles in cobotusr's /permissions/assign page.
