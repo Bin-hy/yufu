@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useNicknames } from "@/composables/useNicknames";
 import { messageApi } from "@/api/messages";
@@ -18,6 +18,57 @@ const mediaPath = computed(() => {
   const extra = props.message.extra as Record<string, unknown> | null;
   if (!extra?.storage_path) return null;
   return fileApi.getUrl(String(extra.storage_path));
+});
+
+const audioDuration = computed(() => {
+  const extra = props.message.extra as Record<string, unknown> | null;
+  const d = extra?.duration;
+  if (typeof d === "number" && d > 0) return Math.round(d);
+  return 0;
+});
+
+const audioRef = ref<HTMLAudioElement | null>(null);
+const isPlaying = ref(false);
+const previewImage = ref<string | null>(null);
+
+function togglePlay() {
+  const audio = audioRef.value;
+  if (!audio) return;
+  if (audio.paused) {
+    audio.play().catch(() => {});
+    isPlaying.value = true;
+  } else {
+    audio.pause();
+    isPlaying.value = false;
+  }
+}
+
+function onAudioEnded() {
+  isPlaying.value = false;
+}
+
+function openPreview(url: string) {
+  previewImage.value = url;
+}
+
+function closePreview() {
+  previewImage.value = null;
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") closePreview();
+}
+
+watch(previewImage, (v) => {
+  if (v) window.addEventListener("keydown", onKeydown);
+  else window.removeEventListener("keydown", onKeydown);
+});
+
+// Width proportional to duration (min 60px, max 200px)
+const bubbleMinWidth = computed(() => {
+  if (audioDuration.value <= 0) return "60px";
+  const w = Math.min(200, Math.max(60, audioDuration.value * 12 + 40));
+  return `${w}px`;
 });
 
 async function handleRecall() {
@@ -68,7 +119,12 @@ async function handleDelete() {
 
         <!-- Image -->
         <div v-else-if="message.msg_type === 2 && mediaPath">
-          <img :src="mediaPath" class="max-w-60 max-h-60 rounded-lg object-cover" loading="lazy" />
+          <img
+            :src="mediaPath"
+            class="max-w-60 max-h-60 rounded-lg object-cover cursor-pointer hover:opacity-90 transition-opacity"
+            loading="lazy"
+            @click="openPreview(mediaPath)"
+          />
           <p v-if="message.content" class="text-xs mt-1 opacity-80">{{ message.content }}</p>
         </div>
 
@@ -78,11 +134,42 @@ async function handleDelete() {
           <p v-if="message.content" class="text-xs mt-1 opacity-80">{{ message.content }}</p>
         </div>
 
-        <!-- Audio -->
-        <div v-else-if="message.msg_type === 3 && mediaPath">
-          <audio :src="mediaPath" controls class="max-w-48" />
-          <p v-if="message.content" class="text-xs mt-1 opacity-80">{{ message.content }}</p>
+        <!-- Audio (WeChat-style: icon + seconds, tap to play/pause) -->
+        <div
+          v-else-if="message.msg_type === 3 && mediaPath"
+          class="flex items-center gap-2 py-1 cursor-pointer select-none"
+          :style="{ minWidth: bubbleMinWidth }"
+          @click="togglePlay"
+        >
+          <!-- Hidden native audio element -->
+          <audio ref="audioRef" :src="mediaPath" class="hidden" @ended="onAudioEnded" />
+
+          <!-- Speaker icon with playing animation -->
+          <span class="text-lg flex-shrink-0" :class="{ 'animate-pulse': isPlaying }">
+            🔊
+          </span>
+
+          <!-- Duration in seconds -->
+          <span
+            class="text-xs whitespace-nowrap flex-shrink-0"
+            :class="isMine ? 'text-blue-100' : 'text-gray-500'"
+          >
+            {{ audioDuration || '--' }}''
+          </span>
+
+          <!-- Playing wave bars -->
+          <span v-if="isPlaying" class="flex items-center gap-0.5 ml-1">
+            <span
+              v-for="i in 3"
+              :key="i"
+              class="wave-bar w-1 rounded-full inline-block"
+              :class="isMine ? 'bg-blue-200' : 'bg-blue-400'"
+              :style="{ animationDelay: `${(i - 1) * 0.15}s` }"
+            />
+          </span>
         </div>
+
+        <p v-if="message.msg_type === 3 && message.content" class="text-xs mt-1 opacity-80">{{ message.content }}</p>
 
         <!-- File -->
         <div v-else-if="message.msg_type === 5">
@@ -115,4 +202,42 @@ async function handleDelete() {
       </div>
     </div>
   </div>
+
+  <!-- Image lightbox -->
+  <Teleport to="body">
+    <div
+      v-if="previewImage"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 cursor-pointer"
+      @click="closePreview"
+    >
+      <img
+        :src="previewImage"
+        class="max-w-[95vw] max-h-[95vh] object-contain rounded-lg"
+        @click.stop
+      />
+      <button
+        class="absolute top-4 right-4 text-white text-3xl opacity-60 hover:opacity-100 transition-opacity"
+        @click="closePreview"
+      >
+        ✕
+      </button>
+    </div>
+  </Teleport>
 </template>
+
+<style scoped>
+.wave-bar {
+  height: 10px;
+  animation: voice-wave 0.6s ease-in-out infinite;
+}
+
+@keyframes voice-wave {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 14px;
+  }
+}
+</style>

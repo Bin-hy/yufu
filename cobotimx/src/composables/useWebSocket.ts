@@ -142,6 +142,18 @@ export function useWebSocket() {
     }
   }
 
+  function previewForType(msgType: unknown): string {
+    const t = msgType as number;
+    switch (t) {
+      case 2: return "[图片]";
+      case 3: return "[语音]";
+      case 4: return "[视频]";
+      case 5: return "[文件]";
+      case 6: return "[系统消息]";
+      default: return "[媒体]";
+    }
+  }
+
   function handleMessage(env: WsServerEnvelope) {
     const chat = useChatStore();
     const auth = useAuthStore();
@@ -152,7 +164,7 @@ export function useWebSocket() {
       case "chat.push": {
         const p = data as unknown as WsChatPushPayload;
         if (p.from === auth.userId) break; // already added locally on send
-        const preview = p.content ?? "[媒体]";
+        const preview = p.content ?? previewForType(p.msg_type);
         chat.upsertConversationFromPush(p.conversation_id, preview, true);
         if (chat.activeConversationId === p.conversation_id) {
           chat.addMessage({
@@ -172,7 +184,7 @@ export function useWebSocket() {
       case "group.push": {
         const p = data as unknown as WsGroupChatPushPayload;
         if (p.from === auth.userId) break; // already added locally on send
-        const preview = p.content ?? "[媒体]";
+        const preview = p.content ?? previewForType(p.msg_type);
         chat.upsertConversationFromPush(p.conversation_id, preview, true);
         if (chat.activeConversationId === p.conversation_id) {
           chat.addMessage({
