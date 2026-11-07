@@ -4,5 +4,6 @@ mod mcp;
 mod oidc;
 mod recording;
 mod role;
+mod security;
 mod sync_permissions;
 mod user;

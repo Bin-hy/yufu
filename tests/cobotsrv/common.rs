@@ -16,6 +16,50 @@ use tokio::sync::oneshot;
 
 use auth::claims::AccessTokenClaims;
 
+/// Isolated HTTP target; counts physical requests so duplicate dispatch is observable.
+pub struct SecurityDevice {
+    pub base: String,
+    requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    _stop: oneshot::Sender<()>,
+}
+
+impl SecurityDevice {
+    pub async fn start() -> Self {
+        let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = requests.clone();
+        let app = Router::new().route(
+            "/execute",
+            axum::routing::post(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Json(json!({"accepted": true}))
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (stop, stopped) = oneshot::channel();
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = stopped.await;
+                })
+                .await
+                .unwrap();
+        });
+        Self {
+            base,
+            requests,
+            _stop: stop,
+        }
+    }
+
+    pub fn request_count(&self) -> usize {
+        self.requests.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 pub struct CobotsrvTestCtx {
     /// Keep Postgres container alive for the test duration.
     pub _db: ContainerAsync<GenericImage>,

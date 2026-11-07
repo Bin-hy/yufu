@@ -68,6 +68,7 @@
 pub mod claims;
 mod claims_extractor;
 pub mod jwks;
+pub mod security;
 pub mod token_manager;
 
 use crate::jwks::JwksClient;
