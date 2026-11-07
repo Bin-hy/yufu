@@ -16,6 +16,45 @@ use tokio::sync::oneshot;
 
 use auth::claims::AccessTokenClaims;
 
+/// Independently controllable wall and monotonic clocks for deadline/fault scenarios.
+pub struct SecurityTestClock {
+    reading: std::sync::Mutex<auth::security::budget::ClockReading>,
+}
+
+impl SecurityTestClock {
+    pub fn new(unix_millis: u64) -> Self {
+        Self {
+            reading: std::sync::Mutex::new(auth::security::budget::ClockReading {
+                monotonic: Duration::ZERO,
+                unix_millis,
+                synchronized: true,
+            }),
+        }
+    }
+
+    pub fn advance(&self, millis: u64) {
+        let mut reading = self.reading.lock().unwrap();
+        reading.monotonic += Duration::from_millis(millis);
+        reading.unix_millis = reading.unix_millis.checked_add(millis).unwrap();
+    }
+
+    pub fn set_wall_time(&self, unix_millis: u64) {
+        self.reading.lock().unwrap().unix_millis = unix_millis;
+    }
+
+    pub fn set_synchronized(&self, synchronized: bool) {
+        self.reading.lock().unwrap().synchronized = synchronized;
+    }
+}
+
+impl auth::security::budget::Clock for SecurityTestClock {
+    fn now(
+        &self,
+    ) -> Result<auth::security::budget::ClockReading, auth::security::error::SecurityError> {
+        Ok(*self.reading.lock().unwrap())
+    }
+}
+
 /// Isolated HTTP target; counts physical requests so duplicate dispatch is observable.
 pub struct SecurityDevice {
     pub base: String,

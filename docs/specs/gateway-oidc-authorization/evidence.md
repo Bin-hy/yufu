@@ -13,7 +13,8 @@
 
 - `cargo test --test mod --no-run --locked`：退出码0，集成测试入口编译成功。
 - `cargo test --test mod security_t02 --locked -- --nocapture`：首次编译暴露 SeaORM 2 的原始 Statement 接口差异，已改用 execute_raw/query_one_raw；重跑退出码0，2 passed、0 failed、0 ignored。
-- 已实际验证两个独立 PostgreSQL 容器的数据隔离，以及模拟设备的实际请求计数。可注入时钟夹具将在预算接口建立时补齐；T02 保持进行中，不提前标完整完成。
+- 已实际验证两个独立 PostgreSQL 容器的数据隔离，以及模拟设备的实际请求计数。
+- 补齐可注入时钟夹具后再次执行相同命令：退出码0，3 passed、0 failed、0 ignored、48 filtered out。新增用例用同一夹具验证安全预算与授权新鲜期，包含时间回拨及同步状态失败。T02 已完成。
 
 ## T03 身份契约
 
@@ -23,6 +24,17 @@
 - `cargo clippy -p auth --lib --tests --locked -- -D warnings`：退出码0。
 - `cargo fmt --all -- --check`、`git diff --check`：退出码0。
 - T03 已完成。共享契约当前尚未替换业务路由，不能据此宣称任何现有鉴权漏洞已修复。
+
+## T04–T06 资源、预算与授权有效期
+
+- 先新增T04–T06行为测试，再运行 `cargo test -p auth --lib security_t0 --locked`：首轮退出码101，缺少待实现的类型，日志保存在本轮临时测试日志中；实现后退出码0，14 passed、0 failed、0 ignored、1 filtered out。
+- T04：ResourceRef 按资源种类要求完整字段，反序列化执行相同校验；规范标识使用resource:v1结构化编码，网关/设备中的分隔符不能混淆目标。授权范围必须显式携带应用和资源选择器，空授权集合是deny-all。
+- T05：新增可信时钟接口和SecurityBudget。排队及子调用共享原始单调截止期；外部剩余时间只能缩短预算；实际异步等待超时测试使用暂停的Tokio时钟，无需等待真实2秒。
+- T06：源头新鲜期最多5秒，与凭据、父凭据及已继承期限取最小值；预留1秒时钟误差，无过期宽限。本地缓存绑定后还受固定单调截止期约束，时间回拨不恢复已过期结论。
+- `cargo test -p auth --lib --locked`：退出码0，15 passed、0 failed、0 ignored、0 filtered out，包含原有基础库测试。
+- `cargo clippy -p auth --lib --tests --locked -- -D warnings`：退出码0。
+- `cargo fmt --all -- --check`、`git diff --check`：退出码0。
+- T04、T05、T06 已完成。当前只完成共享安全契约；服务路由尚未接入，跨实例10秒撤权和完整业务链2秒预算仍未验收。
 
 ## 验收状态
 

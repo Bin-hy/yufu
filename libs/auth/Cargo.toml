@@ -12,7 +12,7 @@ crate-type = ["lib"]
 [dependencies]
 axum = { workspace = true }
 anyhow = { workspace = true, features = ["backtrace"] }
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "time"] }
 http = {workspace = true}
 serde = { version = "1.0.226", features = ["derive"] }
 serde_json = "1.0"
@@ -29,3 +29,6 @@ rsa = { version = "0.9", features = ["pem"] }
 uuid = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-tls"], default-features = false }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
