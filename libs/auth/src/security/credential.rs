@@ -5,7 +5,422 @@ use serde::{Deserialize, Serialize};
 use super::{
     budget::{Clock, ClockReading, healthy_reading},
     error::SecurityError,
+    identity::{IdentityBinding, PrincipalKind, PrincipalRef, SecretToken, TokenUse},
+    policy::CredentialBounds,
 };
+
+/// The registry key, never a substitute for querying current credential state.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "CredentialRefWire")]
+pub struct CredentialRef {
+    issuer: String,
+    jti: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CredentialRefWire {
+    issuer: String,
+    jti: String,
+}
+fn valid_identifier(value: &str) -> bool {
+    !value.trim().is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
+}
+impl CredentialRef {
+    pub fn new(issuer: impl Into<String>, jti: impl Into<String>) -> Result<Self, SecurityError> {
+        let issuer = issuer.into();
+        let jti = jti.into();
+        PrincipalRef::new(&issuer, PrincipalKind::Machine, "credential-reference")?;
+        if !valid_identifier(&jti) {
+            return Err(SecurityError::InvalidCredential);
+        }
+        Ok(Self { issuer, jti })
+    }
+    pub fn issuer(&self) -> &str {
+        &self.issuer
+    }
+    pub fn jti(&self) -> &str {
+        &self.jti
+    }
+}
+impl TryFrom<CredentialRefWire> for CredentialRef {
+    type Error = SecurityError;
+    fn try_from(raw: CredentialRefWire) -> Result<Self, Self::Error> {
+        Self::new(raw.issuer, raw.jti)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CredentialProfile {
+    kind: PrincipalKind,
+    token_use: TokenUse,
+}
+impl CredentialProfile {
+    pub fn new(kind: PrincipalKind, token_use: TokenUse) -> Result<Self, SecurityError> {
+        let valid = matches!(
+            (kind, token_use),
+            (
+                PrincipalKind::User,
+                TokenUse::UserSession | TokenUse::McpAccess | TokenUse::StreamConnect
+            ) | (
+                PrincipalKind::Machine,
+                TokenUse::SecurityService | TokenUse::PermissionSync
+            ) | (PrincipalKind::Device, TokenUse::DeviceAccess)
+        );
+        if !valid {
+            return Err(SecurityError::InvalidCredential);
+        }
+        Ok(Self { kind, token_use })
+    }
+}
+
+/// Server configuration only. Never derive these expectations from token contents or Host.
+#[derive(Debug, Clone)]
+pub struct CredentialExpectation {
+    issuer: String,
+    audience: String,
+    application: String,
+    profiles: Vec<CredentialProfile>,
+}
+impl CredentialExpectation {
+    pub fn new(
+        issuer: impl Into<String>,
+        audience: impl Into<String>,
+        application: impl Into<String>,
+        profiles: Vec<CredentialProfile>,
+    ) -> Result<Self, SecurityError> {
+        let issuer = issuer.into();
+        let audience = audience.into();
+        let application = application.into();
+        PrincipalRef::new(&issuer, PrincipalKind::Machine, "verifier-expectation")?;
+        if !valid_identifier(&audience) || !valid_identifier(&application) || profiles.is_empty() {
+            return Err(SecurityError::InvalidCredential);
+        }
+        Ok(Self {
+            issuer,
+            audience,
+            application,
+            profiles,
+        })
+    }
+}
+
+/// New access profile: security-relevant fields are mandatory, no legacy defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityAccessClaims {
+    pub iss: String,
+    pub sub: String,
+    pub aud: String,
+    pub iat: u64,
+    pub exp: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nbf: Option<u64>,
+    pub jti: String,
+    pub principal_kind: PrincipalKind,
+    pub token_use: TokenUse,
+    pub application: String,
+    pub grant_id: String,
+    pub bounds: CredentialBounds,
+    pub binding: IdentityBinding,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_id: Option<String>,
+}
+
+/// Implementations load an authoritative consistent snapshot and verify all revocation
+/// roots and the signing-key binding. Return registered claims, never echo the request.
+#[async_trait::async_trait]
+pub trait CurrentCredentialChecker: Send + Sync {
+    async fn check_current(
+        &self,
+        verified: &VerifiedCredential,
+        budget: &super::budget::SecurityBudget,
+    ) -> Result<CurrentCredentialStatus, SecurityError>;
+}
+
+/// Trusted repository/transport result, not a public endpoint's deserialization type.
+pub struct CurrentCredentialStatus {
+    pub claims: SecurityAccessClaims,
+    pub active: bool,
+    pub validity: DecisionValidity,
+}
+
+#[derive(Clone)]
+pub struct AuthenticatedContext {
+    verified: VerifiedCredential,
+    evidence: Arc<SecretToken>,
+    validity: ActiveValidity,
+}
+impl std::fmt::Debug for AuthenticatedContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthenticatedContext")
+            .field("principal", self.principal())
+            .field("credential", self.credential())
+            .finish_non_exhaustive()
+    }
+}
+impl AuthenticatedContext {
+    pub fn principal(&self) -> &PrincipalRef {
+        self.verified.principal()
+    }
+    pub fn credential(&self) -> &CredentialRef {
+        self.verified.reference()
+    }
+    pub fn token_use(&self) -> TokenUse {
+        self.verified.claims.token_use
+    }
+    pub fn audience(&self) -> &str {
+        &self.verified.claims.aud
+    }
+    pub fn application(&self) -> &str {
+        &self.verified.claims.application
+    }
+    pub fn bounds(&self) -> &CredentialBounds {
+        &self.verified.claims.bounds
+    }
+    pub fn binding(&self) -> &IdentityBinding {
+        &self.verified.claims.binding
+    }
+    pub fn expires_at(&self) -> u64 {
+        self.verified.claims.exp
+    }
+    pub fn evidence(&self) -> &SecretToken {
+        &self.evidence
+    }
+    pub fn ensure_current(&self) -> Result<(), SecurityError> {
+        self.validity.remaining().map(|_| ())
+    }
+}
+
+/// Header extraction only. URL/query parameters and request extensions are not evidence.
+pub fn extract_bearer(headers: &http::HeaderMap) -> Result<SecretToken, SecurityError> {
+    let mut values = headers.get_all(http::header::AUTHORIZATION).iter();
+    let value = values.next().ok_or(SecurityError::InvalidCredential)?;
+    if values.next().is_some() {
+        return Err(SecurityError::InvalidCredential);
+    }
+    let (scheme, token) = value
+        .to_str()
+        .map_err(|_| SecurityError::InvalidCredential)?
+        .split_once(' ')
+        .ok_or(SecurityError::InvalidCredential)?;
+    if !scheme.eq_ignore_ascii_case("Bearer") {
+        return Err(SecurityError::InvalidCredential);
+    }
+    if token.len() > 65_536 {
+        return Err(SecurityError::InvalidCredential);
+    }
+    SecretToken::new(token.to_owned())
+}
+
+pub struct StrictAccessState {
+    jwks: Arc<crate::jwks::JwksClient>,
+    expected: CredentialExpectation,
+    clock: Arc<dyn Clock>,
+    checker: Arc<dyn CurrentCredentialChecker>,
+}
+impl StrictAccessState {
+    pub fn new(
+        jwks: Arc<crate::jwks::JwksClient>,
+        expected: CredentialExpectation,
+        clock: Arc<dyn Clock>,
+        checker: Arc<dyn CurrentCredentialChecker>,
+    ) -> Self {
+        Self {
+            jwks,
+            expected,
+            clock,
+            checker,
+        }
+    }
+    pub async fn authenticate(
+        &self,
+        headers: &http::HeaderMap,
+    ) -> Result<AuthenticatedContext, SecurityError> {
+        let budget = super::budget::SecurityBudget::new(self.clock.clone())?;
+        let token = extract_bearer(headers)?;
+        let verified = self
+            .jwks
+            .verify_credential(&token, &self.expected, self.clock.as_ref())?;
+        budget.remaining()?;
+        let status = budget
+            .run(self.checker.check_current(&verified, &budget))
+            .await??;
+        if !status.active {
+            return Err(SecurityError::CredentialRevoked);
+        }
+        if status.claims != verified.claims {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let expires = verified
+            .claims
+            .exp
+            .checked_mul(1000)
+            .ok_or(SecurityError::InvalidCredential)?;
+        if status.validity.valid_until() > expires {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let validity = status
+            .validity
+            .bind_to_clock(self.clock.clone())
+            .map_err(|error| {
+                if error == SecurityError::DeadlineExceeded {
+                    SecurityError::InvalidCredential
+                } else {
+                    error
+                }
+            })?;
+        budget.remaining()?;
+        Ok(AuthenticatedContext {
+            verified,
+            evidence: Arc::new(token),
+            validity,
+        })
+    }
+}
+
+/// Only proves cryptographic/profile validity. A registry/status check is still required.
+/// There is deliberately no Deserialize or public constructor for this type.
+#[derive(Debug, Clone)]
+pub struct VerifiedCredential {
+    claims: SecurityAccessClaims,
+    principal: PrincipalRef,
+    reference: CredentialRef,
+    signing_key_id: String,
+}
+impl VerifiedCredential {
+    pub fn claims(&self) -> &SecurityAccessClaims {
+        &self.claims
+    }
+    pub fn principal(&self) -> &PrincipalRef {
+        &self.principal
+    }
+    pub fn reference(&self) -> &CredentialRef {
+        &self.reference
+    }
+    pub fn signing_key_id(&self) -> &str {
+        &self.signing_key_id
+    }
+}
+
+pub(crate) fn access_key_id(token: &SecretToken) -> Result<String, SecurityError> {
+    use jsonwebtoken::{Algorithm, decode_header};
+    if token.expose_secret().len() > 65_536 {
+        return Err(SecurityError::InvalidCredential);
+    }
+    let header =
+        decode_header(token.expose_secret()).map_err(|_| SecurityError::InvalidCredential)?;
+    if header.alg != Algorithm::RS256
+        || header.typ.as_deref() != Some("at+jwt")
+        || header.jku.is_some()
+        || header.jwk.is_some()
+        || header.x5u.is_some()
+        || header.x5c.is_some()
+    {
+        return Err(SecurityError::InvalidCredential);
+    }
+    header
+        .kid
+        .filter(|kid| !kid.is_empty() && kid.len() <= 128)
+        .ok_or(SecurityError::InvalidCredential)
+}
+
+pub(crate) fn verify_access_with_key(
+    token: &SecretToken,
+    expected: &CredentialExpectation,
+    key: &jsonwebtoken::DecodingKey,
+    clock: &dyn Clock,
+) -> Result<VerifiedCredential, SecurityError> {
+    use jsonwebtoken::{Algorithm, Validation, decode};
+    let signing_key_id = access_key_id(token)?;
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_issuer(&[&expected.issuer]);
+    validation.set_audience(&[&expected.audience]);
+    validation.set_required_spec_claims(&["iss", "sub", "aud", "iat", "exp", "jti"]);
+    // Use the injected, health-checked clock instead of jsonwebtoken's process wall clock.
+    validation.validate_exp = false;
+    validation.validate_nbf = false;
+    validation.leeway = 0;
+    healthy_reading(clock)?;
+    let claims = decode::<SecurityAccessClaims>(token.expose_secret(), key, &validation)
+        .map_err(|_| SecurityError::InvalidCredential)?
+        .claims;
+    let reading = healthy_reading(clock)?;
+    let latest = reading
+        .unix_millis
+        .checked_add(CLOCK_ERROR_MILLIS)
+        .ok_or(SecurityError::DependencyUnavailable)?;
+    let earliest = reading.unix_millis.saturating_sub(CLOCK_ERROR_MILLIS);
+    let expires = claims
+        .exp
+        .checked_mul(1000)
+        .ok_or(SecurityError::InvalidCredential)?;
+    let issued = claims
+        .iat
+        .checked_mul(1000)
+        .ok_or(SecurityError::InvalidCredential)?;
+    let profile = CredentialProfile::new(claims.principal_kind, claims.token_use)?;
+    if claims.iss != expected.issuer
+        || claims.aud != expected.audience
+        || claims.application != expected.application
+        || !expected.profiles.contains(&profile)
+        || claims.exp <= claims.iat
+        || expires <= latest
+        || issued > latest
+        || !valid_identifier(&claims.grant_id)
+        || (claims.token_use == TokenUse::UserSession && claims.session_id.is_none())
+        || (claims.token_use != TokenUse::UserSession
+            && (claims.session_id.is_some() || claims.family_id.is_some()))
+        || claims
+            .session_id
+            .as_ref()
+            .is_some_and(|v| !valid_identifier(v))
+        || claims
+            .family_id
+            .as_ref()
+            .is_some_and(|v| !valid_identifier(v))
+    {
+        return Err(SecurityError::InvalidCredential);
+    }
+    if let Some(nbf) = claims.nbf {
+        let not_before = nbf
+            .checked_mul(1000)
+            .ok_or(SecurityError::InvalidCredential)?;
+        if not_before > earliest || not_before >= expires {
+            return Err(SecurityError::InvalidCredential);
+        }
+    }
+    let binding_valid = match (&claims.binding, claims.principal_kind) {
+        (IdentityBinding::None, PrincipalKind::User | PrincipalKind::Machine) => true,
+        (IdentityBinding::Gateway { gateway_id }, PrincipalKind::Machine) => {
+            valid_identifier(gateway_id)
+        }
+        (
+            IdentityBinding::Device {
+                gateway_id,
+                device_id,
+            },
+            PrincipalKind::Device,
+        ) => {
+            valid_identifier(gateway_id)
+                && valid_identifier(device_id)
+                && claims.aud == format!("cobotlet:{gateway_id}")
+        }
+        _ => false,
+    };
+    if !binding_valid {
+        return Err(SecurityError::InvalidCredential);
+    }
+    let principal = PrincipalRef::new(&claims.iss, claims.principal_kind, &claims.sub)?;
+    let reference = CredentialRef::new(&claims.iss, &claims.jti)?;
+    Ok(VerifiedCredential {
+        claims,
+        principal,
+        reference,
+        signing_key_id,
+    })
+}
 
 pub const MAX_DECISION_AGE_MILLIS: u64 = 5000;
 pub const CLOCK_ERROR_MILLIS: u64 = 1000;

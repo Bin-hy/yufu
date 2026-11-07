@@ -39,3 +39,23 @@
 ## 验收状态
 
 checklist.md 全部条目保持未验证。只在取得对应实际证据后勾选，不用本文件中的环境检查替代端到端验收。
+
+## T07 严格 JWT 验证
+
+- 先新增负向测试再实现：首轮 `cargo test -p auth --lib security_t07 --locked` 退出码101，原因是待实现的验证接口及类型缺失。
+- 新增 SecurityAccessClaims、CredentialExpectation、CredentialProfile、CredentialRef 与不可由客户端反序列化构造的 VerifiedCredential。验签结果保留签名 key ID，但不等同于凭据登记状态或业务授权。
+- 严格验证 RS256、at+jwt、已配置可信 kid、精确 issuer/单受众/application、主体与用途组合、会话/设备绑定、到期/签发时间/nbf、必需字段及时间溢出。拒绝令牌自带的密钥URL/密钥/证书以及过大的令牌。
+- 新访问凭据类型不为缺少用途/范围/绑定的旧令牌补默认权限；旧签发链的迁移仍在后续任务中。
+- `cargo test -p auth --lib security_t07 --locked`：退出码0，5 passed、0 failed、0 ignored；包含合法用户、机器、设备与MCP类型的正向路径。
+
+## T08 认证上下文及 Bearer 提取
+
+- 先新增上下文/路由负向测试：首轮 `cargo test -p auth --lib security_t08 --locked` 退出码101，原因是待实现状态接口和上下文缺失。
+- 新 StrictAccessState 必须注入 CurrentCredentialChecker，签名通过后核对可信登记快照及其新鲜度；签名claims与登记claims不同、已吊销、过期或依赖超时均不产生 AuthenticatedContext。
+- 上下文秘密证据使用脱敏类型，无客户端反序列化入口；中间件先移除旧上下文，只从唯一Authorization头提取Bearer。
+- 两个现有RS256中间件也已改为共用Bearer提取，不再接受query access_token回退；旧HS256通用回调接口不在本次替换范围。浏览器流连接的受限票据迁移需后续完成，不能用此变化宣称全部旧入口已迁移。
+- `cargo test -p auth --lib security_t08 --locked`：退出码0，4 passed、0 failed、0 ignored；验证query及预置上下文不绕过认证、状态匹配/新鲜度、2秒超时，以及现有入口Bearer正常路径。
+- 状态检查当前由隔离测试适配器验证接口契约；生产仓储及各服务的严格状态接入尚未完成，仍需T18、T24及相应服务组装任务。
+- 最终回归：`cargo test -p auth --lib --locked` 退出码0，24 passed、0 failed、0 ignored；`cargo test --test mod --locked -- --test-threads=4` 退出码0，51 passed、0 failed、0 ignored。
+- `cargo clippy -p auth --lib --tests --locked -- -D warnings`、`cargo fmt --all -- --check` 和 `git diff --check` 均退出码0。
+- T07、T08 组件任务已完成；完整workspace所有feature、实际生产状态仓储及端到端安全清单仍未验收。

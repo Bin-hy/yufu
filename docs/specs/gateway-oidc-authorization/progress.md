@@ -10,8 +10,8 @@
 | T04 | 完成 | 见 evidence.md |
 | T05 | 完成 | 见 evidence.md |
 | T06 | 完成 | 见 evidence.md |
-| T07 | 未开始 | 尚未执行 |
-| T08 | 未开始 | 尚未执行 |
+| T07 | 完成 | 见 evidence.md |
+| T08 | 完成 | 见 evidence.md |
 | T09 | 未开始 | 尚未执行 |
 | T10 | 未开始 | 尚未执行 |
 | T11 | 未开始 | 尚未执行 |

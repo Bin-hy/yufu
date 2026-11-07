@@ -71,6 +71,36 @@ pub mod jwks;
 pub mod security;
 pub mod token_manager;
 
+/// Strict access profile, including current registered credential status.
+pub async fn strict_access_middleware(
+    State(auth): State<Arc<security::credential::StrictAccessState>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    use security::{credential::AuthenticatedContext, error::SecurityError};
+    request.extensions_mut().remove::<AuthenticatedContext>();
+    match auth.authenticate(request.headers()).await {
+        Ok(context) => {
+            request.extensions_mut().insert(context);
+            next.run(request).await
+        }
+        Err(error) => {
+            let status = match error {
+                SecurityError::InvalidCredential | SecurityError::CredentialRevoked => {
+                    StatusCode::UNAUTHORIZED
+                }
+                SecurityError::Forbidden => StatusCode::FORBIDDEN,
+                SecurityError::InvalidResource => StatusCode::BAD_REQUEST,
+                SecurityError::Conflict => StatusCode::CONFLICT,
+                SecurityError::DependencyUnavailable
+                | SecurityError::DeadlineExceeded
+                | SecurityError::CapacityExceeded => StatusCode::SERVICE_UNAVAILABLE,
+            };
+            (status, error.to_string()).into_response()
+        }
+    }
+}
+
 use crate::jwks::JwksClient;
 use crate::token_manager::{TokenError, TokenManager};
 use axum::extract::State;
@@ -434,22 +464,9 @@ pub async fn access_middleware_rs256(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let token = match request
-        .headers()
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .map(|t| t.trim().to_string())
-        .or_else(|| {
-            request.uri().query().and_then(|q| {
-                q.split('&')
-                    .filter_map(|p| p.split_once('='))
-                    .find(|(k, _)| *k == "access_token")
-                    .map(|(_, v)| v.trim().to_string())
-            })
-        }) {
-        Some(t) => t,
-        None => {
+    let token = match security::credential::extract_bearer(request.headers()) {
+        Ok(token) => token,
+        Err(_) => {
             return (
                 StatusCode::UNAUTHORIZED,
                 "Missing or invalid Authorization header",
@@ -457,7 +474,7 @@ pub async fn access_middleware_rs256(
                 .into_response();
         }
     };
-    let token = token.as_str();
+    let token = token.expose_secret();
 
     match jwks.verify(token) {
         Ok(claims) => {
@@ -494,22 +511,9 @@ pub async fn access_middleware_local_rs256(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let token = match request
-        .headers()
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .map(|t| t.trim().to_string())
-        .or_else(|| {
-            request.uri().query().and_then(|q| {
-                q.split('&')
-                    .filter_map(|p| p.split_once('='))
-                    .find(|(k, _)| *k == "access_token")
-                    .map(|(_, v)| v.trim().to_string())
-            })
-        }) {
-        Some(t) => t,
-        None => {
+    let token = match security::credential::extract_bearer(request.headers()) {
+        Ok(token) => token,
+        Err(_) => {
             return (
                 StatusCode::UNAUTHORIZED,
                 "Missing or invalid Authorization header",
@@ -517,7 +521,7 @@ pub async fn access_middleware_local_rs256(
                 .into_response();
         }
     };
-    let token = token.as_str();
+    let token = token.expose_secret();
 
     match signer.verify_access_token(token, None) {
         Ok(claims) => {
