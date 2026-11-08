@@ -331,159 +331,83 @@ async fn handle_authorization_code(
     state: &AppState,
     req: &TokenRequest,
 ) -> Result<Json<TokenResponse>> {
-    let code = req
-        .code
-        .as_deref()
-        .ok_or(crate::error::AppError::BadRequest(
-            "missing code".to_string(),
-        ))?;
-    let code_verifier = req.code_verifier.as_deref();
-
-    let db = &state.database.connection;
-    let entry = OidcService::take_authorization_code(db, code)
-        .await?
-        .ok_or(crate::error::AppError::BadRequest(
-            "authorization code invalid or already used".to_string(),
-        ))?;
-    if Utc::now().naive_utc() > entry.expires_at {
-        return Err(crate::error::AppError::BadRequest(
-            "authorization code expired".to_string(),
-        ));
-    }
-
-    // Public clients use PKCE instead of a secret. Confidential clients still
-    // must authenticate at the token endpoint, even when PKCE was used.
-    let cid = req
+    use crate::service::security::lifecycle::CodeExchangeRequest;
+    use auth::security::identity::SecretToken;
+    let code = SecretToken::new(
+        req.code
+            .clone()
+            .ok_or(crate::error::AppError::BadRequest("missing code".into()))?,
+    )?;
+    let client_id = req
         .client_id
         .as_deref()
         .ok_or(crate::error::AppError::BadRequest(
-            "missing client_id".to_string(),
+            "missing client_id".into(),
         ))?;
-    let code_client = oauth_client::Entity::get_by_client_id(db, cid)
-        .await?
-        .ok_or(crate::error::AppError::Unauthorized(
-            "invalid client_id".to_string(),
-        ))?;
-    let client = if code_client.public_client {
-        code_client
-    } else {
-        // Verify the secret against the client row we already loaded instead
-        // of querying it again via authenticate_client.
-        let secret = req
-            .client_secret
-            .as_deref()
-            .ok_or(crate::error::AppError::BadRequest(
-                "missing client_secret".to_string(),
-            ))?;
-        if !OidcService::client_verify_secret(&code_client, secret) {
-            return Err(crate::error::AppError::Unauthorized(
-                "invalid client_secret".to_string(),
-            ));
-        }
-        code_client
-    };
-
-    // Validate consistency
-    if entry.client_id != client.client_id
-        || entry.redirect_uri.as_deref() != req.redirect_uri.as_deref()
-    {
-        return Err(crate::error::AppError::BadRequest(
-            "client_id or redirect_uri mismatch".to_string(),
-        ));
-    }
-    if !OidcService::client_allows_grant_type(&client, "authorization_code") {
-        return Err(crate::error::AppError::BadRequest(
-            "client not allowed authorization_code grant".to_string(),
-        ));
-    }
-    if !OidcService::public_client_requires_s256_pkce(
-        &client,
-        Some(&entry.code_challenge),
-        &entry.code_challenge_method,
-    ) {
-        return Err(crate::error::AppError::BadRequest(
-            "public clients require a non-empty S256 code_challenge".to_string(),
-        ));
-    }
-
-    // Verify PKCE
-    if !entry.code_challenge.is_empty() {
-        let verifier = code_verifier.ok_or(crate::error::AppError::BadRequest(
-            "missing code_verifier (PKCE was used during authorization)".to_string(),
-        ))?;
-        if !OidcService::verify_pkce(
-            &entry.code_challenge,
-            &entry.code_challenge_method,
-            verifier,
-        ) {
-            return Err(crate::error::AppError::BadRequest(
-                "code_verifier validation failed".to_string(),
-            ));
-        }
-    }
-
-    let (access_token, id_token, refresh_token) =
-        OidcService::issue_authorization_code_tokens(state, &entry, &client).await?;
-
-    Ok(Json(TokenResponse {
-        access_token,
-        id_token: Some(id_token),
-        token_type: "Bearer".to_string(),
-        expires_in: state.oidc_access_token_exp(),
-        refresh_token: Some(refresh_token),
-    }))
+    let secret = req
+        .client_secret
+        .clone()
+        .map(SecretToken::new)
+        .transpose()?;
+    let verifier = req
+        .code_verifier
+        .clone()
+        .map(SecretToken::new)
+        .transpose()?;
+    let set = OidcService::exchange_authorization_code(
+        state,
+        CodeExchangeRequest {
+            code: &code,
+            client_id,
+            client_secret: secret.as_ref(),
+            redirect_uri: req.redirect_uri.as_deref(),
+            code_verifier: verifier.as_ref(),
+        },
+    )
+    .await?;
+    Ok(Json(session_token_response(state, set)))
 }
 
 async fn handle_refresh_token(state: &AppState, req: &TokenRequest) -> Result<Json<TokenResponse>> {
-    let rt = req
-        .refresh_token
+    use crate::service::security::lifecycle::RefreshRequest;
+    use auth::security::identity::SecretToken;
+    let refresh_token = SecretToken::new(req.refresh_token.clone().ok_or(
+        crate::error::AppError::BadRequest("missing refresh_token".into()),
+    )?)?;
+    let client_id = req
+        .client_id
         .as_deref()
         .ok_or(crate::error::AppError::BadRequest(
-            "missing refresh_token".to_string(),
+            "missing client_id".into(),
         ))?;
-
-    let db = &state.database.connection;
-
-    // Authenticate client
-    let client = OidcService::authenticate_token_client(
-        db,
-        req.client_id.as_deref(),
-        req.client_secret.as_deref(),
+    let secret = req
+        .client_secret
+        .clone()
+        .map(SecretToken::new)
+        .transpose()?;
+    let set = OidcService::rotate_session_refresh(
+        state,
+        RefreshRequest {
+            refresh_token: &refresh_token,
+            client_id,
+            client_secret: secret.as_ref(),
+        },
     )
     .await?;
-    if !OidcService::client_allows_grant_type(&client, "refresh_token") {
-        return Err(crate::error::AppError::BadRequest(
-            "client not allowed refresh_token grant".to_string(),
-        ));
-    }
+    Ok(Json(session_token_response(state, set)))
+}
 
-    let rec = crate::entity::oauth_token::Entity::find_by_refresh_token(db, rt)
-        .await?
-        .ok_or(crate::error::AppError::Unauthorized(
-            "invalid refresh_token".to_string(),
-        ))?;
-
-    if Utc::now().naive_utc() > rec.refresh_expires_at {
-        return Err(crate::error::AppError::Unauthorized(
-            "refresh_token expired".to_string(),
-        ));
-    }
-    if rec.client_id != client.client_id {
-        return Err(crate::error::AppError::Unauthorized(
-            "refresh_token does not belong to this client".to_string(),
-        ));
-    }
-
-    let (access_token, id_token, new_refresh_token) =
-        OidcService::issue_refresh_tokens(state, rt, &rec).await?;
-
-    Ok(Json(TokenResponse {
-        access_token,
-        id_token: Some(id_token),
-        token_type: "Bearer".to_string(),
+fn session_token_response(
+    state: &AppState,
+    set: crate::service::security::lifecycle::SessionTokenSet,
+) -> TokenResponse {
+    TokenResponse {
+        access_token: set.access_token.expose_secret().into(),
+        id_token: Some(set.id_token.expose_secret().into()),
+        refresh_token: Some(set.refresh_token.expose_secret().into()),
+        token_type: "Bearer".into(),
         expires_in: state.oidc_access_token_exp(),
-        refresh_token: Some(new_refresh_token),
-    }))
+    }
 }
 
 async fn handle_client_credentials(
@@ -534,6 +458,32 @@ async fn revoke(
     State(state): State<AppState>,
     axum::extract::Form(req): axum::extract::Form<RevokeRequest>,
 ) -> Result<http::StatusCode> {
+    if req.token_type_hint == "refresh_token" {
+        use crate::service::security::lifecycle::RefreshRequest;
+        use auth::security::identity::SecretToken;
+        let token = SecretToken::new(req.token.clone())?;
+        let secret = req
+            .client_secret
+            .clone()
+            .map(SecretToken::new)
+            .transpose()?;
+        let client_id = req
+            .client_id
+            .as_deref()
+            .ok_or(crate::error::AppError::BadRequest(
+                "missing client_id".into(),
+            ))?;
+        OidcService::revoke_session_refresh(
+            &state,
+            RefreshRequest {
+                refresh_token: &token,
+                client_id,
+                client_secret: secret.as_ref(),
+            },
+        )
+        .await?;
+        return Ok(http::StatusCode::OK);
+    }
     let db = &state.database.connection;
     let client = OidcService::authenticate_token_client(
         db,

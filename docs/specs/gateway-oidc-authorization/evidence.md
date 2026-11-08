@@ -153,3 +153,71 @@ checklist.md 全部条目保持未验证。只在取得对应实际证据后勾�
 - `cargo clippy -p auth -p cobotusr --lib --tests --locked -- -D warnings`、`cargo clippy --test mod --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`均退出码0。
 - T19、T20组件任务完成（累计20/80）；全入口、生命周期写入和端到端撤权仍未验收。之前记录的8项原有文档示例失败尚待T79处理，checklist不提前勾选。
 - 最后增加真实HTTP兼容性断言：旧超级管理员Bearer携带自报subject的/enforce请求返回401。`cargo test --test mod security_t19_live_legacy_routes --locked` 退出码0，1 passed、0 failed、0 ignored；集成目标clippy重跑退出码0。
+
+## 2026-11-08：T21–T23 原子兑换、轮换与重放保护
+
+工作目录为 `/Users/xionghaoyi.binhy/BinhyPC/cobot-for`，分支 `codex/gateway-oidc-authorization`，接续基线 `86628ac`。用户给出的旧路径 `/Users/binhy/Binhy-Projects/cobotrix` 在本机不存在；当前仓库的远端为 Bin-hy/cobot-for。开始时工作区干净。四份设计已批准，没有重新审批。仓库及父目录未发现AGENTS.md；按mew-spec和rust-dev-workflow执行，并使用已就绪CodeGraph导航。
+
+环境：macOS Apple Silicon，rustc 1.99.1（2026-10-13）、cargo 1.99.1；Docker colima-binim 中的隔离 PostgreSQL 18-alpine。测试不涉及真实设备。Cargo.lock未变更。
+
+### 先失败后实现的证据
+
+| 命令/阶段 | 实际结果 | 失败行为 |
+|---|---|---|
+| `cargo test --test mod security_t21 --locked -- --test-threads=4`，接口桩阶段 | 0 passed / 3 failed，退出1 | 合法兑换、并发唯一结果、失败回滚尚未实现；隔离夹具已实际运行 |
+| `cargo test --test mod security_t22 --locked -- --test-threads=4`，轮换接口桩阶段 | 0 passed / 4 failed，退出1 | 原子刷新轮换尚未实现 |
+| `cargo test --test mod security_t23 --locked -- --test-threads=4`，实现T22后 | 0 passed / 4 failed，退出1 | 旧refresh被拒绝但没有撤销族；提交失败未被识别；实例竞争后仍可能留下活动后代 |
+| `cargo test --test mod test_oidc_authorization_code_pkce_exchange --locked`，旧路由 | 0 passed / 1 failed，退出1 | 错误PKCE后再次正确兑换同一码仍返回400，确认提前烧码 |
+| `cargo test --test mod security_t21_signing_wait --locked`，同步签名阶段 | 0 passed / 1 failed，退出1 | 600ms签名等待突破继承的100ms预算，并返回成功 |
+
+中间修正了测试夹具缺少用户、重复种子应用、JWKS路径，以及旧T19测试假定操作种子始终为最后一个迁移的问题。这些夹具/编译失败没有算作行为通过。一次增量编译遇到rustc ICE（伴随尚未修正的类型错误），修正类型并执行`cargo clean -p cobotusr`后重编译通过。先前clippy因async_trait生成的重复must_use在Rust 1.99下失败；仅对相关trait/方法注解抑制该宏生成lint，其他警告仍为错误。
+
+### 已实现与实际观察
+
+- T21：先在同一主库事务内认证客户端并校验授权码、redirect、PKCE及到期，再条件消费、签名、登记access/refresh和稳定grant/session/family，提交后才返回。16路并发仅一次成功。错误client/redirect/verifier不烧码；签名、延迟提交触发器或预算失败均不留下凭据及根，随后仍能正确兑换。
+- 客户端允许的服务受众来自新的`security_session_client`登记，访问令牌的aud/application为cobotusr或cobotsrv，ID Token保持client_id受众及字符串sub。未登记/停用绑定拒绝兑换；变更登记不能借refresh切换旧会话受众。同受众不同client_id重用他人的已消费refresh不会撤销该族。
+- T22：锁定稳定grant→session→family→refresh，在同一事务消费旧refresh、撤销明确配对旧access、登记新配对并建立替代关联。原有非空g1设备权限上界在当前规则改为g2后仍保持g1；缺失/旧glob资源元数据不被提升为权限。旧access到期而refresh有效时仍可轮换。16路并发最多一个替代配对，签名/提交失败回滚。重放竞争可能使唯一替代族被撤销，这是T23的预期防护。
+- T23：仅保存refresh摘要和消费历史；重用已消费摘要时，先认证client并验证issuer、client、稳定根归属，再撤销该族和通过明确revocation_parent_jti派生的凭据。已过期祖先仍能终止活动后代。其他会话、其grant/session及仅通过minted_by关联的凭据不受影响。双生命周期实例并发重放/轮换不会恢复活动族；提交失败返回依赖不可用，回滚后合法后代仍可用，随后成功重放防护可重试且保持幂等。
+- PostgreSQL序列化/死锁冲突最多重试4次，每次重开主库一致快照，复用原始SecurityBudget；不重新给2秒。生产RSA签名在spawn_blocking中执行，其等待受同一预算限制。时钟不健康、没有监控及HMAC签名均失败关闭并保留授权码。
+- 实际OIDC授权码/refresh路由已经接入新服务，移除了`take_authorization_code`、`issue_authorization_code_tokens`、`issue_refresh_tokens`。真实HTTP覆盖公共PKCE、机密客户端secret、错误PKCE后正确重试、字符串sub/UserInfo、refresh与配对撤销、已消费重放。新access由实际JWKS严格验签并与主库登记比对。SecurityError的HTTP转换保留401/403/400/409/503分类。
+
+### 最终运行记录
+
+以下均实际执行，退出0；数量为本轮最终代码的结果：
+
+```text
+cargo test --test mod --locked -- --test-threads=4
+92 passed; 0 failed; 0 ignored; 0 filtered out
+
+cargo test -p auth -p cobotusr --lib --locked
+auth: 45 passed; 0 failed
+cobotusr: 23 passed; 0 failed
+
+cargo test --test mod oidc --locked -- --test-threads=4
+4 passed; 0 failed; 88 filtered out
+
+cargo clippy -p auth -p cobotusr --lib --tests --locked -- -D warnings
+cargo clippy --test mod --locked -- -D warnings
+cargo fmt --all -- --check
+git diff --check
+```
+
+最终92个集成用例包含T21的5个事务/预算/绑定测试及3个HTTP故障测试、T22的4个测试、T23的4个测试；扩展了原有OIDC完整HTTP测试和T19迁移顺序验证。最终全量集成运行包括增强后的显式委托后代与minted_by隔离断言。auth/cobotusr单元测试共68个，新增安全错误HTTP分类回归。
+
+proc-macro-error2的future-incompat提示仍存在，不影响上述退出码。旧证据中的auth文档示例8项失败/1项ignored没有在本轮修正或重新验收。完整workspace/all-features、前端、跨服务10秒撤权、真实时钟健康接线、故障矩阵与完整checklist仍未验收。
+
+### 生产组装与后续任务
+
+新迁移在原安全操作种子之后添加客户端受众表及凭据的oidc_client_id、paired_access_jti。旧记录允许NULL，运行时不能借缺失的配对/客户端事实刷新；没有将旧JWT自动登记为可信。绑定表默认不启用，也不从client_id猜测服务受众。
+
+宿主必须使用`serve_with_security_clock`注入真实同步状态监控，并在维护/配置流程中登记客户端受众。原`serve`没有监控时，新的OIDC兑换和刷新返回503。本轮只用隔离测试中明确声明健康的时钟完成HTTP接线，不把它当成生产同步监控。N1/T70/T71及迁移演练仍待后续完成。
+
+refresh-token hint的现有撤销入口兼容了统一配对登记；完整access/会话/族/应用根撤销、无hint适配、Cookie退出/CSRF、consent撤销及普通API当前状态检查仍待T24/T25/T32及后续接线。不能据本轮组件和OIDC测试推断旧access已被所有业务入口拒绝。
+
+当前完成23/80，T34仍部分完成，下一项T24。本轮只做分组本地提交，不push、不部署、不操作真实设备。checklist保留未验收状态；没有宣称全部漏洞已修复。
+
+### 分组提交与自动扫描说明
+
+- 核心生命周期、存储、迁移与事务测试：`73e01d1`（`feat(auth): add atomic OIDC session exchange rotation and replay protection`）。
+- 实际OIDC路由、时钟注入、HTTP分类/测试和本轮文档作为第二组提交；完整提交身份由本分支git log查询。两组代码与上述最终验证时工作区代码相同，后续只更新文档。
+- 核心提交后宿主自动触发神医最近commit分析，原始回传9个文件均没有具体display/finds/vulnerability内容。该回传可能不完整，没有作为“安全”或“全部漏洞修复”的证据；本轮没有额外主动扫描或上传。

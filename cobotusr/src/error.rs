@@ -3,6 +3,7 @@ use http::StatusCode;
 use sea_orm::{DbErr, SqlErr};
 #[derive(Debug)]
 pub enum AppError {
+    Security(auth::security::error::SecurityError),
     NoAvailableDevice,
     RequestProxyError,
     NotFound(String),
@@ -40,6 +41,21 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
+            AppError::Security(err) => {
+                use auth::security::error::SecurityError;
+                let status = match err {
+                    SecurityError::InvalidCredential | SecurityError::CredentialRevoked => {
+                        StatusCode::UNAUTHORIZED
+                    }
+                    SecurityError::Forbidden => StatusCode::FORBIDDEN,
+                    SecurityError::InvalidResource => StatusCode::BAD_REQUEST,
+                    SecurityError::Conflict => StatusCode::CONFLICT,
+                    SecurityError::DependencyUnavailable
+                    | SecurityError::DeadlineExceeded
+                    | SecurityError::CapacityExceeded => StatusCode::SERVICE_UNAVAILABLE,
+                };
+                (status, err.to_string()).into_response()
+            }
             AppError::NoAvailableDevice => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "no available device".to_string(),
@@ -66,7 +82,12 @@ where
     E: Into<anyhow::Error>,
 {
     fn from(err: E) -> Self {
-        AppError::InternalServerError(err.into())
+        let err = err.into();
+        if let Some(security) = err.downcast_ref::<auth::security::error::SecurityError>() {
+            AppError::Security(*security)
+        } else {
+            AppError::InternalServerError(err)
+        }
     }
 }
 
@@ -109,6 +130,37 @@ impl<T> SeaResultExt<T> for Result<T, DbErr> {
                     _ => Err(AppError::InternalServerError(e.into())),
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use auth::security::error::SecurityError;
+
+    #[test]
+    fn security_errors_keep_their_sanitized_http_classification() {
+        for (error, expected) in [
+            (SecurityError::InvalidCredential, StatusCode::UNAUTHORIZED),
+            (SecurityError::CredentialRevoked, StatusCode::UNAUTHORIZED),
+            (SecurityError::Forbidden, StatusCode::FORBIDDEN),
+            (SecurityError::InvalidResource, StatusCode::BAD_REQUEST),
+            (SecurityError::Conflict, StatusCode::CONFLICT),
+            (
+                SecurityError::DependencyUnavailable,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                SecurityError::DeadlineExceeded,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                SecurityError::CapacityExceeded,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+        ] {
+            assert_eq!(AppError::from(error).into_response().status(), expected);
         }
     }
 }

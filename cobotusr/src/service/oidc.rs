@@ -8,12 +8,81 @@ use crate::{AppState, IdType};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
-use rand::RngCore;
-use rand::rngs::OsRng;
+use rand::{RngCore, rngs::OsRng};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use sha2::{Digest, Sha256};
 
 pub struct OidcService;
+
+use super::security::{
+    lifecycle::{
+        CodeExchangeRequest, CredentialLifecycle, RefreshRequest, SessionTokenConfig,
+        SessionTokenSet,
+    },
+    repository::PgSecurityRepository,
+};
+use auth::security::{budget::SecurityBudget, error::SecurityError};
+use std::sync::Arc;
+
+impl OidcService {
+    fn session_lifecycle(
+        state: &AppState,
+    ) -> Result<(CredentialLifecycle, SecurityBudget, SessionTokenConfig)> {
+        let clock = state.security_clock()?;
+        let budget = SecurityBudget::new(clock.clone())?;
+        let lifecycle = CredentialLifecycle::new(
+            Arc::new(PgSecurityRepository::new(
+                state.database.connection.clone(),
+                clock.clone(),
+            )),
+            clock,
+        );
+        let config = SessionTokenConfig {
+            issuer: get_issuer_base(state),
+            access_ttl_seconds: u64::try_from(state.oidc_access_token_exp())
+                .map_err(|_| SecurityError::DependencyUnavailable)?,
+            refresh_ttl_seconds: u64::try_from(state.oidc_refresh_token_exp())
+                .map_err(|_| SecurityError::DependencyUnavailable)?,
+        };
+        Ok((lifecycle, budget, config))
+    }
+
+    pub async fn exchange_authorization_code(
+        state: &AppState,
+        request: CodeExchangeRequest<'_>,
+    ) -> Result<SessionTokenSet> {
+        let (lifecycle, budget, config) = Self::session_lifecycle(state)?;
+        lifecycle
+            .consume_authorization_code(request, &config, state.id_token_signer().as_ref(), &budget)
+            .await
+            .map_err(|error| match error {
+                SecurityError::InvalidCredential => AppError::BadRequest(
+                    "invalid authorization code, client_secret, redirect_uri or PKCE".into(),
+                ),
+                error => AppError::Security(error),
+            })
+    }
+
+    pub async fn rotate_session_refresh(
+        state: &AppState,
+        request: RefreshRequest<'_>,
+    ) -> Result<SessionTokenSet> {
+        let (lifecycle, budget, config) = Self::session_lifecycle(state)?;
+        Ok(lifecycle
+            .rotate_refresh(request, &config, state.id_token_signer().as_ref(), &budget)
+            .await?)
+    }
+
+    pub async fn revoke_session_refresh(
+        state: &AppState,
+        request: RefreshRequest<'_>,
+    ) -> Result<()> {
+        let (lifecycle, budget, config) = Self::session_lifecycle(state)?;
+        Ok(lifecycle
+            .revoke_session_refresh(request, &config.issuer, &budget)
+            .await?)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Client helpers (moved from entity/oauth_client.rs Model impl)
@@ -379,23 +448,6 @@ impl OidcService {
         Ok(code)
     }
 
-    /// Take (consume) an authorization code: find it, mark as used, return it.
-    /// Returns None if not found or already used.
-    pub async fn take_authorization_code(
-        db: &DatabaseConnection,
-        code: &str,
-    ) -> Result<Option<oauth_authorization_code::Model>> {
-        let rec = oauth_authorization_code::Entity::find_unused_by_code(db, code).await?;
-        if let Some(rec) = rec {
-            let mut am: oauth_authorization_code::ActiveModel = rec.clone().into();
-            am.used = Set(true);
-            am.update(db).await?;
-            Ok(Some(rec))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Delete expired authorization codes.
     pub async fn cleanup_expired_codes(db: &DatabaseConnection) -> Result<u64> {
         let now = Utc::now().naive_utc();
@@ -429,112 +481,6 @@ impl OidcService {
             am.update(db).await?;
         }
         Ok(())
-    }
-
-    fn generate_refresh_token_value() -> String {
-        let mut buf = [0u8; 32];
-        OsRng.fill_bytes(&mut buf);
-        hex::encode(buf)
-    }
-
-    /// Issue tokens for authorization_code grant.
-    pub async fn issue_authorization_code_tokens(
-        state: &AppState,
-        entry: &oauth_authorization_code::Model,
-        client: &oauth_client::Model,
-    ) -> Result<(String, String, String)> {
-        let base = get_issuer_base(state);
-        let access_token = state
-            .sign_access_token(
-                entry.user_id,
-                &client.client_id,
-                entry.scope.as_deref().unwrap_or(""),
-            )
-            .await?;
-
-        let id_token = state.id_token_signer().sign_id_token(
-            &entry.user_id.to_string(),
-            &base,
-            Some(&client.client_id),
-            entry.nonce.as_deref(),
-            Some(&access_token),
-        )?;
-
-        let refresh_token = Self::generate_refresh_token_value();
-        let now = Utc::now().naive_utc();
-        let access_expires = now + Duration::seconds(state.oidc_access_token_exp());
-        let refresh_expires = now + Duration::seconds(state.oidc_refresh_token_exp());
-
-        let new_rec = oauth_token::ActiveModel {
-            id: sea_orm::ActiveValue::NotSet,
-            user_id: Set(entry.user_id),
-            client_id: Set(client.client_id.clone()),
-            access_token: Set(access_token.clone()),
-            id_token: Set(id_token.clone()),
-            refresh_token: Set(refresh_token.clone()),
-            scope: Set(entry.scope.clone()),
-            token_type: Set("Bearer".to_string()),
-            create_time: Set(now),
-            access_expires_at: Set(access_expires),
-            refresh_expires_at: Set(refresh_expires),
-            update_time: Set(now),
-            revoked: Set(false),
-        };
-        new_rec.insert(&state.database.connection).await?;
-
-        Ok((access_token, id_token, refresh_token))
-    }
-
-    /// Issue tokens for refresh_token grant (with rotation).
-    pub async fn issue_refresh_tokens(
-        state: &AppState,
-        old_rt: &str,
-        rec: &oauth_token::Model,
-    ) -> Result<(String, String, String)> {
-        let db = &state.database.connection;
-        let base = get_issuer_base(state);
-
-        let access_token = state
-            .sign_access_token(
-                rec.user_id,
-                &rec.client_id,
-                rec.scope.as_deref().unwrap_or(""),
-            )
-            .await?;
-
-        let id_token = state.id_token_signer().sign_id_token(
-            &rec.user_id.to_string(),
-            &base,
-            Some(&rec.client_id),
-            None,
-            Some(&access_token),
-        )?;
-
-        // Rotate: revoke old refresh_token, issue new one
-        Self::revoke_by_refresh_token(db, old_rt).await?;
-        let new_refresh_token = Self::generate_refresh_token_value();
-        let now = Utc::now().naive_utc();
-        let access_expires = now + Duration::seconds(state.oidc_access_token_exp());
-        let refresh_expires = now + Duration::seconds(state.oidc_refresh_token_exp());
-
-        let new_rec = oauth_token::ActiveModel {
-            id: sea_orm::ActiveValue::NotSet,
-            user_id: Set(rec.user_id),
-            client_id: Set(rec.client_id.clone()),
-            access_token: Set(access_token.clone()),
-            id_token: Set(id_token.clone()),
-            refresh_token: Set(new_refresh_token.clone()),
-            scope: Set(rec.scope.clone()),
-            token_type: Set("Bearer".to_string()),
-            create_time: Set(now),
-            access_expires_at: Set(access_expires),
-            refresh_expires_at: Set(refresh_expires),
-            update_time: Set(now),
-            revoked: Set(false),
-        };
-        new_rec.insert(db).await?;
-
-        Ok((access_token, id_token, new_refresh_token))
     }
 
     /// Issue access_token for client_credentials grant (M2M, no user context).

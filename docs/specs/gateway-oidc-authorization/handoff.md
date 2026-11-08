@@ -1,88 +1,77 @@
-# 网关 OIDC / RBAC / ABAC 实施交接
+# 接续交接：网关 OIDC、RBAC/ABAC 与执行授权整改
 
-## 接续状态
+更新日期：2026-11-08。
 
-- 工作目录：`/Users/binhy/Binhy-Projects/cobotrix`
-- 分支：`codex/gateway-oidc-authorization`
-- origin：`git@github.com:Bin-hy/cobot-for.git`
-- 四份设计文档已获用户批准，处于开发阶段；不需要重新启动逐段审批。
-- T01–T20 完成，累计20/80。T34仅完成T19所需的既有URI方法登记修复，整体仍为进行中。其他任务以progress.md为准。
-- 代码和进度已提交：`7cc28ef`（主库凭据状态）、`b774719`（URI与应用权限适配）。`8b01876`是另一组已独立提交的OIDC sub字符串修复，需要保留。
-- 未完成全入口迁移或端到端验收，checklist.md没有提前勾选；不应宣称全部漏洞已修复。
-- 当前剩余工作区改动属于原有内容：两个`assets/*/.gitkeep`删除和未跟踪`docs/reviews/`。保留，不加入安全整改提交。每次开始仍先检查git status，其他聊天可能继续修改共享工作区。
-- 本轮只做本地提交，没有推送或部署。
+## 当前状态
 
-## 从哪里继续
+- 本机工作目录为 `/Users/xionghaoyi.binhy/BinhyPC/cobot-for`，分支 `codex/gateway-oidc-authorization`，远端 `git@github.com:Bin-hy/cobot-for.git`。原工作目录 `/Users/binhy/Binhy-Projects/cobotrix` 在本机不存在。
+- 四份设计文档已批准。T01–T23完成，当前23/80；T34仍部分完成。下一项T24。不要重新要求设计确认。
+- T21–T23生命周期与存储提交为 `73e01d1`。同轮第二组接入实际OIDC路由、时钟注入与HTTP测试并更新文档；以本分支最新git log为准。此前独立OIDC字符串sub修复 `8b01876` 已保留。
+- 开始时工作区干净；共享目录仍可能有其他聊天改动，每次先检查git status，保留他人改动及未跟踪文件，仅暂存任务文件。旧交接提到的资产占位文件删除在本次切换后未出现，不应自行恢复或制造这些改动。
+- 只有本地提交，没有push、部署或真实设备操作。完整链路尚未验收，checklist保持未验收；不能宣称全部漏洞修复。
 
-先阅读本目录的spec.md、plan.md、task.md、checklist.md、progress.md、evidence.md，再按依赖继续：
+## 已实现的生命周期
 
-1. T21：授权码原子消费。先验证client、redirect URI和PKCE，再在事务内条件消费及登记替代凭据。并发只能一次成功；错误verifier不能烧码。
-2. T22：普通refresh原子轮换。同一稳定grant/session/family，旧refresh只能消费一次，同时使对应旧access失效；签名或提交失败应回滚。
-3. T23：保留已消费refresh摘要，重用时撤销对应族及派生访问凭据，不影响其他会话。
-4. 再继续T24及其后任务，不跳过实际验证，不反复要求用户确认已批准的设计。
+1. T21：客户端认证、服务端受众绑定、redirect/PKCE/到期校验都在同一主库一致事务内进行；条件消费授权码并登记access/refresh、稳定grant/session/family后提交。16路并发仅一次成功。校验、签名、预算或提交失败不烧码、不遗留替代凭据。
+2. T22：锁定稳定grant→session→family→refresh，再原子消费旧refresh、撤销明确配对旧access并登记同根替代。保持原有权限上界，不按刷新时新角色或新资源范围扩大。access到期不妨碍仍有效的refresh；签名和提交失败回滚。
+3. T23：保留refresh摘要与消费历史。旧摘要重放先认证客户端并核对issuer/client/根归属，再撤销正确族及显式委托后代；过期祖先仍可保护活动后代。其他会话和仅minted_by关联的凭据不受影响。最多4次主库冲突重试继承原预算，双实例竞争不能恢复活动族；提交失败不回报已持久撤销。
+4. 实际OIDC授权码/refresh路由已调用上述生命周期。删除了先烧码与oauth_token明文独立签发/非原子轮换辅助方法。新access采用RS256、at+jwt及严格登记claims；ID Token的sub为字符串，aud保持client_id。
+5. 现有明确refresh-token hint的撤销入口兼容了统一配对登记，但完整撤销作用域、无hint、consent及Cookie退出/CSRF仍留在T25及后续。
 
-T21/T22的仓储写入和条件消费接口仍需实现；现有SecurityTransaction主要提供一致快照读取。不能把新生命周期写入放到另一个不受预算约束的连接上，绕过主库事务。
+## 实现入口与组装限制
 
-## 实现入口
+- `cobotusr/src/service/security/lifecycle.rs`：CodeExchangeRequest、RefreshRequest、SessionTokenSigner及SessionTokenSet；生产RSA签名使用spawn_blocking，其等待由原SecurityBudget约束。
+- `cobotusr/src/service/security/repository.rs`：同一主库SecurityTransaction的客户端/绑定读取、授权码CAS、refresh配对消费、族撤销与委托传播。REPEATABLE READ / READ WRITE，没有副本、缓存或另开不受预算限制连接的回退。
+- `cobotusr/src/migration/m20261108_000001_security_refresh_pair.rs`：添加security_session_client与凭据oidc_client_id/paired_access_jti，在原操作种子之后注册。旧记录允许NULL，刷新时缺必要事实失败关闭；没有自动补齐旧JWT。
+- `security_session_client`按issuer/client_id登记cobotusr或cobotsrv的audience/application，默认停用。不能从client_id猜受众或在refresh时切换旧会话受众。资源元数据缺失/旧glob不会自动升级为权限。
+- `cobotusr::serve_with_security_clock`需由宿主注入真实时钟健康监控。旧serve入口没有监控时，新OIDC兑换/刷新返回503；测试中显式健康时钟不代表生产同步监控。配置登记、健康就绪和生产启动接线仍属于T70/T71及迁移演练。
+- `cobotusr/src/service/oidc.rs`及`route/oidc.rs`是实际接入点；SecurityError通过AppError保留安全HTTP分类，机密客户端缺secret仍返回400，依赖不可用/超时返回503。
+- `tests/cobotusr/routes/security.rs`覆盖事务、并发、回滚、非空g1上界、过期祖先和双实例竞争；`routes/oidc.rs`覆盖真实RSA/JWKS HTTP及缺监控/不健康/HMAC失败关闭。
+- 普通API认证/当前凭据检查的完整组装仍待T32等任务；不能从本轮仓储检查推断旧access已被所有业务入口拒绝。旧/enforce缺主体证据返回401，不得恢复自报subject或默认放行。
 
-- `libs/auth/src/security/credential.rs`：严格JWT契约、CurrentCredentialChecker、AuthenticatedContext、DecisionValidity。上下文携带原始SecurityBudget；后续授权只能缩短预算和有效期。
-- `libs/auth/src/security/{identity,policy,message,budget,redaction}.rs`：身份命名空间、纯拒绝优先判定、不可变消息摘要、时限和脱敏工具。
-- `cobotusr/src/service/security/repository.rs`：SecurityRepository/SecurityTransaction、PgSecurityRepository。REPEATABLE READ / READ WRITE，同一事务读取凭据和根、绑定；检查备用/只读状态，没有副本或缓存回退。
-- `cobotusr/src/service/security/lifecycle.rs`：当前凭据与根的校验；status_for_snapshot供同一事务内的授权复用。minted_by只用于审计，revocation_parent_jti才表示委托撤销依赖。
-- `cobotusr/src/service/security/authorization.rs`：管理受众的URI授权及业务应用授权，复核登记claims/kid后使用共享纯判定器。
-- `cobotusr/src/service/{oidc,user,mcp_token,permission,authority}.rs`及对应route：旧签发/生命周期的实际调用点。OIDC sub已改为字符串，保留该修复，不恢复数字或用户0回退。
-- `cobotusr/src/entity/security_*.rs`和`migration/m20261107_00000{1,2}_*.rs`：已建立的凭据、稳定根、刷新族、绑定、许可和审计表；更新模型时检查数据库约束。
-- `tests/cobotusr/routes/security.rs`：真实PostgreSQL和真实RS256/JWKS测试；新增I用例继续放这里，使用security_tNN命名并确保非零用例执行。
+## 继续顺序
 
-## 必须保留的安全边界
+1. T24：本地/login、/register、/refresh统一登记UserSession、稳定根及IdP管理受众；移除旧本地独立签发旁路。
+2. T25：单凭据/当前会话/刷新族/应用根的明确撤销作用域，提交后回执；浏览器退出保留独立MCP根，Cookie变更校验CSRF。
+3. T26/T27：新建与轮换MCP统一生命周期、独立授权根及权限上界，不把被消费旧凭据当撤销父。
+4. 后续按task.md依赖推进，T34仍需完整操作目录/路由覆盖/应用种子。不要将当前默认失败关闭误认为全入口迁移完成。
 
-- 主体按issuer/kind/subject区分；签名证明、当前凭据状态和资源授权是不同步骤。
-- 未登记操作默认拒绝；扫描全部匹配显式拒绝，再考虑用户允许、角色允许，超级管理员不绕过拒绝。
-- 活动凭据/稳定根、签发范围、当前权限及资源系统约束同时成立才允许。
-- 同步安全链共享最多2秒预算；查询开始确定最多5秒的新鲜期，继承父/原期限并预留1秒时钟余量。不能转发或命中缓存后重新计时。全实例10秒撤权仍待后续验收。
-- 新访问凭据不为旧JWT补默认用途、受众或权限。StrictAccessState与生产仓储已通过隔离测试，但各服务的生产组装仍需后续任务完成。
-- refresh只存摘要，保留消费历史供重放检测。轮换替代保持稳定根，不能把被消费旧refresh当成替代凭据的撤销父。
-- 旧`/enforce`缺少主体证据，现明确返回401。不要恢复自报subject、缺资源或未知规则放行；新协议由T28/T29建立、云端调用方由T38迁移。
-- 新资源权限使用ResourceSelector JSON。缺失范围、旧glob和分隔符别名不能自动转成全设备；旧字符串权限解析仅为迁移期元数据。
-- 普通task:read需要可信owner且属于主体；读取他人任务使用独立操作。机器只用当前服务绑定，不借同名用户角色。
-- StreamConnect目前失败关闭，受限浏览器票据尚未接入。日志脱敏工具不等于所有服务日志已迁移，T65仍需完成。
-- T34种子按注册顺序位于新安全schema之后；它只补既有URI方法，已有登记与管理员授权不覆盖。仅新建个人服务行补标准角色授权，未给User添加网关执行权限。其完整操作目录和路由覆盖仍待完成。
+## 必须保留的安全语义
 
-## 实际验证与未完成门禁
+- 主体按issuer/kind/subject区分；签名证明、当前凭据状态和资源授权是分别必要的步骤。
+- 全部匹配显式拒绝先于允许，超级管理员不绕过拒绝；活动根、签发上界、当前权限与系统资源约束同时成立才允许。未登记操作和必要资源事实缺失默认拒绝。
+- 原始同步安全预算最多2秒；重试、缓存、转发和排队不得重新计时。查询开始确定最多5秒新鲜期，受父/原期限限制并预留1秒时钟余量。全实例10秒撤权仍待验收。
+- grant/session/family是稳定撤销根，minted_by只作审计；显式revocation_parent_jti才传播委托撤销。
+- refresh只存摘要并保留消费历史；失败响应不能包含秘密/底层数据库异常。没有真实时钟健康、正确绑定或RSA能力时不回落到旧签发路径。
+- 设备/任务所有权、签名许可、执行领取、Unknown和结果身份链仍需后续任务完成。StreamConnect仍失败关闭。
 
-最近通过：
+## 实际验证
 
-```bash
+2026-11-08最终代码实际执行并通过（详细失败到通过记录见evidence.md）：
+
+```text
 cargo test --test mod --locked -- --test-threads=4
-# 76 passed
+92 passed; 0 failed; 0 ignored
 cargo test -p auth -p cobotusr --lib --locked
-# auth 45 passed；cobotusr 22 passed
+auth 45 passed; cobotusr 23 passed
+cargo test --test mod oidc --locked -- --test-threads=4
+4 passed; 0 failed
 cargo clippy -p auth -p cobotusr --lib --tests --locked -- -D warnings
 cargo clippy --test mod --locked -- -D warnings
 cargo fmt --all -- --check
 git diff --check
 ```
 
-最后增加旧/enforce真实HTTP的401断言后，单独重跑该HTTP测试（1 passed）和集成目标clippy，均成功。auth 45中包含独立OIDC sub提交增加的3项基础库测试。
+工具链rustc/cargo 1.99.1，隔离Docker PostgreSQL 18-alpine可用，Cargo.lock未修改。Rust 1.99下async_trait重复must_use仅作相关trait/方法局部lint处理。proc-macro-error2 future-incompat提示仍存在。历史auth doc 8项失败/1项ignored尚待T79；完整workspace/all-features、前端、故障矩阵、多实例10秒撤权和checklist未验收。
 
-曾额外运行`cargo test -p auth --doc --locked`，记录了8项原有示例编译失败、1项ignored，尚待T79修正。完整workspace/all-features、前端、跨实例撤权、故障矩阵及checklist未验收。proc-macro-error2还有future-incompat提示，不要把它当成本次测试失败或当作已经修复。
+本轮仓库提交被宿主自动触发神医分析；回传没有具体finding内容，不代表安全或完整分析结束。不要为此重扫、上传或宣称验收通过。
 
-Docker隔离PostgreSQL测试已可运行，Cargo依赖按lock准备完毕。遇到沙箱/Docker访问限制时按工具的权限机制处理，不把环境失败、过滤为0或ignore记为通过。
-
-## 工作方式
-
-使用用户指定的mew-spec和本项目rust-dev-workflow技能。先写负向/并发测试取得失败证据，再实现并验证；每组相关任务更新progress.md/evidence.md并提交。只提交自己的文件，避免共享索引中混入其他任务。不要自动push、部署或向真实设备发指令。
-
-按AGENTS.md优先用CodeGraph回答结构问题；本轮没有可用CodeGraph工具，才采用本地检索，不能据此推断项目未初始化。下一Agent应以其实际工具可用性为准。
-
-## 可复制的开场提示词
+## 可复制开场提示
 
 ```text
-继续本项目已批准的“网关OIDC、RBAC/ABAC与执行授权整改”。
-工作目录 /Users/binhy/Binhy-Projects/cobotrix，分支 codex/gateway-oidc-authorization。
-先读取 docs/specs/gateway-oidc-authorization/handoff.md，以及该目录的 spec.md、plan.md、task.md、checklist.md、progress.md、evidence.md，并遵守 AGENTS.md、mew-spec、rust-dev-workflow。
-四份文档已经批准，直接继续开发，不重新索要设计确认。T01–T20完成（20/80），T34仅部分完成；从T21授权码原子消费开始，按依赖继续T22刷新轮换和T23重放保护。
-保持主库一致事务、原始2秒预算、不可延期有效期、拒绝优先、签发范围上界及稳定撤销根语义；先补失败和并发用例，验证通过后更新进度、证据并分组提交。
-旧/enforce已因缺少主体证据返回401，不得恢复放行。新入口和生产接线尚未全部完成；不能用组件测试代替端到端验收。
-先检查git status，保留已有资产占位文件删除、docs/reviews及其他聊天的改动。仅提交本任务文件，不自动push或部署；不要操作真实设备。报告实际测试数量及剩余问题。
+继续项目 /Users/xionghaoyi.binhy/BinhyPC/cobot-for 的网关OIDC、RBAC/ABAC与执行授权整改，分支 codex/gateway-oidc-authorization。
+先读 docs/specs/gateway-oidc-authorization/handoff.md 及同目录 spec.md、plan.md、task.md、checklist.md、progress.md、evidence.md；遵守实际可用的AGENTS.md、mew-spec和rust-dev-workflow。
+四份设计已批准，直接继续，不重新确认。T01–T23完成（23/80），T34部分完成；从T24本地登录汇入开始，再推进T25撤销作用域和T26/T27。
+先补失败和并发测试，再实现；原始2秒预算、主库一致事务、拒绝优先、权限上界与稳定撤销根语义必须保留。缺生产时钟监控或客户端绑定时当前OIDC路径失败关闭，不添加默认同步或client_id猜受众回退。
+检查并保留其他工作区改动；实际验证后更新进度/证据，分组本地提交。完整链路仍未验收，不宣称漏洞全部修复，不自动push、部署或操作真实设备。
 ```

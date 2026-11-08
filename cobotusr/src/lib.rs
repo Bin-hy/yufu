@@ -196,6 +196,30 @@ pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
+    serve_internal(cfg, listener, signal, None).await;
+}
+
+/// The clock-health monitor is supplied by the host. No assumed-synchronized
+/// fallback is allowed for transactional credential issuance.
+pub async fn serve_with_security_clock<F>(
+    cfg: Config,
+    listener: TcpListener,
+    signal: F,
+    clock: Arc<dyn auth::security::budget::Clock>,
+) where
+    F: Future<Output = ()> + Send + 'static,
+{
+    serve_internal(cfg, listener, signal, Some(clock)).await;
+}
+
+async fn serve_internal<F>(
+    cfg: Config,
+    listener: TcpListener,
+    signal: F,
+    security_clock: Option<Arc<dyn auth::security::budget::Clock>>,
+) where
+    F: Future<Output = ()> + Send + 'static,
+{
     info!("Server listening on {}", listener.local_addr().unwrap());
 
     // Initialize database connection
@@ -270,6 +294,7 @@ where
         database: database.clone(),
         refresh_token_manager: refresh_token_manager.clone(),
         id_token_signer: id_token_signer.clone(),
+        security_clock,
         im_events,
         ws_handle,
     };
@@ -466,12 +491,23 @@ pub struct AppState {
     refresh_token_manager: TokenManager,
     /// RS256 signer for cross-service access tokens (also exposed via JWKS).
     id_token_signer: Arc<IdTokenSigner>,
+    security_clock: Option<Arc<dyn auth::security::budget::Clock>>,
     pub im_events: crate::modules::im::service::ImEvents,
     pub ws_handle: crate::modules::im::service::WsHandle,
 }
 pub type IdType = i32;
 
 impl AppState {
+    pub fn security_clock(
+        &self,
+    ) -> std::result::Result<
+        Arc<dyn auth::security::budget::Clock>,
+        auth::security::error::SecurityError,
+    > {
+        self.security_clock
+            .clone()
+            .ok_or(auth::security::error::SecurityError::DependencyUnavailable)
+    }
     pub async fn init(&self) -> result::Result<()> {
         self.ensure_sadmin_authorities().await?;
         self.init_sadmin_from_config().await?;
