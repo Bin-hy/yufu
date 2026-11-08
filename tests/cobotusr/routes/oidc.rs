@@ -50,7 +50,7 @@ pub(super) fn rsa_test_token(config: &mut Config) -> (String, TestRsaFile) {
     )
 }
 
-const CLIENT_ID: &str = "cobotimx-test";
+const CLIENT_ID: &str = "example-spa-test";
 const CONFIDENTIAL_CLIENT_ID: &str = "confidential-pkce-test";
 const CONFIDENTIAL_CLIENT_SECRET: &str = "confidential-secret";
 const REDIRECT_URI: &str = "http://localhost:5174/oauth/callback";
@@ -224,7 +224,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
     use sea_orm::ConnectionTrait;
     for client_id in [CLIENT_ID, CONFIDENTIAL_CLIENT_ID] {
         db.execute_raw(sea_orm::Statement::from_sql_and_values(sea_orm::DbBackend::Postgres,
-            "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ($1,$2,'cobotsrv','cobotsrv',TRUE)",
+            "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ($1,$2,'resource-app','resource-app',TRUE)",
             [base_url.clone().into(), client_id.into()])).await.unwrap();
     }
     assert!(end_session.headers().contains_key("set-cookie"));
@@ -458,7 +458,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
     let jwks = Arc::new(
         auth::jwks::JwksClient::new(
             format!("{base_url}/.well-known/jwks.json"),
-            Some("cobotsrv".into()),
+            Some("resource-app".into()),
         )
         .await
         .unwrap(),
@@ -467,8 +467,8 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         jwks,
         CredentialExpectation::new(
             &base_url,
-            "cobotsrv",
-            "cobotsrv",
+            "resource-app",
+            "resource-app",
             vec![CredentialProfile::new(PrincipalKind::User, TokenUse::UserSession).unwrap()],
         )
         .unwrap(),
@@ -571,7 +571,7 @@ async fn assert_session_configuration_failure(mode: &str) {
     .await
     .unwrap();
     db.execute_raw(sea_orm::Statement::from_sql_and_values(sea_orm::DbBackend::Postgres,
-        "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ($1,$2,'cobotsrv','cobotsrv',TRUE)", [base_url.clone().into(), CLIENT_ID.into()])).await.unwrap();
+        "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ($1,$2,'resource-app','resource-app',TRUE)", [base_url.clone().into(), CLIENT_ID.into()])).await.unwrap();
     let code = OidcService::create_authorization_code(
         &db,
         CreateAuthCodeParams {

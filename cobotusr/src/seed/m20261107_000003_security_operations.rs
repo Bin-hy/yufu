@@ -1,5 +1,5 @@
-//! Versioned repair for the legacy method-blind URI seeds. The remaining
-//! application operation/catalog coverage is completed by T34.
+//! Versioned method-aware registration of authentication administration
+//! and owner-facing account operations.
 use crate::entity::{authority, authority_role, role};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::prelude::*;
@@ -59,10 +59,9 @@ const MANAGEMENT: &[(&str, &str)] = &[
     ("POST", "/oidc/scope"),
     ("POST", "/kickout"),
     ("POST", "/enforce"),
-    ("POST", "/im/outbox-dispatches"),
 ];
 // These existing owner-facing handlers also check the authenticated owner or
-// conversation membership. Registering them preserves their existing purpose;
+// account ownership. Registering them preserves their existing purpose;
 // it grants no role-writing or gateway/device execution permission.
 const PERSONAL: &[(&str, &str)] = &[
     ("GET", "/user"),
@@ -76,24 +75,6 @@ const PERSONAL: &[(&str, &str)] = &[
     ("PATCH", "/oidc/mcp-tokens/{id}"),
     ("DELETE", "/oidc/mcp-tokens/{id}"),
     ("POST", "/oidc/mcp-tokens/{id}/refresh"),
-    ("GET", "/im/users"),
-    ("GET", "/im/ws"),
-    ("GET", "/im/conversations"),
-    ("POST", "/im/conversations"),
-    ("GET", "/im/conversations/{id}"),
-    ("DELETE", "/im/conversations/{id}"),
-    ("GET", "/im/conversations/{id}/members"),
-    ("POST", "/im/conversations/{id}/members"),
-    ("DELETE", "/im/conversations/{id}/members/me"),
-    ("DELETE", "/im/conversations/{id}/members/{user_id}"),
-    ("PATCH", "/im/conversations/{id}/owner"),
-    ("PUT", "/im/conversations/{id}/read-state"),
-    ("GET", "/im/conversations/{id}/messages"),
-    ("POST", "/im/conversations/{id}/messages"),
-    ("DELETE", "/im/conversations/{id}/messages"),
-    ("PATCH", "/im/conversations/{id}/messages"),
-    ("GET", "/im/files"),
-    ("POST", "/im/files"),
 ];
 
 #[async_trait::async_trait]

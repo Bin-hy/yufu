@@ -1,8 +1,5 @@
 packages:
-  - "cobotweb/apps/*"
-  - "cobotweb/packages/*"
-  - "cobotweb"
-  - "cobotimx"
+  - "cobotweb/apps/cobotusr"
 allowBuilds:
   esbuild: true
   playwright-webkit: false

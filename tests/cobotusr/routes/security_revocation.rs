@@ -18,7 +18,7 @@ use std::sync::Arc;
 async fn context_for(
     set: &SessionTokenSet,
     lifecycle: Arc<CredentialLifecycle>,
-    clock: Arc<crate::cobotsrv::common::SecurityTestClock>,
+    clock: Arc<crate::cobotusr::common::SecurityTestClock>,
 ) -> AuthenticatedContext {
     let (jwks, _stop) = security_jwks().await;
     let expected = CredentialExpectation::new(
@@ -80,7 +80,7 @@ async fn independent_mcp(
 async fn assert_active(
     lifecycle: &CredentialLifecycle,
     reference: &CredentialRef,
-    clock: &Arc<crate::cobotsrv::common::SecurityTestClock>,
+    clock: &Arc<crate::cobotusr::common::SecurityTestClock>,
 ) {
     lifecycle
         .check_registered(reference, &security_budget(clock))
@@ -90,7 +90,7 @@ async fn assert_active(
 async fn assert_revoked(
     lifecycle: &CredentialLifecycle,
     reference: &CredentialRef,
-    clock: &Arc<crate::cobotsrv::common::SecurityTestClock>,
+    clock: &Arc<crate::cobotusr::common::SecurityTestClock>,
 ) {
     assert_eq!(
         lifecycle
@@ -188,8 +188,8 @@ async fn security_t25_credential_and_family_scopes_follow_only_explicit_delegati
         .await
         .unwrap()
         .tokens;
-    let parent = independent_mcp(&db, &manager, "mcp-parent", "cobotsrv").await;
-    let unrelated = independent_mcp(&db, &manager, "mcp-audit-only", "cobotsrv").await;
+    let parent = independent_mcp(&db, &manager, "mcp-parent", "resource-app").await;
+    let unrelated = independent_mcp(&db, &manager, "mcp-audit-only", "resource-app").await;
     let row = credential::Entity::find_by_id((parent.issuer().to_owned(), parent.jti().to_owned()))
         .one(&db)
         .await
@@ -198,7 +198,7 @@ async fn security_t25_credential_and_family_scopes_follow_only_explicit_delegati
     let mut child: credential::ActiveModel = row.into();
     child.jti = Set("mcp-delegation".into());
     child.token_use = Set("gateway_operation".into());
-    child.audience = Set("cobotlet:g1".into());
+    child.audience = Set("legacy-gateway:g1".into());
     child.binding = Set(serde_json::json!({"kind":"gateway","gateway_id":"g1"}));
     child.revocation_parent_jti = Set(Some(parent.jti().into()));
     child.insert(&db).await.unwrap();
@@ -251,14 +251,14 @@ async fn security_t25_application_revocation_includes_mcp_and_all_matching_sessi
     let second = redeem_session(&lifecycle, &second_code, &signer, &security_budget(&clock))
         .await
         .unwrap();
-    let mcp = independent_mcp(&db, &first, "app-mcp", "cobotsrv").await;
+    let mcp = independent_mcp(&db, &first, "app-mcp", "resource-app").await;
     let other = independent_mcp(&db, &manager, "other-app-mcp", "cobotusr").await;
     let context = context_for(&manager, lifecycle.clone(), clock.clone()).await;
     lifecycle
         .revoke_credentials(
             &context,
             RevocationScope::ApplicationGrants {
-                application: "cobotsrv".into(),
+                application: "resource-app".into(),
             },
             context.budget(),
         )

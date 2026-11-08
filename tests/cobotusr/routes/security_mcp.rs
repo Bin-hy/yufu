@@ -20,9 +20,10 @@ use sea_orm::EntityTrait;
 use std::sync::Arc;
 
 async fn seed_mcp(db: &DatabaseConnection) {
+    crate::cobotusr::common::seed_resource_application(db).await;
     let access = serde_json::to_string(
         &ResourceSelector::new(
-            "cobotsrv",
+            "resource-app",
             ResourceScope::Application {
                 kind: ResourceKind::Application,
             },
@@ -30,10 +31,10 @@ async fn seed_mcp(db: &DatabaseConnection) {
         .unwrap(),
     )
     .unwrap();
-    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres, "UPDATE permission SET action='mcp:access',resource_type='application',resource_pattern=$1 WHERE name='mcp:access' AND application_id=(SELECT id FROM application WHERE app_key='cobotsrv')", [access.into()])).await.unwrap();
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres, "UPDATE permission SET action='mcp:access',resource_type='application',resource_pattern=$1 WHERE name='mcp:access' AND application_id=(SELECT id FROM application WHERE app_key='resource-app')", [access.into()])).await.unwrap();
     let scope = serde_json::to_string(
         &ResourceSelector::new(
-            "cobotsrv",
+            "resource-app",
             ResourceScope::Gateway {
                 gateway_id: "g1".into(),
                 kind: ResourceKind::Device,
@@ -42,14 +43,14 @@ async fn seed_mcp(db: &DatabaseConnection) {
         .unwrap(),
     )
     .unwrap();
-    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres, "INSERT INTO permission (application_id,name,action,resource_type,resource_pattern,create_time,update_time) SELECT id,'t26-device','device:read','device',$1,NOW(),NOW() FROM application WHERE app_key='cobotsrv'", [scope.into()])).await.unwrap();
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres, "INSERT INTO permission (application_id,name,action,resource_type,resource_pattern,create_time,update_time) SELECT id,'t26-device','device:read','device',$1,NOW(),NOW() FROM application WHERE app_key='resource-app'", [scope.into()])).await.unwrap();
     execute(db,"INSERT INTO role_permission (role_id,permission_id,create_time) SELECT 3,p.id,NOW() FROM permission p WHERE p.name='t26-device'").await.unwrap();
 }
 async fn context(
     claims: &auth::security::credential::SecurityAccessClaims,
     token: &auth::security::identity::SecretToken,
     lifecycle: Arc<CredentialLifecycle>,
-    clock: Arc<crate::cobotsrv::common::SecurityTestClock>,
+    clock: Arc<crate::cobotusr::common::SecurityTestClock>,
 ) -> AuthenticatedContext {
     let (jwks, _stop) = security_jwks().await;
     StrictAccessState::new(
@@ -86,7 +87,7 @@ async fn issue(
         .issue_mcp(
             manager,
             McpIssueRequest {
-                application: "cobotsrv",
+                application: "resource-app",
                 name: "personal MCP",
                 ttl_days: Some(9999),
             },
@@ -99,7 +100,7 @@ async fn issue(
 async fn active(
     lifecycle: &CredentialLifecycle,
     set: &McpTokenSet,
-    clock: &Arc<crate::cobotsrv::common::SecurityTestClock>,
+    clock: &Arc<crate::cobotusr::common::SecurityTestClock>,
 ) {
     lifecycle
         .check_registered(
@@ -132,7 +133,7 @@ async fn security_t26_personal_management_mints_registered_independent_bounded_m
     let first = issue(&lifecycle, &manager, &signer).await.unwrap();
     let second = issue(&lifecycle, &manager, &signer).await.unwrap();
     assert_eq!(first.claims.token_use, TokenUse::McpAccess);
-    assert_eq!(first.claims.aud, "cobotsrv");
+    assert_eq!(first.claims.aud, "resource-app");
     assert_eq!(first.claims.exp - first.claims.iat, 90 * 86_400);
     assert!(first.claims.session_id.is_none() && first.claims.family_id.is_none());
     assert_ne!(first.claims.grant_id, session.claims.grant_id);
@@ -143,7 +144,7 @@ async fn security_t26_personal_management_mints_registered_independent_bounded_m
             first.claims.bounds.allows(
                 &op,
                 &ResourceRef::new(
-                    "cobotsrv",
+                    "resource-app",
                     ResourceTarget::Device {
                         gateway_id: gateway.into(),
                         device_id: "d".into()
@@ -292,7 +293,7 @@ async fn security_t26_signing_commit_and_inherited_budget_failures_leave_no_mcp(
             .issue_mcp(
                 &manager,
                 McpIssueRequest {
-                    application: "cobotsrv",
+                    application: "resource-app",
                     name: "slow",
                     ttl_days: None
                 },
@@ -320,7 +321,7 @@ async fn security_t26_signing_commit_and_inherited_budget_failures_leave_no_mcp(
             .issue_mcp(
                 &manager,
                 McpIssueRequest {
-                    application: "cobotsrv",
+                    application: "resource-app",
                     name: "fresh budget",
                     ttl_days: None
                 },
@@ -438,14 +439,14 @@ async fn security_t27_rotation_retains_root_ceiling_and_revokes_explicit_descend
     let mut child: credential::ActiveModel = row.clone().into();
     child.jti = Set("mcp-delegated".into());
     child.token_use = Set("gateway_operation".into());
-    child.audience = Set("cobotlet:g1".into());
+    child.audience = Set("legacy-gateway:g1".into());
     child.binding = Set(serde_json::json!({"kind":"gateway","gateway_id":"g1"}));
     child.revocation_parent_jti = Set(Some(old.claims.jti.clone()));
     child.insert(&db).await.unwrap();
     // Current role expansion and a newly logged-in manager cannot expand the old MCP.
     let broad = serde_json::to_string(
         &ResourceSelector::new(
-            "cobotsrv",
+            "resource-app",
             ResourceScope::Application {
                 kind: ResourceKind::Device,
             },
@@ -482,7 +483,7 @@ async fn security_t27_rotation_retains_root_ceiling_and_revokes_explicit_descend
             new.claims.bounds.allows(
                 &OperationId::new("device:read").unwrap(),
                 &ResourceRef::new(
-                    "cobotsrv",
+                    "resource-app",
                     ResourceTarget::Device {
                         gateway_id: gateway.into(),
                         device_id: "d".into()
@@ -535,7 +536,7 @@ async fn security_t27_rotation_retains_root_ceiling_and_revokes_explicit_descend
         .revoke_credentials(
             &manager,
             RevocationScope::ApplicationGrants {
-                application: "cobotsrv".into(),
+                application: "resource-app".into(),
             },
             &security_budget(&clock),
         )
@@ -682,7 +683,7 @@ async fn security_t26_overlapping_deny_and_invalid_metadata_never_expand_ceiling
     seed_mcp(&db).await;
     let broad = serde_json::to_string(
         &ResourceSelector::new(
-            "cobotsrv",
+            "resource-app",
             ResourceScope::Application {
                 kind: ResourceKind::Device,
             },
@@ -690,7 +691,7 @@ async fn security_t26_overlapping_deny_and_invalid_metadata_never_expand_ceiling
         .unwrap(),
     )
     .unwrap();
-    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO permission (application_id,name,action,resource_type,resource_pattern,create_time,update_time) SELECT id,'wide-read','device:read','device',$1,NOW(),NOW() FROM application WHERE app_key='cobotsrv'",[broad.into()])).await.unwrap();
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO permission (application_id,name,action,resource_type,resource_pattern,create_time,update_time) SELECT id,'wide-read','device:read','device',$1,NOW(),NOW() FROM application WHERE app_key='resource-app'",[broad.into()])).await.unwrap();
     execute(&db,"INSERT INTO user_permission (user_id,permission_id,allow,create_time,update_time) SELECT 1,id,FALSE,NOW(),NOW() FROM permission WHERE name='t26-device'").await.unwrap();
     let signer = SessionTestSigner::new();
     let session = login_local_session(&lifecycle, &signer, &security_budget(&clock))
@@ -740,7 +741,7 @@ async fn security_t26_overlapping_deny_and_invalid_metadata_never_expand_ceiling
     );
     let selector = serde_json::to_string(
         &ResourceSelector::new(
-            "cobotsrv",
+            "resource-app",
             ResourceScope::Application {
                 kind: ResourceKind::Application,
             },
@@ -749,7 +750,7 @@ async fn security_t26_overlapping_deny_and_invalid_metadata_never_expand_ceiling
     )
     .unwrap();
     db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"UPDATE permission SET action='mcp:access',resource_type='application',resource_pattern=$1 WHERE name='mcp:access'",[selector.into()])).await.unwrap();
-    execute(&db,"INSERT INTO permission (application_id,name,action,resource_type,resource_pattern,create_time,update_time) SELECT id,'ambiguous-deny','','application','*',NOW(),NOW() FROM application WHERE app_key='cobotsrv'").await.unwrap();
+    execute(&db,"INSERT INTO permission (application_id,name,action,resource_type,resource_pattern,create_time,update_time) SELECT id,'ambiguous-deny','','application','*',NOW(),NOW() FROM application WHERE app_key='resource-app'").await.unwrap();
     execute(&db,"INSERT INTO user_permission (user_id,permission_id,allow,create_time,update_time) SELECT 1,id,FALSE,NOW(),NOW() FROM permission WHERE name='ambiguous-deny'").await.unwrap();
     assert_eq!(
         issue(&lifecycle, &manager, &signer).await.err(),
@@ -831,7 +832,7 @@ async fn security_t26_application_revocation_blocks_mcp_from_an_older_snapshot()
         .revoke_credentials(
             &revoke_manager,
             RevocationScope::ApplicationGrants {
-                application: "cobotsrv".into(),
+                application: "resource-app".into(),
             },
             &security_budget(&clock),
         )

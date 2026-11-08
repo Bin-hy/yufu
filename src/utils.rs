@@ -1,6 +1,13 @@
-use tracing::debug;
-
 pub async fn shutdown_signal() {
-    let str = signal::wait_for_stop_signal().await;
-    debug!("Received signal: {}", str);
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }

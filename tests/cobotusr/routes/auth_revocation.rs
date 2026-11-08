@@ -64,7 +64,7 @@ async fn oidc_pair(fixture: &LocalHttpFixture, client_id: &str) -> serde_json::V
     )
     .await
     .unwrap();
-    fixture.db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ($1,$2,'cobotsrv','cobotsrv',TRUE)",[fixture.root.clone().into(),client_id.into()])).await.unwrap();
+    fixture.db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ($1,$2,'resource-app','resource-app',TRUE)",[fixture.root.clone().into(),client_id.into()])).await.unwrap();
     let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     let challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_owned();
     let code = OidcService::create_authorization_code(
@@ -365,7 +365,7 @@ async fn security_t25_http_consent_revocation_commits_registry_roots_and_consent
     assert_eq!(response.status(), 200);
     let receipt: serde_json::Value = response.json().await.unwrap();
     assert!(receipt["effective_by"].as_u64().is_some());
-    assert_eq!(count(&fixture,"SELECT COUNT(*) AS count FROM security_grant WHERE application='cobotsrv' AND revoked_at IS NOT NULL").await,1);
+    assert_eq!(count(&fixture,"SELECT COUNT(*) AS count FROM security_grant WHERE application='resource-app' AND revoked_at IS NOT NULL").await,1);
     assert_eq!(
         count(&fixture, "SELECT COUNT(*) AS count FROM oauth_consent").await,
         0

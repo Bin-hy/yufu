@@ -199,14 +199,14 @@ mod security_tests {
     fn expectation() -> CredentialExpectation {
         CredentialExpectation::new(
             "https://idp.test",
-            "cobotsrv",
+            "resource-app",
             "app",
             vec![CredentialProfile::new(PrincipalKind::User, TokenUse::UserSession).unwrap()],
         )
         .unwrap()
     }
     fn claims() -> Value {
-        json!({"iss":"https://idp.test","sub":"42","aud":"cobotsrv","iat":98,"exp":200,"jti":"credential-1","principal_kind":"user","token_use":"user_session","application":"app","grant_id":"grant-1","session_id":"session-1","bounds":{"grants":[]},"binding":{"kind":"none"}})
+        json!({"iss":"https://idp.test","sub":"42","aud":"resource-app","iat":98,"exp":200,"jti":"credential-1","principal_kind":"user","token_use":"user_session","application":"app","grant_id":"grant-1","session_id":"session-1","bounds":{"grants":[]},"binding":{"kind":"none"}})
     }
     fn header() -> Header {
         let mut h = Header::new(Algorithm::RS256);
@@ -239,7 +239,7 @@ mod security_tests {
         for (field, value) in [
             ("iss", json!("https://other.test")),
             ("aud", json!("cobotusr")),
-            ("aud", json!(["cobotsrv", "cobotusr"])),
+            ("aud", json!(["resource-app", "cobotusr"])),
             ("token_use", json!("mcp_access")),
             ("principal_kind", json!("machine")),
             ("sub", json!("")),
@@ -292,7 +292,7 @@ mod security_tests {
             (
                 PrincipalKind::User,
                 TokenUse::McpAccess,
-                "cobotsrv",
+                "resource-app",
                 json!({"kind":"none"}),
             ),
             (
@@ -306,12 +306,6 @@ mod security_tests {
                 TokenUse::PermissionSync,
                 "cobotusr:permission-sync",
                 json!({"kind":"none"}),
-            ),
-            (
-                PrincipalKind::Device,
-                TokenUse::DeviceAccess,
-                "cobotlet:g",
-                json!({"kind":"device","gateway_id":"g","device_id":"d"}),
             ),
         ] {
             let expected = CredentialExpectation::new(
@@ -335,15 +329,10 @@ mod security_tests {
                 )
                 .is_ok()
             );
-            if kind == PrincipalKind::Device {
-                raw["binding"] = json!({"kind":"device","gateway_id":"other","device_id":"d"});
-                assert!(
-                    c.verify_credential(&token(raw, header()), &expected, &ManualClock::new())
-                        .is_err()
-                );
-            }
         }
         assert!(CredentialProfile::new(PrincipalKind::Machine, TokenUse::UserSession).is_err());
+        assert!(CredentialProfile::new(PrincipalKind::Device, TokenUse::DeviceAccess).is_err());
+        assert!(CredentialProfile::new(PrincipalKind::User, TokenUse::StreamConnect).is_err());
         assert!(CredentialProfile::new(PrincipalKind::User, TokenUse::GatewayOperation).is_err());
     }
 

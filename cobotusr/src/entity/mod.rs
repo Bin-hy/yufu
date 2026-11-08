@@ -5,11 +5,7 @@ use serde::{Deserialize, Serialize};
 pub mod application;
 pub mod authority;
 pub mod authority_role;
-pub mod conversation;
-pub mod conversation_member;
-pub mod group;
 pub mod mcp_token;
-pub mod message;
 pub mod oauth_authorization_code;
 pub mod oauth_client;
 pub mod oauth_consent;
@@ -23,12 +19,10 @@ pub mod role_permission;
 pub mod security_binding;
 pub mod security_credential;
 pub mod security_grant;
-pub mod security_permit;
 pub mod security_refresh_family;
 pub mod security_session;
 pub mod user;
 pub mod user_authority;
-pub mod user_conversation;
 pub mod user_permission;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]

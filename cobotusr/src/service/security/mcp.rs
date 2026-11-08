@@ -273,7 +273,8 @@ fn validate_target(
     config: &McpTokenConfig,
 ) -> Result<(), SecurityError> {
     manager.ensure_current()?;
-    if application != "cobotsrv" || config.issuer != manager.principal().issuer() {
+    ResourceRef::new(application, ResourceTarget::Application)?;
+    if config.issuer != manager.principal().issuer() {
         return Err(SecurityError::Forbidden);
     }
     Ok(())

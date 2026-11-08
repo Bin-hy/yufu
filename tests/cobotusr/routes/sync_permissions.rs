@@ -8,13 +8,13 @@ use tokio::net::TcpListener;
 
 use super::super::common::{get_postgres_container, get_test_token, shutdown_signal};
 
-const SPA_CLIENT_ID: &str = "cobotsrv-spa-test";
-const MACHINE_CLIENT_ID: &str = "cobotsrv-sync-test";
+const SPA_CLIENT_ID: &str = "resource-app-spa-test";
+const MACHINE_CLIENT_ID: &str = "resource-app-sync-test";
 const MACHINE_CLIENT_SECRET: &str = "machine-secret";
 const PERMISSION_NAME: &str = "device:read";
 
 /// Boot a cobotusr with a public SPA client + a confidential machine client,
-/// mirroring the production cobotsrv/cobotsrv-sync split. Returns the Postgres
+/// mirroring the production resource-app/resource-app-sync split. Returns the Postgres
 /// container (must stay alive for the server's lifetime), base URL and an
 /// admin access token for verifying results via the permission API.
 async fn start_server() -> (ContainerAsync<GenericImage>, String, String) {

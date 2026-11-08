@@ -11,7 +11,7 @@ impl MigrationTrait for Migration {
                 "CREATE TABLE security_session_client (
                     issuer TEXT NOT NULL CHECK (issuer<>''),
                     client_id VARCHAR(512) NOT NULL REFERENCES oauth_client(client_id) ON DELETE RESTRICT,
-                    audience VARCHAR(512) NOT NULL CHECK (audience IN ('cobotusr','cobotsrv')),
+                    audience VARCHAR(512) NOT NULL CHECK (audience <> ''),
                     application VARCHAR(512) NOT NULL CHECK (application=audience),
                     enabled BOOLEAN NOT NULL DEFAULT FALSE,
                     PRIMARY KEY (issuer,client_id)

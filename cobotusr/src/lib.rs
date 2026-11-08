@@ -19,7 +19,6 @@ use tracing::{error, info, info_span, warn};
 use crate::config::Config;
 use crate::entity::role::RoleEnum;
 use crate::entity::user;
-use crate::modules::im::service::{ConnectionManager, event_channel, spawn_event_service};
 use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
@@ -33,7 +32,6 @@ pub mod config;
 pub mod entity;
 pub mod error;
 pub mod migration;
-pub mod modules;
 pub mod rbac;
 mod recording_middleware;
 mod result;
@@ -93,7 +91,6 @@ fn should_skip_body_logging(uri: &http::Uri, headers: &HeaderMap, api_prefix: &s
         format!("{api_prefix}/refresh"),
         format!("{api_prefix}/csrf"),
         format!("{api_prefix}/logout"),
-        format!("{api_prefix}/im/files"),
     ]
     .iter()
     .any(|skip| skip == path)
@@ -244,7 +241,7 @@ async fn serve_internal<F>(
         .await
         .unwrap();
 
-    // Refresh tokens stay HS256 / opaque-internal (cobotsrv issues + verifies them itself,
+    // Legacy refresh compatibility remains local to the authentication center (
     // they never cross service boundaries). Access tokens move to RS256 via id_token_signer.
     let refresh_token_manager = TokenManager::new(&cfg.auth.secret, cfg.auth.refresh_exp_seconds);
 
@@ -294,12 +291,6 @@ async fn serve_internal<F>(
         }
     };
 
-    // IM: websocket connection manager and event channel (before database_service move)
-    let im_db_conn = database_service.connection.clone();
-    let ws_handle = std::sync::Arc::new(ConnectionManager::new());
-    let (im_events, im_event_receiver) = event_channel();
-    let _im_event_service = spawn_event_service(im_db_conn, ws_handle.clone(), im_event_receiver);
-
     let database = Arc::new(database_service);
     let id_token_signer = Arc::new(id_token_signer);
 
@@ -309,8 +300,6 @@ async fn serve_internal<F>(
         refresh_token_manager: refresh_token_manager.clone(),
         id_token_signer: id_token_signer.clone(),
         security_clock,
-        im_events,
-        ws_handle,
     };
     let _ = app_state.init().await;
 
@@ -341,7 +330,7 @@ async fn serve_internal<F>(
     let sub_public_router = route::get_public_routes();
 
     // Service-to-service routes: Bearer JWT verified, but no user load / URI-RBAC,
-    // so machine callers (cobotsrv revocation introspection) always get JSON or 401.
+    // so external machine callers always get JSON or 401.
     let sub_service_router = route::get_service_routes().layer(middleware::from_fn_with_state(
         id_token_signer.clone(),
         access_middleware_local_rs256,
@@ -483,8 +472,6 @@ pub struct AppState {
     /// RS256 signer for cross-service access tokens (also exposed via JWKS).
     id_token_signer: Arc<IdTokenSigner>,
     security_clock: Option<Arc<dyn auth::security::budget::Clock>>,
-    pub im_events: crate::modules::im::service::ImEvents,
-    pub ws_handle: crate::modules::im::service::WsHandle,
 }
 pub type IdType = i32;
 
@@ -793,7 +780,7 @@ mod tests {
     #[test]
     fn test_redact_access_token_masks_each_token_and_preserves_other_parameters() {
         let uri: http::Uri =
-            "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4&access_token=first&access_token=second"
+            "/api/v1/oidc/userinfo?format=json&access_token=first&access_token=second"
                 .parse()
                 .unwrap();
 
@@ -801,7 +788,7 @@ mod tests {
 
         assert_eq!(
             redacted,
-            "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4&access_token=REDACTED&access_token=REDACTED"
+            "/api/v1/oidc/userinfo?format=json&access_token=REDACTED&access_token=REDACTED"
         );
         assert!(!redacted.contains("first"));
         assert!(!redacted.contains("second"));
@@ -809,10 +796,8 @@ mod tests {
 
     #[test]
     fn test_redact_access_token_leaves_uris_without_token_unchanged() {
-        let without_query: http::Uri = "/api/v1/im/users".parse().unwrap();
-        let without_token: http::Uri = "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4"
-            .parse()
-            .unwrap();
+        let without_query: http::Uri = "/api/v1/users".parse().unwrap();
+        let without_token: http::Uri = "/api/v1/oidc/userinfo?format=json".parse().unwrap();
 
         assert_eq!(
             redact_access_token(&without_query),
@@ -863,22 +848,22 @@ mod tests {
             "/api/v1"
         ));
         assert!(should_skip_body_logging(
-            &"/api/v1/im/files".parse().unwrap(),
+            &"/api/v1/csrf".parse().unwrap(),
             &headers,
             "/api/v1"
         ));
         assert!(!should_skip_body_logging(
-            &"/something-im/files".parse().unwrap(),
+            &"/other/csrf".parse().unwrap(),
             &headers,
             "/api/v1"
         ));
         assert!(!should_skip_body_logging(
-            &"/api/v1/im/users".parse().unwrap(),
+            &"/api/v1/users".parse().unwrap(),
             &headers,
             "/api/v1"
         ));
         assert!(should_skip_body_logging(
-            &"/api/v1/im/messages".parse().unwrap(),
+            &"/api/v1/test-upload".parse().unwrap(),
             &multipart_headers,
             "/api/v1"
         ));
@@ -919,7 +904,7 @@ mod tests {
             "/custom"
         ));
         assert!(should_skip_body_logging(
-            &"/custom/im/files".parse().unwrap(),
+            &"/custom/csrf".parse().unwrap(),
             &headers,
             "/custom"
         ));

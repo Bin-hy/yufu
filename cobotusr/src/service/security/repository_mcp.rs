@@ -53,7 +53,6 @@ impl PgSecurityTransaction {
             .parse()
             .map_err(|_| SecurityError::InvalidCredential)?;
         if c.token_use != TokenUse::McpAccess
-            || c.application != "cobotsrv"
             || c.aud != c.application
             || c.session_id.is_some()
             || c.family_id.is_some()

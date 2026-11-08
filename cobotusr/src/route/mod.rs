@@ -1,5 +1,4 @@
 use crate::AppState;
-use crate::modules::im;
 use axum::Router;
 
 pub mod application;
@@ -33,7 +32,6 @@ pub fn get_auth_routes() -> Router<AppState> {
         .merge(permission::get_auth_routes())
         .merge(role_permission::get_auth_routes())
         .merge(user_permission::get_auth_routes())
-        .nest("/im", im::router::init_im_router())
 }
 
 pub fn get_public_routes() -> Router<AppState> {
@@ -55,7 +53,7 @@ pub fn get_revocation_routes() -> Router<AppState> {
 /// Service-to-service routes: JWT-verified, but deliberately WITHOUT the
 /// user-load / URI-RBAC / recording middleware, so a misconfigured authority
 /// row or deleted user cannot produce non-JSON errors for machine callers
-/// (cobotsrv's MCP revocation client fails open on those).
+/// (resource-app's MCP revocation client fails open on those).
 pub fn get_service_routes() -> Router<AppState> {
     Router::new().merge(mcp::get_service_routes())
 }

@@ -12,7 +12,6 @@ use auth::security::{
     credential::{CredentialRef, SecurityAccessClaims},
     error::SecurityError,
     identity::{IdentityBinding, PrincipalKind, PrincipalRef, SecretToken, TokenUse},
-    message::SignedDocument,
     policy::{
         CredentialBounds, OperationContext, OperationId, PolicyRule, PolicySnapshot, PolicySubject,
         ResourceConstraint, ResourceFacts, ResourceRef, ResourceScope, ResourceSelector,
@@ -29,34 +28,13 @@ use uuid::Uuid;
 
 use crate::entity::{
     application, authority, authority_role, oauth_authorization_code, oauth_client, permission,
-    role, role_permission,
-    security_binding::{self, device, gateway_key},
-    security_credential as credential, security_grant as grant, security_permit as permit,
-    security_refresh_family as family, security_session as session, user, user_authority,
-    user_permission,
+    role, role_permission, security_binding, security_credential as credential,
+    security_grant as grant, security_refresh_family as family, security_session as session, user,
+    user_authority, user_permission,
 };
 
 pub fn refresh_digest(secret: &SecretToken) -> [u8; 32] {
     Sha256::digest(secret.expose_secret().as_bytes()).into()
-}
-/// Trusted registration and reads share a canonical SPKI DER fingerprint.
-pub fn gateway_key_fingerprint(pem: &str) -> Result<[u8; 32], SecurityError> {
-    use rsa::{
-        pkcs8::{DecodePublicKey, EncodePublicKey},
-        traits::PublicKeyParts,
-    };
-    if pem.len() > 16_384 {
-        return Err(SecurityError::InvalidCredential);
-    }
-    let public = rsa::RsaPublicKey::from_public_key_pem(pem)
-        .map_err(|_| SecurityError::InvalidCredential)?;
-    if !(2048..=8192).contains(&public.n().bits()) {
-        return Err(SecurityError::InvalidCredential);
-    }
-    let der = public
-        .to_public_key_der()
-        .map_err(|_| SecurityError::InvalidCredential)?;
-    Ok(Sha256::digest(der.as_bytes()).into())
 }
 fn unavailable(error: DbErr) -> SecurityError {
     if let DbErr::Exec(sea_orm::RuntimeErr::SqlxError(e))
@@ -131,7 +109,6 @@ pub(super) struct RegisteredState {
     pub session: Option<session::Model>,
     pub family: Option<family::Model>,
     pub service_binding: Option<ServiceBinding>,
-    pub device_binding: Option<device::Model>,
 }
 /// Trusted storage facts only, not an authentication or policy decision.
 pub struct CredentialSnapshot {
@@ -294,23 +271,6 @@ pub trait SecurityTransaction: Send {
         &mut self,
         key: &ServiceBindingKey,
     ) -> Result<Option<ServiceBinding>, SecurityError>;
-    async fn device_binding(
-        &mut self,
-        principal: &PrincipalRef,
-        application: &str,
-    ) -> Result<Option<device::Model>, SecurityError>;
-    async fn gateway_key(
-        &mut self,
-        issuer: &str,
-        application: &str,
-        gateway_id: &str,
-        kid: &str,
-    ) -> Result<Option<gateway_key::Model>, SecurityError>;
-    async fn permit(
-        &mut self,
-        application: &str,
-        request_id: Uuid,
-    ) -> Result<Option<permit::Model>, SecurityError>;
     async fn commit(self: Box<Self>) -> Result<(), SecurityError>;
     async fn rollback(self: Box<Self>) -> Result<(), SecurityError>;
 }
@@ -457,18 +417,12 @@ impl PgSecurityTransaction {
             } else {
                 None
             };
-        let device_binding = if kind == PrincipalKind::Device {
-            self.device_binding(&principal, &row.application).await?
-        } else {
-            None
-        };
         Ok(RegisteredState {
             credential: row,
             grant,
             session,
             family,
             service_binding,
-            device_binding,
         })
     }
     async fn snapshot(
@@ -697,13 +651,20 @@ impl SecurityTransaction for PgSecurityTransaction {
             }
             // New interactive management credentials carry a separately scoped
             // ceiling for the MCP resource server. Refresh retains the old ceiling.
-            grants.extend(
-                self.current_application_bounds(claims, "cobotsrv")
-                    .await?
-                    .grants()
-                    .iter()
-                    .cloned(),
-            );
+            let applications = self
+                .run(application::Entity::find().all(&self.transaction))
+                .await?;
+            for app in applications {
+                if app.app_key != "cobotusr" {
+                    grants.extend(
+                        self.current_application_bounds(claims, &app.app_key)
+                            .await?
+                            .grants()
+                            .iter()
+                            .cloned(),
+                    );
+                }
+            }
         } else {
             return self
                 .current_application_bounds(claims, &claims.application)
@@ -1290,110 +1251,6 @@ impl SecurityTransaction for PgSecurityTransaction {
             identity,
             bounds: CredentialBounds::new(grants),
         }))
-    }
-    async fn device_binding(
-        &mut self,
-        principal: &PrincipalRef,
-        application: &str,
-    ) -> Result<Option<device::Model>, SecurityError> {
-        if principal.kind() != PrincipalKind::Device {
-            return Ok(None);
-        }
-        validate_application(application)?;
-        let row = self
-            .run(
-                device::Entity::find()
-                    .filter(device::Column::Issuer.eq(principal.issuer()))
-                    .filter(device::Column::Subject.eq(principal.subject()))
-                    .filter(device::Column::Application.eq(application))
-                    .filter(device::Column::Enabled.eq(true))
-                    .one(&self.transaction),
-            )
-            .await?;
-        if let Some(row) = &row {
-            ResourceRef::new(
-                application,
-                ResourceTarget::Device {
-                    gateway_id: row.gateway_id.clone(),
-                    device_id: row.device_id.clone(),
-                },
-            )?;
-            if row.binding_revision.trim().is_empty() {
-                return Err(SecurityError::DependencyUnavailable);
-            }
-        }
-        Ok(row)
-    }
-    async fn gateway_key(
-        &mut self,
-        issuer: &str,
-        application: &str,
-        gateway_id: &str,
-        kid: &str,
-    ) -> Result<Option<gateway_key::Model>, SecurityError> {
-        PrincipalRef::new(issuer, PrincipalKind::Machine, gateway_id)?;
-        ResourceRef::new(
-            application,
-            ResourceTarget::GatewayKey {
-                gateway_id: gateway_id.into(),
-                kid: kid.into(),
-            },
-        )?;
-        let row = self
-            .run(
-                gateway_key::Entity::find()
-                    .filter(gateway_key::Column::Issuer.eq(issuer))
-                    .filter(gateway_key::Column::Application.eq(application))
-                    .filter(gateway_key::Column::GatewayId.eq(gateway_id))
-                    .filter(gateway_key::Column::Kid.eq(kid))
-                    .filter(gateway_key::Column::Enabled.eq(true))
-                    .one(&self.transaction),
-            )
-            .await?;
-        if let Some(row) = &row {
-            let now = now(self.clock.as_ref())?;
-            if u64::try_from(row.valid_from).map_err(|_| SecurityError::DependencyUnavailable)?
-                > now.saturating_sub(1000)
-                || u64::try_from(row.valid_until)
-                    .map_err(|_| SecurityError::DependencyUnavailable)?
-                    <= now.saturating_add(1000)
-            {
-                return Ok(None);
-            }
-            let fingerprint = gateway_key_fingerprint(&row.public_key)
-                .map_err(|_| SecurityError::DependencyUnavailable)?;
-            if fingerprint.as_slice() != row.public_key_fingerprint.as_slice() {
-                return Err(SecurityError::DependencyUnavailable);
-            }
-        }
-        Ok(row)
-    }
-    async fn permit(
-        &mut self,
-        application: &str,
-        request_id: Uuid,
-    ) -> Result<Option<permit::Model>, SecurityError> {
-        validate_application(application)?;
-        let row = self
-            .run(
-                permit::Entity::find()
-                    .filter(permit::Column::Application.eq(application))
-                    .filter(permit::Column::RequestId.eq(request_id))
-                    .one(&self.transaction),
-            )
-            .await?;
-        if let Some(row) = &row {
-            let _: PrincipalRef = decode(row.actor.clone())?;
-            let _: PrincipalRef = decode(row.presenter.clone())?;
-            let resource: ResourceRef = decode(row.resource.clone())?;
-            OperationId::new(&row.operation)?;
-            CredentialRef::new(&row.issuer, &row.jti)?;
-            SignedDocument::new(row.signed_permit.expose_secret().to_owned())?;
-            if resource.application() != row.application {
-                return Err(SecurityError::DependencyUnavailable);
-            }
-        }
-        Ok(row)
     }
     async fn commit(self: Box<Self>) -> Result<(), SecurityError> {
         self.budget

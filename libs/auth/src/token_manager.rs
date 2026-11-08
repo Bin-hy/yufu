@@ -35,7 +35,7 @@ impl TokenManager {
     /// # Example
     ///
     /// ```
-    /// use auth::TokenManager;
+    /// use auth::token_manager::TokenManager;
     ///
     /// let manager = TokenManager::new("mysecret", 3600);
     /// ```
@@ -61,12 +61,12 @@ impl TokenManager {
     /// # Example
     ///
     /// ```
-    /// use auth::TokenManager;
+    /// use auth::token_manager::TokenManager;
     ///
     /// let manager = TokenManager::new("mysecret", 3600);
     /// let token = manager.generate_token("user123").unwrap(); // String ID
     /// let token2 = manager.generate_token(42).unwrap();       // i32 ID
-    /// println!("Generated token: {}", token);
+    /// assert!(!token.is_empty());
     /// ```
     pub fn generate_token<IDTYPE>(&self, user_id: IDTYPE) -> JwtResult<String>
     where
@@ -126,7 +126,7 @@ impl TokenManager {
     /// # Example
     ///
     /// ```
-    /// use auth::{TokenManager, TokenError, Claims};
+    /// use auth::token_manager::{TokenManager, TokenError};
     ///
     /// let manager = TokenManager::new("mysecret", 3600);
     /// let token = manager.generate_token::<String>("user1".to_string()).unwrap();
@@ -305,19 +305,6 @@ impl IdTokenSigner {
         )
     }
 
-    /// Sign only the dedicated operation profile; never fall back to shared HMAC.
-    pub fn sign_gateway_operation(
-        &self,
-        permit: &crate::security::message::GatewayOperationPermit,
-    ) -> Result<crate::security::message::SignedDocument, crate::security::error::SecurityError>
-    {
-        let key = self
-            .rsa_encoding_key
-            .as_ref()
-            .ok_or(crate::security::error::SecurityError::InvalidCredential)?;
-        crate::security::message::sign_gateway_operation(permit, key, &self.kid)
-    }
-
     /// Create from RSA PEM private key.
     pub fn from_rsa_pem(pem: &[u8], expire_seconds: i64) -> Result<Self, String> {
         let encoding_key = EncodingKey::from_rsa_pem(pem)
@@ -482,7 +469,7 @@ impl IdTokenSigner {
 
     /// Verify a JWT access token using this signer's own key.
     ///
-    /// Used by cobotsrv to verify its own tokens locally (no JWKS round-trip).
+    /// Used by resource-app to verify its own tokens locally (no JWKS round-trip).
     /// Other services should use [`crate::jwks::JwksClient`] instead.
     /// `expected_aud` — if Some, requires the token's `aud` claim to match exactly.
     pub fn verify_access_token(

@@ -28,8 +28,7 @@ impl MigrationTrait for Migration {
         manager
             .get_connection()
             .execute_unprepared(
-            "DROP TABLE security_gateway_signing_key; DROP TABLE security_device_binding;
-             DROP TABLE security_binding; DROP TABLE security_credential; DROP TABLE security_refresh_family;
+            "DROP TABLE IF EXISTS security_gateway_signing_key; DROP TABLE IF EXISTS security_device_binding; DROP TABLE security_binding; DROP TABLE security_credential; DROP TABLE security_refresh_family;
              DROP TABLE security_session; DROP TABLE security_grant;",
             )
             .await?;
@@ -142,30 +141,4 @@ CREATE TABLE security_binding (
     enabled BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (issuer,client_id,token_use,application,audience)
 );
-CREATE TABLE security_device_binding (
-    id UUID PRIMARY KEY,
-    issuer TEXT NOT NULL CHECK (issuer <> ''),
-    subject VARCHAR(512) NOT NULL CHECK (subject <> ''),
-    application VARCHAR(512) NOT NULL CHECK (application <> ''),
-    gateway_id VARCHAR(512) NOT NULL CHECK (gateway_id <> ''),
-    device_id VARCHAR(512) NOT NULL CHECK (device_id <> ''),
-    binding_revision VARCHAR(512) NOT NULL CHECK (binding_revision <> ''),
-    enabled BOOLEAN NOT NULL DEFAULT FALSE,
-    UNIQUE (issuer,subject),
-    UNIQUE (application,gateway_id,device_id)
-);
-CREATE TABLE security_gateway_signing_key (
-    id UUID PRIMARY KEY,
-    issuer TEXT NOT NULL CHECK (issuer <> ''),
-    application VARCHAR(512) NOT NULL CHECK (application <> ''),
-    gateway_id VARCHAR(512) NOT NULL CHECK (gateway_id <> ''),
-    kid VARCHAR(128) NOT NULL CHECK (kid <> ''),
-    public_key TEXT NOT NULL CHECK (public_key <> ''),
-    public_key_fingerprint BYTEA NOT NULL UNIQUE CHECK (octet_length(public_key_fingerprint) = 32),
-    enabled BOOLEAN NOT NULL DEFAULT FALSE,
-    valid_from BIGINT NOT NULL CHECK (valid_from >= 0),
-    valid_until BIGINT NOT NULL CHECK (valid_until > valid_from),
-    UNIQUE (issuer,kid)
-);
-CREATE INDEX security_gateway_signing_key_gateway ON security_gateway_signing_key(application,gateway_id);
 "#;

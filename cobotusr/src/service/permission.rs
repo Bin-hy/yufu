@@ -8,7 +8,7 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 /// Resolve user roles (names) and permission names for a given target application.
 ///
 /// Looks up `aud` as the application's `app_key`. If no application with that
-/// key exists (e.g. for cobotsrv's own internal tokens), returns empty sets.
+/// key exists (e.g. for resource-app's own internal tokens), returns empty sets.
 ///
 /// Legacy metadata only: a string-name list cannot express resource scopes or
 /// overlapping denies. Strict authorization uses the structured primary snapshot,
@@ -104,7 +104,7 @@ pub struct EnforceRequest {
     /// Resource type (e.g. "device", "task"). Optional if action-only permission.
     #[serde(default)]
     pub resource_type: Option<String>,
-    /// Resource identifier (e.g. "cobotlet-0:lift"). Optional if no object match needed.
+    /// Resource identifier (e.g. "example-resource:lift"). Optional if no object match needed.
     #[serde(default)]
     pub resource_id: Option<String>,
 }

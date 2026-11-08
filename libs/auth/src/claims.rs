@@ -4,18 +4,17 @@ use std::fmt::{Debug, Display};
 /// Represents the payload (claims) contained within a JWT token.
 ///
 /// The `Claims` struct stores essential information about the token,
-/// such as the user ID, the issued-at timestamp, and the expiration time.
+/// such as the user ID and expiration time.
 ///
 /// # Fields
 ///
 /// * `id` - The unique identifier of the user or subject associated with the token.
-/// * `iat` - The UNIX timestamp (in seconds) when the token was issued.
 /// * `exp` - The UNIX timestamp (in seconds) when the token will expire.
 ///
 /// # Example
 ///
 /// ```
-/// use auth::Claims;
+/// use auth::claims::Claims;
 ///
 /// let claims = Claims {
 ///     id: "user123".to_string(),

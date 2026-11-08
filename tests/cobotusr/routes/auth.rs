@@ -908,3 +908,31 @@ async fn security_browser_loopback_aliases_and_rejection_diagnostics() {
         "csrf_cookie_requires_https"
     );
 }
+
+#[tokio::test]
+async fn auth_center_removed_im_routes_return_json_not_found() {
+    let fixture = local_http_fixture("healthy").await;
+    for suffix in ["/im/users", "/im/ws", "/im/files", "/im/conversations"] {
+        let response = fixture
+            .client
+            .get(format!("{}{suffix}", fixture.api))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 404, "removed route {suffix}");
+        assert!(
+            response.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .contains("application/json")
+        );
+    }
+    let response = fixture
+        .client
+        .post(format!("{}/im/conversations", fixture.api))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+}

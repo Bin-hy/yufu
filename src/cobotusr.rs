@@ -51,17 +51,7 @@ async fn main() -> Result<()> {
         cfg.log.level.to_ascii_uppercase()
     };
 
-    #[cfg(debug_assertions)]
-    log::set(format!(
-        "cobotsrv={},cobotusr={},net4mqtt={},http_log={}",
-        log_level, log_level, log_level, log_level
-    ));
-
-    #[cfg(not(debug_assertions))]
-    log::set(format!(
-        "cobotsrv={},cobotusr={},http_log={}",
-        log_level, log_level, log_level
-    ));
+    log::set(format!("cobotusr={},http_log={}", log_level, log_level));
 
     warn!("set log level: [{}]", log_level);
     if cfg.auth.allow_insecure_loopback_cookies {

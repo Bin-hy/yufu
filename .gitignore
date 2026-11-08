@@ -64,16 +64,7 @@ conf/oidc_rsa_private*.pem
 # Keep directories alive with .gitkeep so CI builds (--all-features) don't fail on
 # missing rust-embed folders.
 assets/*
-!assets/cobotlet/
-!assets/cobotrix/
-!assets/cobotsrv/
 !assets/cobotusr/
-assets/cobotlet/*
-!assets/cobotlet/.gitkeep
-assets/cobotrix/*
-!assets/cobotrix/.gitkeep
-assets/cobotsrv/*
-!assets/cobotsrv/.gitkeep
 assets/cobotusr/*
 !assets/cobotusr/.gitkeep
 node_modules
@@ -84,10 +75,6 @@ node_modules
 
 # Local configuration overrides (root-level only, not conf/ templates)
 /cobotusr.toml
-/cobotlet.toml
-/cobotsrv.toml
-/cobotmap.toml
-/cobotnil
 
 # redb
 data/uploads/
@@ -100,8 +87,4 @@ storage
 cobotweb/apps/cobotusr/test-results/
 cobotweb/apps/cobotusr/playwright-report/
 # Configuration
-cobotsrv.toml
-cobotlet.toml
-cobotnil
-/conf/cobolet.toml
 /conf/cobotusr.toml

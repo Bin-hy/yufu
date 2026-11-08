@@ -93,7 +93,11 @@ async fn issue_mcp_token(
         .issue_mcp(
             &manager,
             McpIssueRequest {
-                application: req.aud.as_deref().unwrap_or("cobotsrv"),
+                application: req
+                    .aud
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or_else(|| crate::error::AppError::BadRequest("aud is required".into()))?,
                 name,
                 ttl_days: req.ttl_days,
             },

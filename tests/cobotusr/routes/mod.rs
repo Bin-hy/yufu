@@ -1,4 +1,5 @@
 mod auth;
+mod auth_center;
 mod authority;
 mod mcp;
 mod oidc;

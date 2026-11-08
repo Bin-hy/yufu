@@ -60,11 +60,11 @@ impl CredentialProfile {
             (kind, token_use),
             (
                 PrincipalKind::User,
-                TokenUse::UserSession | TokenUse::McpAccess | TokenUse::StreamConnect
+                TokenUse::UserSession | TokenUse::McpAccess
             ) | (
                 PrincipalKind::Machine,
                 TokenUse::SecurityService | TokenUse::PermissionSync
-            ) | (PrincipalKind::Device, TokenUse::DeviceAccess)
+            )
         );
         if !valid {
             return Err(SecurityError::InvalidCredential);
@@ -504,17 +504,6 @@ pub(crate) fn verify_access_with_key(
         (IdentityBinding::None, PrincipalKind::User | PrincipalKind::Machine) => true,
         (IdentityBinding::Gateway { gateway_id }, PrincipalKind::Machine) => {
             valid_identifier(gateway_id)
-        }
-        (
-            IdentityBinding::Device {
-                gateway_id,
-                device_id,
-            },
-            PrincipalKind::Device,
-        ) => {
-            valid_identifier(gateway_id)
-                && valid_identifier(device_id)
-                && claims.aud == format!("cobotlet:{gateway_id}")
         }
         _ => false,
     };

@@ -6,51 +6,15 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-default-run = "cobotnil"
-
-[[bin]]
-name = "cobotnil"
-path = "src/cobotnil.rs"
-
-[[bin]]
-name = "cobotlet"
-path = "src/cobotlet.rs"
+default-run = "cobotusr"
+autobins = false
 
 [[bin]]
 name = "cobotusr"
 path = "src/cobotusr.rs"
 
-[[bin]]
-name = "cobotsrv"
-path = "src/cobotsrv.rs"
-
-[[bin]]
-name = "cobotmap"
-path = "src/cobotmap.rs"
-
-[[bin]]
-name = "cobotmap-verify"
-path = "src/cobotmap_verify.rs"
-
-[[bin]]
-name = "cobotrix"
-path = "src/cobotrix.rs"
-
-[[bin]]
-name = "cobotset"
-path = "src/cobotset.rs"
-
 [workspace]
-members = [
-    ".",
-    "cobotlet",
-    "cobotsrv",
-    "cobotusr",
-    "cobotset",
-    "cobotnet",
-    "cobotmap",
-    "libs/auth",
-]
+members = [".", "cobotusr", "libs/auth"]
 
 [workspace.package]
 version = "0.0.0"
@@ -60,10 +24,7 @@ authors = ["BinBat Ltd <hey@binbat.com>"]
 repository = "https://github.com/binbat/live777"
 
 [workspace.dependencies]
-cobotnet = { path = "cobotnet" }
 auth = {path = "libs/auth" }
-net4mqtt = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
-signal = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
 http-log = { git = "https://github.com/binbat/live777", rev = "a1ba82c" }
 futures = "0.3"
 axum = "0.8"
@@ -71,13 +32,10 @@ tower = "0.5"
 tower-http = "0.6"
 rust-embed = "8.7"
 mime_guess = "2.0"
-mime = "0.3"
-infer = "0.19"
 
 anyhow = "1.0"
 clap = "4.5"
 http = "1.3"
-http-body = "1.0"
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 serde = "1.0"
 serde_json = "1.0"
@@ -86,44 +44,30 @@ tracing = "0.1"
 url = "2.5"
 chrono = "0.4"
 
-utoipa-axum = "0.2"
 utoipa = { version = "5.4", features = ["axum_extras"] }
-utoipa-swagger-ui = {version = "9.0", features = ["axum"]}
+utoipa-swagger-ui = {version = "9.0", features = ["axum", "vendored"]}
 uuid = {version = "1.18.1", features = ["v4"]}
 
-redb = "4"
-rumqttc = "0.25"
-dashmap = "6"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
-net4mqtt = { workspace = true, features = ["test-utils"] }
 tracing = { workspace = true }
-serde = { workspace = true }
 anyhow = { workspace = true }
-uuid =  { workspace = true }
-auth = { workspace = true }
 
 toml = "1.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-testcontainers = {version = "0.25.0", features = ["blocking"]}
-testcontainers-modules = { version = "0.13.0", features = ["postgres"] }
 
-cobotlet = { path = "cobotlet" }
-cobotset = { path = "cobotset" }
 cobotusr = { path = "cobotusr" }
-cobotsrv = { path = "cobotsrv" }
-cobotmap = { path = "cobotmap" }
-signal = { workspace = true }
 
 [dev-dependencies]
+serde = { workspace = true }
+uuid =  { workspace = true }
+auth = { workspace = true }
+testcontainers = { version = "0.25.0", features = ["blocking"] }
 portpicker = "0.1.1"
-futures = { version = "0.3", default-features = false }
-reqwest = { workspace = true, features = ["socks", "json"] }
+reqwest = { workspace = true, features = ["json"] }
 serde_json = { workspace = true }
-tokio-tungstenite = "0.28"
-# cobotsrv MCP integration test helpers
 axum = { workspace = true }
 rsa = { version = "0.9", features = ["pem"] }
 jsonwebtoken = "9.3"
@@ -133,11 +77,9 @@ chrono = { workspace = true }
 sea-orm = { version = "2.0.0-rc.2", features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 
 [features]
-default = ["net4mqtt"]
-webui = ["cobotlet/webui", "cobotusr/webui", "cobotsrv/webui"]
-net4mqtt = ["cobotlet/net4mqtt", "cobotusr/net4mqtt", "cobotsrv/net4mqtt"]
+default = []
+webui = ["cobotusr/webui"]
 openapi = ["cobotusr/openapi"]
-easytier = ["cobotlet/easytier", "cobotsrv/easytier"]
 
 [profile.dev]
 # 默认是 2（完整调试信息）。改为 1（仅保留行号），可以减少 50%~80% 的体积

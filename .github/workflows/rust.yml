@@ -28,26 +28,32 @@ jobs:
                   components: rustfmt, clippy
             - name: Cache cargo registry and build
               uses: Swatinem/rust-cache@v2
-            - name: Install protoc
-              uses: arduino/setup-protoc@v3
-              # 【新增】专为 Windows 系统下载 Npcap SDK，并配置链接器环境变量
-            - name: Install Npcap SDK (Only for Windows)
-              if: runner.os == 'Windows'
-              shell: pwsh
-              run: |
-                  # 下载 Npcap SDK
-                  Invoke-WebRequest -Uri "https://npcap.com/dist/npcap-sdk-1.13.zip" -OutFile "npcap-sdk.zip"
-                  # 解压
-                  Expand-Archive -Path "npcap-sdk.zip" -DestinationPath "npcap-sdk"
-                  # 获取 x64 库文件的绝对路径
-                  $NpcapLibPath = "$PWD\npcap-sdk\Lib\x64"
-                  # 将路径追加到全局 LIB 环境变量中，让 MSVC 链接器能找到 Packet.lib
-                  echo "LIB=$NpcapLibPath;$env:LIB" >> $env:GITHUB_ENV
             - name: Show version information
               run: |
                   cargo --version
                   cargo fmt --version
                   cargo clippy --version
+
+            - name: Install Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '24'
+            - name: Install frontend dependencies
+              run: |
+                  npm install --global pnpm@12.10.1
+                  pnpm install --frozen-lockfile
+            - name: Build authentication frontend
+              run: pnpm build:cobotusr
+            - name: Verify frontend (Ubuntu)
+              if: matrix.os == 'ubuntu-latest'
+              run: |
+                  pnpm --filter @cobotweb/cobotusr test
+                  pnpm --filter @cobotweb/cobotusr check
+                  pnpm --filter @cobotweb/cobotusr lint
+            - name: Install browser engines (Ubuntu)
+              if: matrix.os == 'ubuntu-latest'
+              working-directory: cobotweb/apps/cobotusr
+              run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
 
             - name: Cargo format
               run: cargo fmt --all -- --check
@@ -58,7 +64,8 @@ jobs:
 
             - name: Cargo Test (only on Ubuntu)
               if: matrix.os == 'ubuntu-latest'
-              # 限制并发:testcontainers(Postgres) 在完全并发下会端口冲突/资源耗尽 flake,
-              # 与 CLAUDE.md「Run all tests (reduced concurrency)」保持一致。
-              run: cargo test --workspace --all-targets --all-features -- --test-threads=4
+              # Each integration case owns its disposable PostgreSQL database.
+              run: |
+                  cargo test --workspace --all-targets --all-features -- --test-threads=1
+                  cargo test --workspace --doc --all-features
 

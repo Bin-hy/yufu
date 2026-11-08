@@ -55,6 +55,7 @@ async fn security_t13_identity_schema_up_down_up_and_namespaced_jti_uniqueness()
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let tables = [
         "security_grant",
         "security_session",
@@ -80,6 +81,7 @@ async fn security_t13_identity_schema_up_down_up_and_namespaced_jti_uniqueness()
             .is_err()
     );
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     execute(&db, "INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at) VALUES
         ('00000000-0000-4000-8000-000000000001','https://idp.test','machine','service','app','service',1000),
         ('00000000-0000-4000-8000-000000000002','https://other.test','machine','service','app','service',1000)")
@@ -109,6 +111,7 @@ async fn security_t13_identity_roots_and_refresh_digest_constraints() {
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     execute(&db, "INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at)
         VALUES ('00000000-0000-4000-8000-000000000001','https://idp.test','user','alice','app','session',1000)")
         .await.unwrap();
@@ -165,13 +168,14 @@ async fn security_t13_identity_roots_and_refresh_digest_constraints() {
 }
 
 #[tokio::test]
-async fn security_t14_machine_device_and_gateway_key_bindings_are_constrained() {
+async fn security_t14_machine_bindings_are_constrained() {
     use cobotusr::migration::{Migrator, MigratorTrait};
     let (_container, url) = crate::cobotusr::common::get_postgres_container()
         .await
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let service = "INSERT INTO security_binding (id,issuer,client_id,token_use,application,audience,allowed_operations,identity_binding)
         VALUES ('00000000-0000-4000-8000-000000000001','https://idp.test','client','permission_sync','app','idp','[]','{\"kind\":\"none\"}')";
     execute(&db, service).await.unwrap();
@@ -197,236 +201,13 @@ async fn security_t14_machine_device_and_gateway_key_bindings_are_constrained() 
         .await
         .is_err()
     );
-    let device = "INSERT INTO security_device_binding (id,issuer,subject,application,gateway_id,device_id,binding_revision)
-        VALUES ('00000000-0000-4000-8000-000000000003','https://idp.test','device-principal','app','gateway-a','device-a','revision1')";
-    execute(&db, device).await.unwrap();
-    // One authenticated device principal cannot acquire another ownership row,
-    // and a second principal cannot seize an already registered physical target.
-    assert!(
-        execute(
-            &db,
-            &device
-                .replace(
-                    "00000000-0000-4000-8000-000000000003",
-                    "00000000-0000-4000-8000-000000000004"
-                )
-                .replace("gateway-a", "gateway-b")
-        )
-        .await
-        .is_err()
-    );
-    assert!(
-        execute(
-            &db,
-            &device
-                .replace(
-                    "00000000-0000-4000-8000-000000000003",
-                    "00000000-0000-4000-8000-000000000004"
-                )
-                .replace("device-principal", "other-principal")
-        )
-        .await
-        .is_err()
-    );
-    let key = "INSERT INTO security_gateway_signing_key (id,issuer,application,gateway_id,kid,public_key,public_key_fingerprint,valid_from,valid_until)
-        VALUES ('00000000-0000-4000-8000-000000000005','https://idp.test','app','gateway-a','key-a','test-public-key',decode(repeat('ab',32),'hex'),1000,9000)";
-    execute(&db, key).await.unwrap();
-    assert!(
-        execute(
-            &db,
-            &key.replace(
-                "00000000-0000-4000-8000-000000000005",
-                "00000000-0000-4000-8000-000000000006"
-            )
-            .replace("gateway-a", "gateway-b")
-        )
-        .await
-        .is_err()
-    );
-    assert!(
-        execute(
-            &db,
-            &key.replace(
-                "00000000-0000-4000-8000-000000000005",
-                "00000000-0000-4000-8000-000000000006"
-            )
-            .replace("key-a", "key-b")
-            .replace("gateway-a", "gateway-b")
-        )
-        .await
-        .is_err()
-    );
-    for table in [
-        "security_binding",
-        "security_device_binding",
-        "security_gateway_signing_key",
-    ] {
-        let row = db
-            .query_one_raw(Statement::from_string(
-                DbBackend::Postgres,
-                format!("SELECT enabled FROM {table}"),
-            ))
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(!row.try_get::<bool>("", "enabled").unwrap());
-        execute(&db, &format!("UPDATE {table} SET enabled=true"))
-            .await
-            .unwrap();
-        execute(&db, &format!("UPDATE {table} SET enabled=false"))
-            .await
-            .unwrap();
-        let row = db
-            .query_one_raw(Statement::from_string(
-                DbBackend::Postgres,
-                format!("SELECT enabled FROM {table}"),
-            ))
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(!row.try_get::<bool>("", "enabled").unwrap());
-    }
-    use cobotusr::entity::security_binding::{self, device as device_binding, gateway_key};
-    use sea_orm::EntityTrait;
-    let binding = security_binding::Entity::find()
-        .one(&db)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!binding.enabled);
-    assert_eq!(binding.token_use, "permission_sync");
-    assert_eq!(binding.allowed_operations, serde_json::json!([]));
-    let device = device_binding::Entity::find()
-        .one(&db)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!device.enabled);
-    assert_eq!(
-        (device.gateway_id.as_str(), device.device_id.as_str()),
-        ("gateway-a", "device-a")
-    );
-    let key = gateway_key::Entity::find().one(&db).await.unwrap().unwrap();
-    assert!(!key.enabled);
-    assert_eq!(key.public_key_fingerprint, vec![0xab; 32]);
-    assert_eq!((key.valid_from, key.valid_until), (1000, 9000));
 }
 
-async fn insert_permit_parent(db: &DatabaseConnection) {
+async fn insert_machine_access(db: &DatabaseConnection) {
     execute(db, "INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at)
         VALUES ('00000000-0000-4000-8000-000000000001','https://idp.test','machine','service','app','service',1000)").await.unwrap();
     execute(db, "INSERT INTO security_credential (issuer,jti,principal_kind,subject,credential_kind,token_use,audience,application,bounds,binding,grant_id,signing_key_id,issued_at,expires_at)
         VALUES ('https://idp.test','parent','machine','service','access','security_service','aud','app','{\"grants\":[]}','{\"kind\":\"none\"}','00000000-0000-4000-8000-000000000001','key',1000,9000)").await.unwrap();
-}
-
-const PERMIT_INSERT: &str = "INSERT INTO security_permit (issuer,jti,parent_jti,grant_id,application,request_id,task_id,actor,presenter,operation,resource,request_digest,signing_key_id,signed_permit,checked_at,valid_until,issued_at,expires_at)
-    VALUES ('https://idp.test','permit-jti','parent','00000000-0000-4000-8000-000000000001','app',
-    '00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003',
-    '{\"issuer\":\"https://idp.test\",\"kind\":\"machine\",\"subject\":\"service\"}',
-    '{\"issuer\":\"https://idp.test\",\"kind\":\"machine\",\"subject\":\"cloud\"}',
-    'task:execute','{\"application\":\"app\",\"target\":{\"kind\":\"device\",\"gateway_id\":\"g\",\"device_id\":\"d\"}}',
-    decode(repeat('ab',32),'hex'),'key','test-signed-permit',1000,6000,1000,6000)";
-
-#[tokio::test]
-async fn security_t15_permit_task_request_and_parent_bindings_are_unique() {
-    use cobotusr::migration::{Migrator, MigratorTrait};
-    let (_container, url) = crate::cobotusr::common::get_postgres_container()
-        .await
-        .unwrap();
-    let db = Database::connect(url).await.unwrap();
-    Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
-    assert!(
-        execute(&db, &PERMIT_INSERT.replace("'parent'", "'missing'"))
-            .await
-            .is_err()
-    );
-    assert!(
-        execute(
-            &db,
-            &PERMIT_INSERT.replace("1000,6000,1000,6000", "1000,6000,1000,7000")
-        )
-        .await
-        .is_err()
-    );
-    execute(&db, PERMIT_INSERT).await.unwrap();
-    // Neither a new request nor a new JWT can renew an already authorized task.
-    assert!(
-        execute(
-            &db,
-            &PERMIT_INSERT.replace("permit-jti", "new-permit").replace(
-                "00000000-0000-4000-8000-000000000002",
-                "00000000-0000-4000-8000-000000000004"
-            )
-        )
-        .await
-        .is_err()
-    );
-    assert!(
-        execute(
-            &db,
-            &PERMIT_INSERT.replace("permit-jti", "new-permit").replace(
-                "00000000-0000-4000-8000-000000000003",
-                "00000000-0000-4000-8000-000000000004"
-            )
-        )
-        .await
-        .is_err()
-    );
-    let non_task = PERMIT_INSERT
-        .replace("permit-jti", "read-permit")
-        .replace("task:execute", "device:read")
-        .replace("'00000000-0000-4000-8000-000000000003'", "NULL")
-        .replace(
-            "00000000-0000-4000-8000-000000000002",
-            "00000000-0000-4000-8000-000000000005",
-        );
-    execute(&db, &non_task).await.unwrap();
-    assert!(
-        execute(&db, &non_task.replace("read-permit", "other-read-permit"))
-            .await
-            .is_err()
-    );
-}
-
-#[tokio::test]
-async fn security_t15_audit_and_security_fact_commit_or_rollback_together() {
-    use cobotusr::migration::{Migrator, MigratorTrait};
-    use sea_orm::TransactionTrait;
-    let (_container, url) = crate::cobotusr::common::get_postgres_container()
-        .await
-        .unwrap();
-    let db = Database::connect(url).await.unwrap();
-    Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
-    let audit = "INSERT INTO security_audit (id,event_type,actor,operation,resource,outcome,reason_code,occurred_at)
-        VALUES ('00000000-0000-4000-8000-000000000006','permit_issued',
-        '{\"issuer\":\"https://idp.test\",\"kind\":\"machine\",\"subject\":\"service\"}',
-        'task:execute','{\"application\":\"app\"}','success','issued',1000)";
-    for commit in [false, true] {
-        let txn = db.begin().await.unwrap();
-        for sql in [PERMIT_INSERT, audit] {
-            txn.execute_raw(Statement::from_string(DbBackend::Postgres, sql.to_owned()))
-                .await
-                .unwrap();
-        }
-        if commit {
-            txn.commit().await.unwrap();
-        } else {
-            txn.rollback().await.unwrap();
-        }
-        for table in ["security_permit", "security_audit"] {
-            let row = db
-                .query_one_raw(Statement::from_string(
-                    DbBackend::Postgres,
-                    format!("SELECT COUNT(*) AS count FROM {table}"),
-                ))
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(row.try_get::<i64>("", "count").unwrap(), i64::from(commit));
-        }
-    }
 }
 
 #[tokio::test]
@@ -444,6 +225,7 @@ async fn security_t16_entities_keep_stable_roots_audit_origin_and_revocation_par
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     execute(&db, "INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at)
         VALUES ('00000000-0000-4000-8000-000000000001','https://idp.test','user','alice','app','session',1000)").await.unwrap();
     execute(
@@ -571,8 +353,9 @@ async fn security_t17_primary_transactions_refresh_hashes_and_disabled_bindings(
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    crate::cobotusr::common::seed_resource_application(&db).await;
+    insert_machine_access(&db).await;
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let budget = SecurityBudget::new(clock.clone()).unwrap();
     let repository = PgSecurityRepository::new(db.clone(), clock);
     let mut txn = repository.begin(&budget).await.unwrap();
@@ -618,38 +401,6 @@ async fn security_t17_primary_transactions_refresh_hashes_and_disabled_bindings(
     let mut txn = repository.begin(&budget).await.unwrap();
     let binding = txn.service_binding(&key).await.unwrap().unwrap();
     assert!(binding.bounds().grants().is_empty());
-    assert!(
-        txn.permit("app", uuid::Uuid::new_v4())
-            .await
-            .unwrap()
-            .is_none()
-    );
-    txn.rollback().await.unwrap();
-    execute(&db, PERMIT_INSERT).await.unwrap();
-    let mut txn = repository.begin(&budget).await.unwrap();
-    let permit = txn
-        .permit(
-            "app",
-            "00000000-0000-4000-8000-000000000002".parse().unwrap(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!format!("{permit:?}").contains("test-signed-permit"));
-    let active: cobotusr::entity::security_permit::ActiveModel = permit.clone().into();
-    assert!(!format!("{active:?}").contains("test-signed-permit"));
-    assert!(
-        cobotusr::entity::security_permit::StoredPermitValue::new(
-            "invalid token with whitespace".into()
-        )
-        .is_err()
-    );
-    assert!(
-        txn.permit("other", permit.request_id)
-            .await
-            .unwrap()
-            .is_none()
-    );
     txn.commit().await.unwrap();
 }
 
@@ -667,7 +418,8 @@ async fn security_t17_refresh_lookup_preserves_consumed_records_without_plaintex
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
+    crate::cobotusr::common::seed_resource_application(&db).await;
+    insert_machine_access(&db).await;
     // User roots are required for a refresh family, independently of machine roots.
     execute(&db, "INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at)
         VALUES ('00000000-0000-4000-8000-000000000010','https://idp.test','user','alice','app','session',1000)").await.unwrap();
@@ -705,7 +457,7 @@ async fn security_t17_refresh_lookup_preserves_consumed_records_without_plaintex
     row.secret_digest = Set(Some(refresh_digest(&secret).to_vec()));
     row.consumed_at = Set(Some(2000));
     row.insert(&db).await.unwrap();
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let budget = SecurityBudget::new(clock.clone()).unwrap();
     let repository = PgSecurityRepository::new(db, clock);
     let mut txn = repository.begin(&budget).await.unwrap();
@@ -730,7 +482,7 @@ async fn enable_service_binding(db: &DatabaseConnection) {
         VALUES ('00000000-0000-4000-8000-000000000007','https://idp.test','service','security_service','app','aud','[]','{\"kind\":\"none\"}',true)").await.unwrap();
 }
 fn security_budget(
-    clock: &std::sync::Arc<crate::cobotsrv::common::SecurityTestClock>,
+    clock: &std::sync::Arc<crate::cobotusr::common::SecurityTestClock>,
 ) -> auth::security::budget::SecurityBudget {
     auth::security::budget::SecurityBudget::new(clock.clone()).unwrap()
 }
@@ -790,8 +542,9 @@ async fn security_t18_unknown_revoked_expired_or_disabled_credentials_are_reject
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    crate::cobotusr::common::seed_resource_application(&db).await;
+    insert_machine_access(&db).await;
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let lifecycle = CredentialLifecycle::new(
         Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
         clock.clone(),
@@ -896,9 +649,10 @@ async fn security_t18_session_family_and_grant_revocation_keep_mcp_roots_indepen
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
+    crate::cobotusr::common::seed_resource_application(&db).await;
+    insert_machine_access(&db).await;
     insert_user_access(&db).await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let lifecycle = CredentialLifecycle::new(
         Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
         clock.clone(),
@@ -973,7 +727,7 @@ async fn security_t18_session_family_and_grant_revocation_keep_mcp_roots_indepen
 }
 
 #[tokio::test]
-async fn security_t18_delegation_checks_parent_and_rejects_redelegation_or_cycles() {
+async fn security_t18_legacy_execution_credentials_are_rejected() {
     use auth::security::{credential::CredentialRef, error::SecurityError};
     use cobotusr::{
         entity::security_credential as credential,
@@ -987,7 +741,8 @@ async fn security_t18_delegation_checks_parent_and_rejects_redelegation_or_cycle
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
+    crate::cobotusr::common::seed_resource_application(&db).await;
+    insert_machine_access(&db).await;
     enable_service_binding(&db).await;
     let mut row: credential::ActiveModel =
         credential::Entity::find_by_id(("https://idp.test".to_owned(), "parent".to_owned()))
@@ -1000,83 +755,28 @@ async fn security_t18_delegation_checks_parent_and_rejects_redelegation_or_cycle
     row.token_use = Set("gateway_operation".into());
     row.revocation_parent_jti = Set(Some("parent".into()));
     row.binding = Set(serde_json::json!({"kind":"gateway","gateway_id":"g"}));
-    row.audience = Set("cobotlet:g".into());
+    row.audience = Set("legacy-gateway:g".into());
     row.clone().insert(&db).await.unwrap();
     row.jti = Set("grandchild".into());
     row.revocation_parent_jti = Set(Some("child".into()));
     row.insert(&db).await.unwrap();
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let lifecycle = CredentialLifecycle::new(
         Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
         clock.clone(),
     );
-    let child = CredentialRef::new("https://idp.test", "child").unwrap();
-    assert!(
-        lifecycle
-            .check_registered(&child, &security_budget(&clock))
-            .await
-            .unwrap()
-            .active
-    );
-    assert_eq!(
-        lifecycle
-            .check_registered(
-                &CredentialRef::new("https://idp.test", "grandchild").unwrap(),
-                &security_budget(&clock)
-            )
-            .await
-            .err(),
-        Some(SecurityError::InvalidCredential)
-    );
-    execute(
-        &db,
-        "UPDATE security_credential SET revoked_at=2000 WHERE jti='parent'",
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        lifecycle
-            .check_registered(&child, &security_budget(&clock))
-            .await
-            .err(),
-        Some(SecurityError::CredentialRevoked)
-    );
-    execute(
-        &db,
-        "UPDATE security_credential SET revoked_at=NULL,expires_at=5000 WHERE jti='parent'",
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        lifecycle
-            .check_registered(&child, &security_budget(&clock))
-            .await
-            .err(),
-        Some(SecurityError::InvalidCredential)
-    );
-    execute(
-        &db,
-        "UPDATE security_credential SET expires_at=4000 WHERE jti='child'",
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        lifecycle
-            .check_registered(&child, &security_budget(&clock))
-            .await
-            .unwrap()
-            .validity
-            .valid_until(),
-        4000
-    );
-    execute(&db,"UPDATE security_credential SET token_use='gateway_operation',revocation_parent_jti='child',binding='{\"kind\":\"gateway\",\"gateway_id\":\"g\"}',audience='cobotlet:g' WHERE jti='parent'").await.unwrap();
-    assert_eq!(
-        lifecycle
-            .check_registered(&child, &security_budget(&clock))
-            .await
-            .err(),
-        Some(SecurityError::InvalidCredential)
-    );
+    for jti in ["child", "grandchild"] {
+        assert_eq!(
+            lifecycle
+                .check_registered(
+                    &CredentialRef::new("https://idp.test", jti).unwrap(),
+                    &security_budget(&clock)
+                )
+                .await
+                .err(),
+            Some(SecurityError::InvalidCredential)
+        );
+    }
 }
 
 struct SecuritySigningFixture {
@@ -1147,161 +847,6 @@ fn sign_security_claims(
 }
 
 #[tokio::test]
-async fn security_t17_device_and_gateway_key_registration_remains_scoped_and_current() {
-    use auth::security::{
-        error::SecurityError,
-        identity::{PrincipalKind, PrincipalRef},
-    };
-    use cobotusr::{
-        entity::security_binding::gateway_key,
-        migration::{Migrator, MigratorTrait},
-        service::security::repository::{
-            PgSecurityRepository, SecurityRepository, gateway_key_fingerprint,
-        },
-    };
-    use sea_orm::{ActiveModelTrait, Set};
-    use std::sync::Arc;
-    let (_container, url) = crate::cobotusr::common::get_postgres_container()
-        .await
-        .unwrap();
-    let db = Database::connect(url).await.unwrap();
-    Migrator::up(&db, None).await.unwrap();
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
-    let repo = PgSecurityRepository::new(db.clone(), clock.clone());
-    execute(&db,"INSERT INTO security_device_binding (id,issuer,subject,application,gateway_id,device_id,binding_revision)
-        VALUES ('00000000-0000-4000-8000-000000000001','https://idp.test','dev','app','g','d','r1')").await.unwrap();
-    let principal = PrincipalRef::new("https://idp.test", PrincipalKind::Device, "dev").unwrap();
-    let mut txn = repo.begin(&security_budget(&clock)).await.unwrap();
-    assert!(
-        txn.device_binding(&principal, "app")
-            .await
-            .unwrap()
-            .is_none()
-    );
-    txn.rollback().await.unwrap();
-    execute(&db, "UPDATE security_device_binding SET enabled=true")
-        .await
-        .unwrap();
-    let mut txn = repo.begin(&security_budget(&clock)).await.unwrap();
-    assert_eq!(
-        txn.device_binding(&principal, "app")
-            .await
-            .unwrap()
-            .unwrap()
-            .device_id,
-        "d"
-    );
-    assert!(
-        txn.device_binding(&principal, "other")
-            .await
-            .unwrap()
-            .is_none()
-    );
-    execute(&db, "UPDATE security_device_binding SET enabled=false")
-        .await
-        .unwrap();
-    // The same transaction keeps one source snapshot, rather than mixing a
-    // previously read identity with a later root/binding state.
-    assert!(
-        txn.device_binding(&principal, "app")
-            .await
-            .unwrap()
-            .is_some()
-    );
-    txn.commit().await.unwrap();
-    let mut txn = repo.begin(&security_budget(&clock)).await.unwrap();
-    assert!(
-        txn.device_binding(&principal, "app")
-            .await
-            .unwrap()
-            .is_none()
-    );
-    txn.rollback().await.unwrap();
-    assert_eq!(
-        gateway_key_fingerprint("invalid-public-key").err(),
-        Some(SecurityError::InvalidCredential)
-    );
-    let public = security_signing_fixture().public_pem.clone();
-    gateway_key::ActiveModel {
-        id: Set(uuid::Uuid::new_v4()),
-        issuer: Set("https://idp.test".into()),
-        application: Set("app".into()),
-        gateway_id: Set("g".into()),
-        kid: Set("gateway-key".into()),
-        public_key: Set(public.clone()),
-        public_key_fingerprint: Set(gateway_key_fingerprint(&public).unwrap().to_vec()),
-        enabled: Set(true),
-        valid_from: Set(1000),
-        valid_until: Set(9000),
-    }
-    .insert(&db)
-    .await
-    .unwrap();
-    let mut txn = repo.begin(&security_budget(&clock)).await.unwrap();
-    assert!(
-        txn.gateway_key("https://idp.test", "app", "g", "gateway-key")
-            .await
-            .unwrap()
-            .is_some()
-    );
-    for (issuer, app, gateway, kid) in [
-        ("https://other.test", "app", "g", "gateway-key"),
-        ("https://idp.test", "other", "g", "gateway-key"),
-        ("https://idp.test", "app", "other", "gateway-key"),
-        ("https://idp.test", "app", "g", "other-key"),
-    ] {
-        assert!(
-            txn.gateway_key(issuer, app, gateway, kid)
-                .await
-                .unwrap()
-                .is_none()
-        );
-    }
-    txn.rollback().await.unwrap();
-    for (change, reset) in [
-        (
-            "UPDATE security_gateway_signing_key SET valid_from=3000",
-            "UPDATE security_gateway_signing_key SET valid_from=1000",
-        ),
-        (
-            "UPDATE security_gateway_signing_key SET valid_until=3000",
-            "UPDATE security_gateway_signing_key SET valid_until=9000",
-        ),
-    ] {
-        execute(&db, change).await.unwrap();
-        let mut txn = repo.begin(&security_budget(&clock)).await.unwrap();
-        assert!(
-            txn.gateway_key("https://idp.test", "app", "g", "gateway-key")
-                .await
-                .unwrap()
-                .is_none()
-        );
-        txn.rollback().await.unwrap();
-        execute(&db, reset).await.unwrap();
-    }
-    execute(&db,"UPDATE security_gateway_signing_key SET public_key_fingerprint=decode(repeat('00',32),'hex')").await.unwrap();
-    let mut txn = repo.begin(&security_budget(&clock)).await.unwrap();
-    assert_eq!(
-        txn.gateway_key("https://idp.test", "app", "g", "gateway-key")
-            .await
-            .err(),
-        Some(SecurityError::DependencyUnavailable)
-    );
-    txn.rollback().await.unwrap();
-    execute(&db, "UPDATE security_gateway_signing_key SET enabled=false")
-        .await
-        .unwrap();
-    let mut txn = repo.begin(&security_budget(&clock)).await.unwrap();
-    assert!(
-        txn.gateway_key("https://idp.test", "app", "g", "gateway-key")
-            .await
-            .unwrap()
-            .is_none()
-    );
-    txn.rollback().await.unwrap();
-}
-
-#[tokio::test]
 async fn security_t18_verified_jwt_must_match_registry_claims_and_signing_key() {
     use auth::security::{
         credential::{
@@ -1321,9 +866,10 @@ async fn security_t18_verified_jwt_must_match_registry_claims_and_signing_key() 
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
+    crate::cobotusr::common::seed_resource_application(&db).await;
+    insert_machine_access(&db).await;
     enable_service_binding(&db).await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let lifecycle = Arc::new(CredentialLifecycle::new(
         Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
         clock.clone(),
@@ -1435,9 +981,10 @@ async fn security_t18_database_locks_outages_and_unhealthy_clocks_fail_closed() 
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
+    crate::cobotusr::common::seed_resource_application(&db).await;
+    insert_machine_access(&db).await;
     enable_service_binding(&db).await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let lifecycle = CredentialLifecycle::new(
         Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
         clock.clone(),
@@ -1485,84 +1032,11 @@ async fn security_t18_database_locks_outages_and_unhealthy_clocks_fail_closed() 
     );
 }
 
-#[tokio::test]
-async fn security_t18_device_access_requires_current_exact_device_binding() {
-    use auth::security::{credential::CredentialRef, error::SecurityError};
-    use cobotusr::{
-        entity::security_credential as credential,
-        migration::{Migrator, MigratorTrait},
-        service::security::{lifecycle::CredentialLifecycle, repository::PgSecurityRepository},
-    };
-    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
-    use std::sync::Arc;
-    let (_container, url) = crate::cobotusr::common::get_postgres_container()
-        .await
-        .unwrap();
-    let db = Database::connect(url).await.unwrap();
-    Migrator::up(&db, None).await.unwrap();
-    insert_permit_parent(&db).await;
-    execute(&db,"INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at)
-        VALUES ('00000000-0000-4000-8000-000000000015','https://idp.test','device','dev','app','device',1000)").await.unwrap();
-    execute(&db,"INSERT INTO security_device_binding (id,issuer,subject,application,gateway_id,device_id,binding_revision)
-        VALUES ('00000000-0000-4000-8000-000000000016','https://idp.test','dev','app','g','device-a','r1')").await.unwrap();
-    let mut row: credential::ActiveModel =
-        credential::Entity::find_by_id(("https://idp.test".to_owned(), "parent".to_owned()))
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap()
-            .into();
-    row.jti = Set("device-token".into());
-    row.subject = Set("dev".into());
-    row.principal_kind = Set("device".into());
-    row.token_use = Set("device_access".into());
-    row.audience = Set("cobotlet:g".into());
-    row.binding = Set(serde_json::json!({"kind":"device","gateway_id":"g","device_id":"device-a"}));
-    row.grant_id = Set("00000000-0000-4000-8000-000000000015".parse().unwrap());
-    row.insert(&db).await.unwrap();
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
-    let lifecycle = CredentialLifecycle::new(
-        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
-        clock.clone(),
-    );
-    let reference = CredentialRef::new("https://idp.test", "device-token").unwrap();
-    assert_eq!(
-        lifecycle
-            .check_registered(&reference, &security_budget(&clock))
-            .await
-            .err(),
-        Some(SecurityError::CredentialRevoked)
-    );
-    execute(&db, "UPDATE security_device_binding SET enabled=true")
-        .await
-        .unwrap();
-    assert!(
-        lifecycle
-            .check_registered(&reference, &security_budget(&clock))
-            .await
-            .unwrap()
-            .active
-    );
-    execute(
-        &db,
-        "UPDATE security_device_binding SET device_id='device-b'",
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        lifecycle
-            .check_registered(&reference, &security_budget(&clock))
-            .await
-            .err(),
-        Some(SecurityError::InvalidCredential)
-    );
-}
-
 async fn authenticated_policy_user(
     db: &DatabaseConnection,
     application: &str,
     bounds: auth::security::policy::CredentialBounds,
-    clock: std::sync::Arc<crate::cobotsrv::common::SecurityTestClock>,
+    clock: std::sync::Arc<crate::cobotusr::common::SecurityTestClock>,
     role_id: i32,
 ) -> auth::security::credential::AuthenticatedContext {
     use auth::security::{
@@ -1690,6 +1164,7 @@ async fn security_t19_uri_adapter_rejects_unknown_and_user_deny_beats_superadmin
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let authority = policy_authority(&db, "GET", "/security-test").await;
     let resource = uri_resource("cobotusr", "GET", "/security-test").unwrap();
     let bounds = CredentialBounds::new(vec![
@@ -1707,7 +1182,7 @@ async fn security_t19_uri_adapter_rejects_unknown_and_user_deny_beats_superadmin
         )
         .unwrap(),
     ]);
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let context = authenticated_policy_user(&db, "cobotusr", bounds, clock.clone(), 3).await;
     let service = AuthorizationService::new(
         Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
@@ -1815,6 +1290,7 @@ async fn security_t19_current_policy_cannot_extend_original_bounds_freshness_or_
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let authority = policy_authority(&db, "GET", "/security-test").await;
     policy_authority(&db, "POST", "/new-security-test").await;
     let resource = uri_resource("cobotusr", "GET", "/security-test").unwrap();
@@ -1833,7 +1309,7 @@ async fn security_t19_current_policy_cannot_extend_original_bounds_freshness_or_
         )
         .unwrap(),
     ]);
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let context = authenticated_policy_user(&db, "cobotusr", bounds, clock.clone(), 1).await;
     let service = AuthorizationService::new(
         Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
@@ -1935,6 +1411,7 @@ async fn security_t19_registration_repairs_missing_methods_without_granting_user
     .await
     .unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     assert!(
         authority_role::Entity::find_by_id((3, restricted))
             .one(&db)
@@ -2040,7 +1517,7 @@ async fn security_t19_live_legacy_routes_cannot_bypass_missing_registration() {
     let legacy = client
         .post(format!("{base}/enforce"))
         .bearer_auth(&token)
-        .json(&serde_json::json!({"application":"cobotsrv","subject":1,"action":"read"}))
+        .json(&serde_json::json!({"application":"resource-app","subject":1,"action":"read"}))
         .send()
         .await
         .unwrap();
@@ -2052,7 +1529,7 @@ async fn security_t19_live_legacy_routes_cannot_bypass_missing_registration() {
 fn policy_device(gateway: &str, device: &str) -> auth::security::policy::ResourceRef {
     use auth::security::policy::{ResourceRef, ResourceTarget};
     ResourceRef::new(
-        "cobotsrv",
+        "resource-app",
         ResourceTarget::Device {
             gateway_id: gateway.into(),
             device_id: device.into(),
@@ -2067,7 +1544,7 @@ fn scoped_grant(
     use auth::security::policy::{OperationId, ResourceSelector, ScopedOperation};
     ScopedOperation::new(
         OperationId::new(operation).unwrap(),
-        vec![ResourceSelector::new("cobotsrv", scope).unwrap()],
+        vec![ResourceSelector::new("resource-app", scope).unwrap()],
     )
     .unwrap()
 }
@@ -2092,7 +1569,7 @@ async fn application_permission(
     use cobotusr::entity::{application, permission};
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
     let app = application::Entity::find()
-        .filter(application::Column::AppKey.eq("cobotsrv"))
+        .filter(application::Column::AppKey.eq("resource-app"))
         .one(db)
         .await
         .unwrap()
@@ -2105,7 +1582,7 @@ async fn application_permission(
         action: Set(action.into()),
         resource_type: Set(Some(kind.into())),
         resource_pattern: Set(scope.map(|scope| {
-            serde_json::to_string(&ResourceSelector::new("cobotsrv", scope).unwrap()).unwrap()
+            serde_json::to_string(&ResourceSelector::new("resource-app", scope).unwrap()).unwrap()
         })),
         description: Set(None),
         create_time: Set(now),
@@ -2147,6 +1624,7 @@ async fn security_t20_overlapping_permissions_scan_denies_before_any_allow() {
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let broad = ResourceScope::Application {
         kind: ResourceKind::Device,
     };
@@ -2164,10 +1642,10 @@ async fn security_t20_overlapping_permissions_scan_denies_before_any_allow() {
     )
     .await;
     grant_role_permission(&db, 3, allow).await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let context = authenticated_policy_user(
         &db,
-        "cobotsrv",
+        "resource-app",
         CredentialBounds::new(vec![scoped_grant("device:read", broad)]),
         clock.clone(),
         3,
@@ -2273,6 +1751,7 @@ async fn security_t20_bounds_missing_scopes_and_unknown_operations_fail_closed()
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let target = policy_device("g1", "d");
     let permission = application_permission(
         &db,
@@ -2284,10 +1763,10 @@ async fn security_t20_bounds_missing_scopes_and_unknown_operations_fail_closed()
         }),
     )
     .await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let context = authenticated_policy_user(
         &db,
-        "cobotsrv",
+        "resource-app",
         CredentialBounds::new(vec![scoped_grant(
             "device:read",
             ResourceScope::Exact {
@@ -2354,7 +1833,7 @@ async fn security_t20_bounds_missing_scopes_and_unknown_operations_fail_closed()
         );
     }
     let legacy = cobotusr::service::permission::EnforceRequest {
-        application: "cobotsrv".into(),
+        application: "resource-app".into(),
         subject: 100,
         action: "read".into(),
         resource_type: None,
@@ -2387,6 +1866,7 @@ async fn security_t20_task_read_requires_owner_and_read_any_requires_separate_gr
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let scope = ResourceScope::Application {
         kind: ResourceKind::Task,
     };
@@ -2401,10 +1881,10 @@ async fn security_t20_task_read_requires_owner_and_read_any_requires_separate_gr
     )
     .await;
     grant_role_permission(&db, 3, read).await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let context = authenticated_policy_user(
         &db,
-        "cobotsrv",
+        "resource-app",
         CredentialBounds::new(vec![
             scoped_grant("task:read", scope.clone()),
             scoped_grant("task:read-any", scope),
@@ -2421,7 +1901,7 @@ async fn security_t20_task_read_requires_owner_and_read_any_requires_separate_gr
     )
     .unwrap();
     let resource = ResourceRef::new(
-        "cobotsrv",
+        "resource-app",
         ResourceTarget::Task {
             gateway_id: "g".into(),
             device_id: "d".into(),
@@ -2491,6 +1971,7 @@ async fn security_t20_long_structured_scopes_are_persisted_without_alias_concate
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let target = policy_device(&"g:".repeat(100), &"d:".repeat(100));
     let id = application_permission(
         &db,
@@ -2543,6 +2024,7 @@ async fn security_t20_machine_uses_current_binding_without_falling_back_to_same_
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     let broad = ResourceScope::Application {
         kind: ResourceKind::Device,
     };
@@ -2554,17 +2036,17 @@ async fn security_t20_machine_uses_current_binding_without_falling_back_to_same_
         Some(broad.clone()),
     )
     .await;
-    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let clock = Arc::new(crate::cobotusr::common::SecurityTestClock::new(2000));
     let user = authenticated_policy_user(
         &db,
-        "cobotsrv",
+        "resource-app",
         CredentialBounds::new(vec![scoped_grant("device:read", broad)]),
         clock.clone(),
         1,
     )
     .await;
     let grant = uuid::Uuid::new_v4();
-    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at) VALUES ($1,'https://idp.test','machine','100','cobotsrv','service',1000)",[grant.into()])).await.unwrap();
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at) VALUES ($1,'https://idp.test','machine','100','resource-app','service',1000)",[grant.into()])).await.unwrap();
     let mut row: credential::ActiveModel =
         credential::Entity::find_by_id(("https://idp.test".to_owned(), "policy-access".to_owned()))
             .one(&db)
@@ -2590,8 +2072,8 @@ async fn security_t20_machine_uses_current_binding_without_falling_back_to_same_
         issuer: Set("https://idp.test".into()),
         client_id: Set("100".into()),
         token_use: Set("security_service".into()),
-        application: Set("cobotsrv".into()),
-        audience: Set("cobotsrv".into()),
+        application: Set("resource-app".into()),
+        audience: Set("resource-app".into()),
         allowed_operations: Set(serde_json::to_value(vec![current]).unwrap()),
         identity_binding: Set(serde_json::json!({"kind":"none"})),
         enabled: Set(true),
@@ -2613,8 +2095,8 @@ async fn security_t20_machine_uses_current_binding_without_falling_back_to_same_
     ));
     let expected = CredentialExpectation::new(
         "https://idp.test",
-        "cobotsrv",
-        "cobotsrv",
+        "resource-app",
+        "resource-app",
         vec![CredentialProfile::new(PrincipalKind::Machine, TokenUse::SecurityService).unwrap()],
     )
     .unwrap();
@@ -2729,7 +2211,7 @@ const LOCAL_PASSWORD: &str = "test password";
 async fn local_fixture() -> (
     testcontainers::ContainerAsync<testcontainers::GenericImage>,
     DatabaseConnection,
-    std::sync::Arc<crate::cobotsrv::common::SecurityTestClock>,
+    std::sync::Arc<crate::cobotusr::common::SecurityTestClock>,
     std::sync::Arc<cobotusr::service::security::lifecycle::CredentialLifecycle>,
 ) {
     let fixture = session_fixture().await;
@@ -3211,7 +2693,7 @@ async fn session_code(
 async fn session_fixture() -> (
     testcontainers::ContainerAsync<testcontainers::GenericImage>,
     DatabaseConnection,
-    std::sync::Arc<crate::cobotsrv::common::SecurityTestClock>,
+    std::sync::Arc<crate::cobotusr::common::SecurityTestClock>,
     std::sync::Arc<cobotusr::service::security::lifecycle::CredentialLifecycle>,
 ) {
     use cobotusr::{
@@ -3226,6 +2708,7 @@ async fn session_fixture() -> (
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     Migrator::up(&db, None).await.unwrap();
+    crate::cobotusr::common::seed_resource_application(&db).await;
     execute(&db, "INSERT INTO \"user\" (id,username,role_id,create_time,update_time) VALUES (1,'session-user',1,NOW(),NOW())").await.unwrap();
     OidcService::register_client(
         &db,
@@ -3239,8 +2722,8 @@ async fn session_fixture() -> (
     )
     .await
     .unwrap();
-    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','session-test','cobotsrv','cobotsrv',TRUE)").await.unwrap();
-    let clock = std::sync::Arc::new(crate::cobotsrv::common::SecurityTestClock::new(
+    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','session-test','resource-app','resource-app',TRUE)").await.unwrap();
+    let clock = std::sync::Arc::new(crate::cobotusr::common::SecurityTestClock::new(
         chrono::Utc::now().timestamp() as u64 * 1000,
     ));
     let repo = std::sync::Arc::new(PgSecurityRepository::new(db.clone(), clock.clone()));
@@ -3447,7 +2930,7 @@ async fn security_t22_rotation_keeps_roots_bounds_and_explicit_access_pair() {
     use cobotusr::entity::security_credential as credential;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     let (_container, db, clock, lifecycle) = session_fixture().await;
-    execute(&db, r#"INSERT INTO permission (id,application_id,name,action,resource_type,resource_pattern,create_time,update_time) VALUES (777,(SELECT id FROM application WHERE app_key='cobotsrv'),'device:read','read','device','{"application":"cobotsrv","scope":{"scope":"gateway","gateway_id":"g1","kind":"device"}}',NOW(),NOW())"#).await.unwrap();
+    execute(&db, r#"INSERT INTO permission (id,application_id,name,action,resource_type,resource_pattern,create_time,update_time) VALUES (777,(SELECT id FROM application WHERE app_key='resource-app'),'device:read','read','device','{"application":"resource-app","scope":{"scope":"gateway","gateway_id":"g1","kind":"device"}}',NOW(),NOW())"#).await.unwrap();
     execute(
         &db,
         "INSERT INTO role_permission (role_id,permission_id,create_time) VALUES (1,777,NOW())",
@@ -3459,10 +2942,10 @@ async fn security_t22_rotation_keeps_roots_bounds_and_explicit_access_pair() {
     let first = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
         .await
         .unwrap();
-    assert_eq!(first.claims.aud, "cobotsrv");
-    assert_eq!(first.claims.application, "cobotsrv");
+    assert_eq!(first.claims.aud, "resource-app");
+    assert_eq!(first.claims.application, "resource-app");
     assert!(!first.claims.bounds.grants().is_empty());
-    execute(&db, r#"UPDATE permission SET resource_pattern='{"application":"cobotsrv","scope":{"scope":"gateway","gateway_id":"g2","kind":"device"}}' WHERE id=777"#).await.unwrap();
+    execute(&db, r#"UPDATE permission SET resource_pattern='{"application":"resource-app","scope":{"scope":"gateway","gateway_id":"g2","kind":"device"}}' WHERE id=777"#).await.unwrap();
     let second = rotate_session(
         &lifecycle,
         &first.refresh_token,
@@ -3754,17 +3237,21 @@ async fn security_t23_consumed_refresh_revokes_only_its_family_and_descendants()
     child.jti = Set("delegated-child".into());
     child.token_use = Set("gateway_operation".into());
     child.oidc_client_id = Set(None);
-    child.audience = Set("cobotlet:g1".into());
+    child.audience = Set("legacy-gateway:g1".into());
     child.binding = Set(serde_json::json!({"kind":"gateway","gateway_id":"g1"}));
     child.revocation_parent_jti = Set(Some(third.claims.jti.clone()));
     child.insert(&db).await.unwrap();
-    lifecycle
-        .check_registered(
-            &CredentialRef::new("https://idp.test", "delegated-child").unwrap(),
-            &security_budget(&clock),
-        )
-        .await
-        .unwrap();
+    // Historical descendants can still be revoked, but cannot authenticate.
+    assert_eq!(
+        lifecycle
+            .check_registered(
+                &CredentialRef::new("https://idp.test", "delegated-child").unwrap(),
+                &security_budget(&clock),
+            )
+            .await
+            .err(),
+        Some(SecurityError::InvalidCredential)
+    );
     execute(&db, &format!("UPDATE security_credential SET minted_by='{{\"issuer\":\"https://idp.test\",\"jti\":\"{}\"}}' WHERE jti='{}'", third.claims.jti, unrelated.claims.jti)).await.unwrap();
     assert_eq!(
         rotate_session(
@@ -3871,7 +3358,7 @@ async fn security_t23_wrong_client_and_unknown_digest_cannot_revoke_consumed_fam
     )
     .await
     .unwrap();
-    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','other-session','cobotsrv','cobotsrv',TRUE)").await.unwrap();
+    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','other-session','resource-app','resource-app',TRUE)").await.unwrap();
     assert_eq!(
         lifecycle
             .rotate_refresh(
@@ -4167,11 +3654,11 @@ async fn security_t21_client_binding_is_required_and_cannot_change_refresh_audie
             .err(),
         Some(SecurityError::InvalidCredential)
     );
-    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','session-test','cobotsrv','cobotsrv',TRUE)").await.unwrap();
+    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','session-test','resource-app','resource-app',TRUE)").await.unwrap();
     let set = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
         .await
         .unwrap();
-    assert_eq!(set.claims.aud, "cobotsrv");
+    assert_eq!(set.claims.aud, "resource-app");
     execute(
         &db,
         "UPDATE security_session_client SET audience='cobotusr',application='cobotusr'",

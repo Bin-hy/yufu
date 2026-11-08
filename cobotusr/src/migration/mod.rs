@@ -23,6 +23,7 @@ mod m20260725_000001_add_oauth_client_public_client;
 mod m20261107_000001_security_identity;
 mod m20261107_000002_security_permit_audit;
 mod m20261108_000001_security_refresh_pair;
+mod m20261108_000002_auth_center;
 
 use crate::seed;
 pub struct Migrator;
@@ -61,6 +62,7 @@ impl MigratorTrait for Migrator {
             seed::m20261107_000003_security_operations::Migration,
         ));
         migrations.push(Box::new(m20261108_000001_security_refresh_pair::Migration));
+        migrations.push(Box::new(m20261108_000002_auth_center::Migration));
         migrations
     }
 }

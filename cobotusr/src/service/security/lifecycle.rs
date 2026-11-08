@@ -14,7 +14,7 @@ use auth::security::{
     },
     error::SecurityError,
     identity::{IdentityBinding, PrincipalKind, PrincipalRef, SecretToken, TokenUse},
-    policy::{CredentialBounds, ResourceRef, ResourceTarget},
+    policy::CredentialBounds,
 };
 
 /// Transport input only; identity, roots and bounds are loaded on the primary.
@@ -706,27 +706,6 @@ fn active_claims(
         (None, None) => {}
         _ => return Err(SecurityError::InvalidCredential),
     }
-    if token_use == TokenUse::GatewayOperation {
-        if !matches!(kind, PrincipalKind::User | PrincipalKind::Machine)
-            || row.revocation_parent_jti.is_none()
-        {
-            return Err(SecurityError::InvalidCredential);
-        }
-        if let IdentityBinding::Gateway { gateway_id } = &claims.binding {
-            ResourceRef::new(
-                &claims.application,
-                ResourceTarget::Gateway {
-                    gateway_id: gateway_id.clone(),
-                },
-            )?;
-            if claims.aud != format!("cobotlet:{gateway_id}") {
-                return Err(SecurityError::InvalidCredential);
-            }
-        } else {
-            return Err(SecurityError::InvalidCredential);
-        }
-        return Ok(claims);
-    }
     CredentialProfile::new(kind, token_use)?;
     if row.revocation_parent_jti.is_some() {
         return Err(SecurityError::InvalidCredential);
@@ -735,7 +714,7 @@ fn active_claims(
         TokenUse::UserSession => "session",
         TokenUse::McpAccess => "mcp",
         TokenUse::SecurityService | TokenUse::PermissionSync => "service",
-        TokenUse::DeviceAccess => "device",
+        TokenUse::DeviceAccess => return Err(SecurityError::InvalidCredential),
         // The restricted browser ticket lifecycle is not yet wired. Never infer
         // missing session/parent security facts for an access-shaped stream token.
         TokenUse::StreamConnect | TokenUse::GatewayOperation => {
@@ -764,79 +743,21 @@ fn active_claims(
                 return Err(SecurityError::InvalidCredential);
             }
         }
-        PrincipalKind::Device => {
-            let binding = state
-                .device_binding
-                .as_ref()
-                .ok_or(SecurityError::CredentialRevoked)?;
-            if claims.binding
-                != (IdentityBinding::Device {
-                    gateway_id: binding.gateway_id.clone(),
-                    device_id: binding.device_id.clone(),
-                })
-                || claims.aud != format!("cobotlet:{}", binding.gateway_id)
-            {
-                return Err(SecurityError::InvalidCredential);
-            }
-        }
+        PrincipalKind::Device => return Err(SecurityError::InvalidCredential),
     }
     Ok(claims)
 }
 
 fn validate_parent(
     snapshot: &CredentialSnapshot,
-    claims: &SecurityAccessClaims,
-    time: u64,
+    _claims: &SecurityAccessClaims,
+    _time: u64,
 ) -> Result<Option<u64>, SecurityError> {
-    let current = &snapshot.current.credential;
-    if current.revocation_parent_jti.is_none() {
-        if snapshot.parent.is_some() {
-            return Err(SecurityError::InvalidCredential);
-        }
-        return Ok(None);
-    }
-    let parent = snapshot
-        .parent
-        .as_ref()
-        .ok_or(SecurityError::InvalidCredential)?;
-    if parent.credential.revocation_parent_jti.is_some()
-        || parent.credential.token_use == "gateway_operation"
-    {
+    // Legacy execution credentials remain readable for revocation, never usable for authentication.
+    if snapshot.current.credential.revocation_parent_jti.is_some() || snapshot.parent.is_some() {
         return Err(SecurityError::InvalidCredential);
     }
-    let parent_claims = active_claims(parent, time)?;
-    if claims.token_use != TokenUse::GatewayOperation
-        || !matches!(
-            parent_claims.token_use,
-            TokenUse::UserSession | TokenUse::McpAccess | TokenUse::SecurityService
-        )
-        || current.revocation_parent_jti.as_deref() != Some(parent_claims.jti.as_str())
-        || claims.iss != parent_claims.iss
-        || claims.sub != parent_claims.sub
-        || claims.principal_kind != parent_claims.principal_kind
-        || claims.application != parent_claims.application
-        || claims.grant_id != parent_claims.grant_id
-        || claims.session_id != parent_claims.session_id
-        || claims.family_id != parent_claims.family_id
-        || claims.exp > parent_claims.exp
-        || claims.iat < parent_claims.iat
-        || claims.jti == parent_claims.jti
-    {
-        return Err(SecurityError::InvalidCredential);
-    }
-    if let IdentityBinding::Gateway { gateway_id } = &parent_claims.binding
-        && claims.binding
-            != (IdentityBinding::Gateway {
-                gateway_id: gateway_id.clone(),
-            })
-    {
-        return Err(SecurityError::InvalidCredential);
-    }
-    parent_claims
-        .exp
-        .checked_mul(1000)
-        .map(Some)
-        .ok_or(SecurityError::InvalidCredential)
+    Ok(None)
 }
 
 pub(super) async fn authenticate_session_client(

@@ -5,9 +5,9 @@ use super::{
 use auth::security::{
     budget::{Clock, SecurityBudget},
     credential::{AuthenticatedContext, CredentialRef, DecisionValidity},
+    digest::RequestDigest,
     error::SecurityError,
     identity::{IdentityBinding, PrincipalKind, TokenUse},
-    message::RequestDigest,
     policy::{OperationContext, PolicyEffect, ResourceTarget, evaluate_policy},
 };
 use std::sync::Arc;

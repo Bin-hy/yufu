@@ -3,8 +3,8 @@
 pub mod budget;
 pub mod credential;
 pub mod csrf;
+pub mod digest;
 pub mod error;
 pub mod identity;
-pub mod message;
 pub mod policy;
 pub mod redaction;

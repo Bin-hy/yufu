@@ -5,8 +5,6 @@ use sea_orm::{DbErr, SqlErr};
 pub enum AppError {
     Security(auth::security::error::SecurityError),
     BrowserRejected(BrowserRejection),
-    NoAvailableDevice,
-    RequestProxyError,
     NotFound(String),
     AlreadyExists(String),
     Throw(String),
@@ -92,14 +90,6 @@ impl IntoResponse for AppError {
                     | SecurityError::CapacityExceeded => StatusCode::SERVICE_UNAVAILABLE,
                 };
                 (status, err.to_string()).into_response()
-            }
-            AppError::NoAvailableDevice => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "no available device".to_string(),
-            )
-                .into_response(),
-            AppError::RequestProxyError => {
-                (StatusCode::BAD_REQUEST, "request error".to_string()).into_response()
             }
             AppError::NotFound(err) => (StatusCode::NOT_FOUND, err).into_response(),
             AppError::AlreadyExists(err) => (StatusCode::CONFLICT, err).into_response(),

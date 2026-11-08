@@ -5,7 +5,6 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build:server": "",
         "build": "vue-tsc -b && vite build",
         "preview": "vite preview",
         "check": "vue-tsc -b --pretty false",
@@ -14,7 +13,6 @@
         "test:e2e": "playwright test"
     },
     "dependencies": {
-        "@cobotweb/shared": "workspace:*",
         "@lucide/vue": "1.70.0",
         "axios": "^1.12.2",
         "js-cookie": "^3.0.5",

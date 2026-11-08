@@ -26,13 +26,13 @@ use serde::Serialize;
 ///
 /// ```
 /// use axum::{Router, routing::get, extract::FromRequestParts, http::StatusCode};
-/// use auth::Claims;
+/// use auth::claims::Claims;
 ///
-/// async fn protected_endpoint(claims: Claims) -> String {
+/// async fn protected_endpoint(claims: Claims<i32>) -> String {
 ///     format!("Hello, user {}!", claims.id)
 /// }
 ///
-/// let app = Router::new().route("/me", get(protected_endpoint));
+/// let app: Router = Router::new().route("/me", get(protected_endpoint));
 /// ```
 ///
 /// In this example, `Claims` is automatically extracted from the request
