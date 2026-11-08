@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 /// A long-lived, revocable MCP access token issued via `POST /api/v1/oidc/mcp-tokens`.
 ///
-/// The row carries the token's `jti`; the token value itself is never stored. Setting
-/// `revoked = true` denylists that `jti` — cobotsrv checks this on every MCP request, so
-/// deleting (or rotating) a token takes effect within the resource server's cache TTL.
+/// Compatibility labels and timestamps only; the token value is never stored.
+/// The unified credential registry and grant are the source of security liveness.
+/// Committed revocation also updates this table for the legacy service adapter.
 #[sea_orm::model]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "mcp_token")]

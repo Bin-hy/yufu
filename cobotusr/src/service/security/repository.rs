@@ -1,4 +1,8 @@
 //! Primary-only, deadline-bounded security transactions. No replica or cache fallback.
+#[path = "repository_bounds.rs"]
+mod bounds;
+#[path = "repository_mcp.rs"]
+mod mcp;
 #[path = "repository_revocation.rs"]
 mod revocation;
 use std::{future::Future, sync::Arc};
@@ -213,6 +217,33 @@ pub trait SecurityTransaction: Send {
         &mut self,
         registration: SessionRegistration,
     ) -> Result<(), SecurityError>;
+    async fn application_bounds(
+        &mut self,
+        claims: &SecurityAccessClaims,
+        application: &str,
+    ) -> Result<CredentialBounds, SecurityError>;
+    async fn prepare_mcp_creation(&mut self, principal: &PrincipalRef)
+    -> Result<(), SecurityError>;
+    async fn register_mcp(
+        &mut self,
+        registration: McpRegistration,
+    ) -> Result<crate::entity::mcp_token::Model, SecurityError>;
+    async fn mcp_metadata(
+        &mut self,
+        principal: &PrincipalRef,
+        id: crate::IdType,
+    ) -> Result<Option<crate::entity::mcp_token::Model>, SecurityError>;
+    async fn consume_mcp(&mut self, old: &CredentialRef, at: u64) -> Result<(), SecurityError>;
+    async fn list_mcp(
+        &mut self,
+        principal: &PrincipalRef,
+    ) -> Result<Vec<crate::entity::mcp_token::Model>, SecurityError>;
+    async fn rename_mcp(
+        &mut self,
+        principal: &PrincipalRef,
+        id: crate::IdType,
+        name: &str,
+    ) -> Result<(), SecurityError>;
     async fn lock_refresh(
         &mut self,
         issuer: &str,
@@ -299,6 +330,14 @@ pub struct SessionRegistration {
 pub struct PgSecurityRepository {
     primary: DatabaseConnection,
     clock: Arc<dyn Clock>,
+}
+
+pub struct McpRegistration {
+    pub(super) claims: SecurityAccessClaims,
+    pub(super) key_id: String,
+    pub(super) name: String,
+    pub(super) minted_by: CredentialRef,
+    pub(super) new_root: bool,
 }
 impl PgSecurityRepository {
     pub fn new(primary: DatabaseConnection, clock: Arc<dyn Clock>) -> Self {
@@ -604,10 +643,7 @@ impl SecurityTransaction for PgSecurityTransaction {
         &mut self,
         claims: &SecurityAccessClaims,
     ) -> Result<CredentialBounds, SecurityError> {
-        use crate::service::{
-            authority::{uri_operation, uri_resource},
-            permission::{registered_operation, resource_selector},
-        };
+        use crate::service::authority::{uri_operation, uri_resource};
         let Some((user, role)) = self.policy_user(claims).await? else {
             return Err(SecurityError::InvalidCredential);
         };
@@ -659,61 +695,65 @@ impl SecurityTransaction for PgSecurityTransaction {
                     )?);
                 }
             }
-        } else if let Some(app) = self
-            .run(
-                application::Entity::find()
-                    .filter(application::Column::AppKey.eq(&claims.application))
-                    .one(&self.transaction),
-            )
-            .await?
-        {
-            let rows = self
-                .run(
-                    permission::Entity::find()
-                        .filter(permission::Column::ApplicationId.eq(app.id))
-                        .all(&self.transaction),
-                )
-                .await?;
-            let overrides = self
-                .run(
-                    user_permission::Entity::find()
-                        .filter(user_permission::Column::UserId.eq(user.id))
-                        .all(&self.transaction),
-                )
-                .await?;
-            let allowed = self
-                .run(
-                    role_permission::Entity::find()
-                        .filter(role_permission::Column::RoleId.eq(user.role_id))
-                        .all(&self.transaction),
-                )
-                .await?;
-            for row in rows {
-                if overrides
+            // New interactive management credentials carry a separately scoped
+            // ceiling for the MCP resource server. Refresh retains the old ceiling.
+            grants.extend(
+                self.current_application_bounds(claims, "cobotsrv")
+                    .await?
+                    .grants()
                     .iter()
-                    .any(|r| r.permission_id == row.id && !r.allow)
-                {
-                    continue;
-                }
-                if overrides
-                    .iter()
-                    .any(|r| r.permission_id == row.id && r.allow)
-                    || (role.is_some()
-                        && (superadmin || allowed.iter().any(|r| r.permission_id == row.id)))
-                {
-                    // Legacy or incomplete metadata confers no authority. An
-                    // invalid selector must never become a wildcard at issuance.
-                    let Some(operation) = registered_operation(&row) else {
-                        continue;
-                    };
-                    let Ok(selector) = resource_selector(&row, &claims.application) else {
-                        continue;
-                    };
-                    grants.push(ScopedOperation::new(operation, vec![selector])?);
-                }
-            }
+                    .cloned(),
+            );
+        } else {
+            return self
+                .current_application_bounds(claims, &claims.application)
+                .await;
         }
         Ok(CredentialBounds::new(grants))
+    }
+    async fn application_bounds(
+        &mut self,
+        claims: &SecurityAccessClaims,
+        application: &str,
+    ) -> Result<CredentialBounds, SecurityError> {
+        self.current_application_bounds(claims, application).await
+    }
+    async fn prepare_mcp_creation(
+        &mut self,
+        principal: &PrincipalRef,
+    ) -> Result<(), SecurityError> {
+        self.serialize_user_roots(principal).await?;
+        self.check_mcp_quota(principal).await
+    }
+    async fn register_mcp(
+        &mut self,
+        registration: McpRegistration,
+    ) -> Result<crate::entity::mcp_token::Model, SecurityError> {
+        self.insert_mcp(registration).await
+    }
+    async fn mcp_metadata(
+        &mut self,
+        principal: &PrincipalRef,
+        id: crate::IdType,
+    ) -> Result<Option<crate::entity::mcp_token::Model>, SecurityError> {
+        self.owned_mcp_metadata(principal, id).await
+    }
+    async fn consume_mcp(&mut self, old: &CredentialRef, at: u64) -> Result<(), SecurityError> {
+        self.consume_mcp_credential(old, at).await
+    }
+    async fn list_mcp(
+        &mut self,
+        principal: &PrincipalRef,
+    ) -> Result<Vec<crate::entity::mcp_token::Model>, SecurityError> {
+        self.active_mcp_metadata(principal).await
+    }
+    async fn rename_mcp(
+        &mut self,
+        principal: &PrincipalRef,
+        id: crate::IdType,
+        name: &str,
+    ) -> Result<(), SecurityError> {
+        self.rename_owned_mcp(principal, id, name).await
     }
     async fn register_session_pair(&mut self, r: SessionRegistration) -> Result<(), SecurityError> {
         if r.new_roots {

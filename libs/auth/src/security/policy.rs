@@ -400,6 +400,222 @@ impl CredentialBounds {
             .iter()
             .any(|grant| grant.matches(operation, resource))
     }
+
+    /// Preserve only operations and resource scopes allowed by both ceilings.
+    pub fn intersection(&self, other: &Self) -> Self {
+        let mut grants = Vec::new();
+        for left in &self.grants {
+            let mut resources = Vec::new();
+            for right in other
+                .grants
+                .iter()
+                .filter(|r| r.operation == left.operation)
+            {
+                for a in &left.resources {
+                    for b in &right.resources {
+                        if let Some(scope) = a.intersection(b)
+                            && !resources.contains(&scope)
+                        {
+                            resources.push(scope);
+                        }
+                    }
+                }
+            }
+            if !resources.is_empty() {
+                grants.push(ScopedOperation {
+                    operation: left.operation.clone(),
+                    resources,
+                });
+            }
+        }
+        Self::new(grants)
+    }
+}
+
+impl ResourceSelector {
+    /// The overlap of two finite typed scopes can only be the narrower scope.
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        if self.application != other.application {
+            return None;
+        }
+        if let ResourceScope::Exact { target } = &self.scope {
+            return other
+                .matches(&ResourceRef {
+                    application: self.application.clone(),
+                    target: target.clone(),
+                })
+                .then(|| self.clone());
+        }
+        if let ResourceScope::Exact { .. } = &other.scope {
+            return other.intersection(self);
+        }
+        let kind = |scope: &ResourceScope| match scope {
+            ResourceScope::Application { kind }
+            | ResourceScope::Gateway { kind, .. }
+            | ResourceScope::Device { kind, .. } => *kind,
+            ResourceScope::Exact { target } => target.kind(),
+        };
+        if kind(&self.scope) != kind(&other.scope) {
+            return None;
+        }
+        match (&self.scope, &other.scope) {
+            (ResourceScope::Application { .. }, _) => Some(other.clone()),
+            (_, ResourceScope::Application { .. }) => Some(self.clone()),
+            (
+                ResourceScope::Gateway { gateway_id: a, .. },
+                ResourceScope::Gateway { gateway_id: b, .. },
+            ) => (a == b).then(|| self.clone()),
+            (
+                ResourceScope::Gateway { gateway_id: a, .. },
+                ResourceScope::Device { gateway_id: b, .. },
+            ) => (a == b).then(|| other.clone()),
+            (ResourceScope::Device { .. }, ResourceScope::Gateway { .. }) => {
+                other.intersection(self)
+            }
+            (
+                ResourceScope::Device {
+                    gateway_id: a,
+                    device_id: x,
+                    ..
+                },
+                ResourceScope::Device {
+                    gateway_id: b,
+                    device_id: y,
+                    ..
+                },
+            ) => (a == b && x == y).then(|| self.clone()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod bounds_tests {
+    use super::*;
+
+    #[test]
+    fn security_t26_scope_intersection_keeps_narrower_resources_and_application() {
+        let broad = ResourceSelector::new(
+            "app",
+            ResourceScope::Application {
+                kind: ResourceKind::Device,
+            },
+        )
+        .unwrap();
+        let gateway = ResourceSelector::new(
+            "app",
+            ResourceScope::Gateway {
+                gateway_id: "g1".into(),
+                kind: ResourceKind::Device,
+            },
+        )
+        .unwrap();
+        let device = ResourceSelector::new(
+            "app",
+            ResourceScope::Device {
+                gateway_id: "g1".into(),
+                device_id: "d1".into(),
+                kind: ResourceKind::Device,
+            },
+        )
+        .unwrap();
+        let exact = ResourceSelector::new(
+            "app",
+            ResourceScope::Exact {
+                target: ResourceTarget::Device {
+                    gateway_id: "g1".into(),
+                    device_id: "d1".into(),
+                },
+            },
+        )
+        .unwrap();
+        for (left, right, expected) in [
+            (&broad, &gateway, &gateway),
+            (&gateway, &device, &device),
+            (&device, &exact, &exact),
+        ] {
+            assert_eq!(left.intersection(right).as_ref(), Some(expected));
+            assert_eq!(right.intersection(left).as_ref(), Some(expected));
+        }
+        for other in [
+            ResourceSelector::new("other", broad.scope.clone()).unwrap(),
+            ResourceSelector::new(
+                "app",
+                ResourceScope::Gateway {
+                    gateway_id: "g2".into(),
+                    kind: ResourceKind::Device,
+                },
+            )
+            .unwrap(),
+            ResourceSelector::new(
+                "app",
+                ResourceScope::Application {
+                    kind: ResourceKind::Tool,
+                },
+            )
+            .unwrap(),
+        ] {
+            assert!(gateway.intersection(&other).is_none());
+        }
+    }
+
+    #[test]
+    fn security_t26_bound_intersection_excludes_new_operations_and_wider_scopes() {
+        let bound = |operation: &str, scope| {
+            CredentialBounds::new(vec![
+                ScopedOperation::new(
+                    OperationId::new(operation).unwrap(),
+                    vec![ResourceSelector::new("app", scope).unwrap()],
+                )
+                .unwrap(),
+            ])
+        };
+        let old = bound(
+            "device:read",
+            ResourceScope::Gateway {
+                gateway_id: "g1".into(),
+                kind: ResourceKind::Device,
+            },
+        );
+        let current = bound(
+            "device:read",
+            ResourceScope::Application {
+                kind: ResourceKind::Device,
+            },
+        );
+        let intersection = old.intersection(&current);
+        for (gateway, expected) in [("g1", true), ("g2", false)] {
+            assert_eq!(
+                intersection.allows(
+                    &OperationId::new("device:read").unwrap(),
+                    &ResourceRef::new(
+                        "app",
+                        ResourceTarget::Device {
+                            gateway_id: gateway.into(),
+                            device_id: "d".into()
+                        }
+                    )
+                    .unwrap()
+                ),
+                expected
+            );
+        }
+        assert!(
+            old.intersection(&bound(
+                "device:write",
+                ResourceScope::Application {
+                    kind: ResourceKind::Device
+                }
+            ))
+            .grants()
+            .is_empty()
+        );
+        assert!(
+            old.intersection(&CredentialBounds::new(vec![]))
+                .grants()
+                .is_empty()
+        );
+    }
 }
 
 impl ScopedOperation {

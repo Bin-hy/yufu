@@ -355,7 +355,7 @@ impl CredentialLifecycle {
                 .ok_or(SecurityError::DependencyUnavailable)?,
         })
     }
-    async fn check_manager(
+    pub(super) async fn check_manager(
         &self,
         txn: &mut dyn SecurityTransaction,
         manager: &AuthenticatedContext,
@@ -380,7 +380,7 @@ impl CredentialLifecycle {
         }
         Ok(())
     }
-    async fn authorize_revocation_uri(
+    pub(super) async fn authorize_revocation_uri(
         &self,
         txn: &mut dyn SecurityTransaction,
         manager: &AuthenticatedContext,

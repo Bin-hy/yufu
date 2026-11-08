@@ -63,9 +63,22 @@ impl MigrationTrait for Migration {
                     application_id: Set(app.id),
                     name: Set(MCP_PERMISSION.to_string()),
                     description: Set(None),
-                    action: Set("access".to_string()),
-                    resource_type: Set(Some("mcp".to_string())),
-                    resource_pattern: Set(Some("*".to_string())),
+                    action: Set(MCP_PERMISSION.to_string()),
+                    resource_type: Set(Some("application".to_string())),
+                    resource_pattern: Set(Some(
+                        serde_json::to_string(
+                            &auth::security::policy::ResourceSelector::new(
+                                MCP_APP_KEY,
+                                auth::security::policy::ResourceScope::Application {
+                                    kind: auth::security::policy::ResourceKind::Application,
+                                },
+                            )
+                            .map_err(|_| {
+                                DbErr::Custom("invalid MCP application selector".into())
+                            })?,
+                        )
+                        .map_err(|_| DbErr::Custom("invalid MCP selector encoding".into()))?,
+                    )),
                     create_time: Set(now),
                     update_time: Set(now),
                 }

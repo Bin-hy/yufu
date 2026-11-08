@@ -3,6 +3,9 @@ use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, DbErr, S
 #[path = "security_revocation.rs"]
 mod revocation;
 
+#[path = "security_mcp.rs"]
+mod mcp;
+
 #[tokio::test]
 async fn security_t02_postgres_fixtures_are_isolated() {
     let (_first_container, first_url) = crate::cobotusr::common::get_postgres_container()

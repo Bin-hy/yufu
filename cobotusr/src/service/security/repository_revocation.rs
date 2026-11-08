@@ -186,6 +186,11 @@ impl PgSecurityTransaction {
         self.run(self.transaction.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
             format!("WITH RECURSIVE descendants(jti) AS (SELECT c.jti FROM security_credential c JOIN security_grant g ON g.id=c.grant_id WHERE {credential_filter} UNION SELECT c.jti FROM security_credential c JOIN descendants d ON c.revocation_parent_jti=d.jti WHERE c.issuer=$1) UPDATE security_credential SET revoked_at=COALESCE(revoked_at,$5) WHERE issuer=$1 AND jti IN (SELECT jti FROM descendants)"),
             parameters.iter().cloned().chain([at.into()]).collect::<Vec<_>>()))).await?;
+        // Compatibility labels mirror committed revocation; they never supply
+        // registry liveness or turn an unknown old JWT into a trusted credential.
+        self.run(self.transaction.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+            "UPDATE mcp_token m SET revoked=TRUE FROM security_credential c WHERE c.issuer=$1 AND c.principal_kind=$2 AND c.subject=$3 AND c.token_use='mcp_access' AND c.revoked_at IS NOT NULL AND m.jti=c.jti AND m.aud=c.application AND m.user_id::text=c.subject",
+            parameters[..3].to_vec()))).await?;
         if let StoredRevocationScope::ApplicationGrants(app) = scope {
             let user_id = principal
                 .subject()
