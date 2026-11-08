@@ -221,3 +221,50 @@ refresh-token hint的现有撤销入口兼容了统一配对登记；完整acces
 - 核心生命周期、存储、迁移与事务测试：`73e01d1`（`feat(auth): add atomic OIDC session exchange rotation and replay protection`）。
 - 实际OIDC路由、时钟注入、HTTP分类/测试和本轮文档作为第二组提交；完整提交身份由本分支git log查询。两组代码与上述最终验证时工作区代码相同，后续只更新文档。
 - 核心提交后宿主自动触发神医最近commit分析，原始回传9个文件均没有具体display/finds/vulnerability内容。该回传可能不完整，没有作为“安全”或“全部漏洞修复”的证据；本轮没有额外主动扫描或上传。
+
+## T24 本地登录汇入统一生命周期（2026-11-08）
+
+### 测试先行与失败记录
+
+- 先增加5项真实PostgreSQL事务、负向和并发测试，提供待实现接口的失败关闭桩后运行 `cargo test --test mod security_t24 --locked -- --test-threads=4`。首轮退出码101，0 passed、5 failed、0 ignored；夹具已实际启动，登录/注册/刷新桩返回DependencyUnavailable，分别未满足成功、认证失败、冲突和原始预算断言。不是将编译失败作为行为覆盖。首轮记录保存在本机临时日志 `/tmp/cobot-t24-red.log`。
+- 后续补3项真实HTTP用例，并将2项既有本地登录/注册测试改为RSA和显式健康测试时钟。中间缺少直接bcrypt测试依赖、authority名称与不合法撤销时间的夹具/编译问题已修正，没有计为行为通过；Cargo.lock未变更。
+
+### 已实现与实际观察
+
+- 新LocalLoginRequest、LocalRegisterRequest和LocalPassword汇入CredentialLifecycle。本地登录/注册固定签发RS256、at+jwt、aud/application=cobotusr、UserSession访问凭据及opaque refresh；登记稳定grant/session/family和明确配对关系，提交后才返回。账户、初始权限上界、凭据与根在同一主库一致事务写入；错误密码/未知用户不产生会话，RSA签名或延迟提交触发器失败同时回滚注册账户、凭据和根，随后相同用户名可重试成功。
+- 密码校验与散列使用spawn_blocking，其等待继承入口SecurityBudget；RSA签名及数据库事务继续受原始2秒预算限制，没有新建预算延长窗口。100ms登录子预算和1ms注册子预算实际返回DeadlineExceeded且不留下部分账户或凭据；这些子链断言不等于完整链路2秒验收。密码空格合法，拒绝空密码和超过72字节，72字节边界接受，Debug只显示脱敏标记，不静默截断或自动改写现存密码。
+- 两路同用户名注册只有一个账户/会话成功，另一请求返回Conflict；16路同一refresh轮换只有一个替代配对。旧access通过明确配对撤销，新配对保留同一grant/session/family和原权限上界。并发旧摘要重放最终撤销对应刷新族，这是T23的预期保护，不能把唯一成功响应理解为该族此后仍活动。
+- 本地refresh复用T22/T23原子轮换、摘要历史及重放保护，但核对明确来源。本地记录oidc_client_id为NULL，OIDC记录要求登记client_id；同为cobotusr受众的OIDC refresh仍不能从本地刷新，本地refresh也不能被OIDC客户端使用。旧refresh JWT即使签名有效且在旧refresh_token表登记，也不能从新路径签发。缺完整配对/根的旧NULL记录没有自动升级为可信凭据。
+- 登录上界包含当前允许并剔除显式拒绝，超级管理员也不能覆盖拒绝；刷新后新增权限不进入原上界。会话根撤销后本地刷新被拒绝；HTTP重放使该族替代access通过严格登记检查失败，另一次独立登录的会话仍可用。minted_by与revocation_parent_jti保持分离，没有把轮换审计来源变成撤销父。
+- UserService的auth/register/refresh使用统一生命周期，移除旧独立refresh JWT轮换及AppState::sign_access_token用户签发辅助。管理员创建账户只返回UserVO，不签发凭据。本地期限取config.auth，测试设access=300秒、refresh=3600秒，同时OIDC覆盖值=30/60秒，实际access与Cookie仍取本地期限。SessionTokenSet.id_token改为可选，本地不签发ID Token，OIDC继续保持client_id受众ID Token。
+- 真实HTTP注册/登录/刷新凭据通过实际JWKS的StrictAccessState验签并与主库登记匹配；检查错误密码、缺少Cookie、非法/缺字段请求、旧JWT拒绝、刷新配对失效与重放后的独立会话隔离。缺时钟监控、不健康时钟和HMAC签发配置分别使登录/注册返回503，不设置成功Cookie或留下新账户/凭据。健康测试时钟不代表生产同步监控。
+
+### 验证记录
+
+以下命令均实际执行并退出0：
+
+```text
+cargo test --test mod --locked -- --test-threads=4
+100 passed; 0 failed; 0 ignored; 0 filtered out
+
+cargo test -p auth -p cobotusr --lib --locked
+auth: 45 passed; 0 failed; 0 ignored
+cobotusr: 23 passed; 0 failed; 0 ignored
+
+cargo test --test mod security_t24 --locked -- --test-threads=4
+8 passed; 0 failed; 0 ignored; 92 filtered out
+
+cargo clippy -p auth -p cobotusr --lib --tests --locked -- -D warnings
+cargo clippy --test mod --locked -- -D warnings
+cargo fmt --all -- --check
+git diff --check
+```
+
+100项集成测试与68项单元测试运行后，仅按clippy要求移除了PrincipalRef::new调用中的多余借用；最终clippy与8项T24测试在该修正后通过，没有后续代码变化。本机临时日志为 `/tmp/cobot-t24-integration-final.log`、`/tmp/cobot-t24-libs-final.log`、`/tmp/cobot-t24-targeted-final.log`、`/tmp/cobot-t24-clippy-libs.log` 和 `/tmp/cobot-t24-clippy-mod.log`。proc-macro-error2仍有future-incompat提示。历史auth文档示例8项失败/1项ignored未在本轮修正或重新验收，仍待T79。
+
+### 未完成边界与分组提交
+
+- 当前完成24/80，T34仍部分完成，下一项T25。旧logout仍验证旧refresh JWT，新opaque refresh会被拒绝；旧kickout只修改旧表，不能据此声称新会话已撤销。全撤销作用域、OIDC退出/无hint撤销与Cookie变更的CSRF校验尚待T25；浏览器退出保留独立MCP根仍未验收。
+- 普通API当前凭据检查完整接线仍待T32。生产宿主必须通过serve_with_security_clock注入真实同步监控；普通serve无监控时新的OIDC及本地签发/刷新均失败关闭。生产时钟组装、前端、完整workspace/all-features、故障矩阵、跨服务10秒撤权与完整checklist尚未验收，不能宣称完整链路或全部漏洞已修复。
+- 核心生命周期、仓储、OIDC可选ID Token适配及事务测试提交为 `19cf7df7ab113c139169404bd3f73121b31cec1a`（`feat(auth): add registered local sessions to the shared lifecycle`）。实际本地入口、用户服务清理、HTTP测试与本轮文档作为第二组本地提交；提交身份由本分支git log查询。仅暂存任务文件，没有push、部署或真实设备操作。
+- 核心提交后宿主自动触发神医分析，4个文件回传均没有具体display/finds/vulnerability内容。该回传不证明安全或完整分析已结束，没有作为验收证据；本轮没有额外主动扫描或上传。

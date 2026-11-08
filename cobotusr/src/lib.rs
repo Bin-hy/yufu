@@ -543,39 +543,6 @@ impl AppState {
         }
     }
 
-    /// Sign an access token addressed to a given audience (`aud`).
-    /// Used by both the legacy `/api/v1/login` flow (`aud="cobotsrv"`) and the
-    /// OIDC token endpoint (`aud=client_id`).
-    pub async fn sign_access_token(
-        &self,
-        sub: IdType,
-        aud: &str,
-        scope: &str,
-    ) -> result::Result<String> {
-        let iss = self.issuer();
-        // Resolve the user's roles + permissions for the target application
-        // (`aud` is the app_key) so they travel in the JWT. This lets resource
-        // servers enforce locally via `require_perm!`'s JWT-fallback mode without
-        // a PDP round-trip. Superadmin gets all of the app's permissions.
-        let (roles, permissions) = crate::service::permission::resolve_user_permissions(
-            &self.database.connection,
-            sub,
-            aud,
-        )
-        .await?;
-        self.id_token_signer
-            .sign_access_token(
-                &sub.to_string(),
-                &iss,
-                aud,
-                scope,
-                self.oidc_access_token_exp(),
-                roles,
-                permissions,
-            )
-            .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
-    }
-
     /// Configured upper bound (days) for long-lived MCP access tokens.
     pub fn mcp_token_max_ttl_days(&self) -> u32 {
         self.config.oidc.mcp_token_max_ttl_days

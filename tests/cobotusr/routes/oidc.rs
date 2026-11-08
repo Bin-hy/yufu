@@ -13,13 +13,13 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-struct TestRsaFile(std::path::PathBuf);
+pub(super) struct TestRsaFile(std::path::PathBuf);
 impl Drop for TestRsaFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
 }
-fn rsa_test_token(config: &mut Config) -> (String, TestRsaFile) {
+pub(super) fn rsa_test_token(config: &mut Config) -> (String, TestRsaFile) {
     use rsa::pkcs8::EncodePrivateKey;
     static PEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let pem = PEM.get_or_init(|| {
