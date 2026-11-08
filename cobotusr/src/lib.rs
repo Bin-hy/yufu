@@ -36,7 +36,7 @@ struct Assets;
 pub mod config;
 pub mod entity;
 pub mod error;
-mod migration;
+pub mod migration;
 pub mod modules;
 pub mod rbac;
 mod recording_middleware;

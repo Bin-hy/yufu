@@ -20,6 +20,7 @@ pub mod recording;
 pub mod refresh_token;
 pub mod role;
 pub mod role_permission;
+pub mod security_binding;
 pub mod user;
 pub mod user_authority;
 pub mod user_conversation;

@@ -87,3 +87,13 @@ checklist.md 全部条目保持未验证。只在取得对应实际证据后勾�
 - `cargo test -p auth --lib --locked`：退出码0，42 passed、0 failed、0 ignored；`cargo clippy -p auth --lib --tests --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 均退出码0。
 - 额外运行 `cargo test -p auth --doc --locked`：退出码101，0 passed、8 failed、1 ignored。失败来自现有示例中的私有根导入、my_crate占位、缺失泛型/字段/分号及未声明sea_orm依赖；这些示例未被本组修改。完整质量门禁仍未通过，后续T79需修正，不能记为通过。
 - T11、T12组件任务已完成（累计12/80）；实际IdP URI/application权限加载与路由接入仍在后续任务中。
+
+## T13–T14 IdP 身份与绑定迁移（2026-11-08）
+
+- T13先新增测试，首次退出码101，迁移模块未公开；补注册身份迁移及公开Migrator测试入口后，测试实际暴露down路径先执行旧不可逆种子的错误。检查锁定SeaORM实现确认它保留注册顺序，修正原有错误注释并将新迁移放在旧schema/seed之后，未重排历史迁移。
+- 新增grant/session/refresh_family/credential表。复合外键约束issuer/主体/应用与稳定根一致；凭据(issuer,jti)唯一；只存32字节refresh摘要并唯一约束，禁止refresh无族、access无签名kid、自引用parent/replacement及非法时间状态。根使用RESTRICT，不级联删除撤销事实。
+- T14先运行负向用例：退出码101，security_binding不存在。补机器用途/应用/受众授权绑定、设备身份到具体目标绑定和逐网关公钥表及实体。默认enabled=false；重复身份/设备目标、重复kid和公钥指纹被数据库拒绝。公钥解析及canonical DER指纹计算属于后续可信登记服务，数据库列本身不替代密码学验证。
+- `cargo test --test mod cobotusr::routes::security::security_t1 --locked -- --nocapture`：退出码0，3 passed、0 failed、0 ignored；包括空库up、down/up、跨issuer同jti合法及同issuer重复拒绝、错误主体根关系拒绝、实体往返和禁用状态持久化。
+- `cargo test --test mod --locked -- --test-threads=4`：退出码0，54 passed、0 failed、0 ignored。
+- `cargo clippy -p cobotusr --lib --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`：退出码0。依赖proc-macro-error2仍有工具链future-incompat提示，未把该提示算成本次lint失败。
+- T13、T14已完成（累计14/80）。当前只是持久化基础；旧令牌签发和业务路由尚未迁移到新仓储。
