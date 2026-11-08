@@ -305,3 +305,243 @@ async fn security_t14_machine_device_and_gateway_key_bindings_are_constrained() 
     assert_eq!(key.public_key_fingerprint, vec![0xab; 32]);
     assert_eq!((key.valid_from, key.valid_until), (1000, 9000));
 }
+
+async fn insert_permit_parent(db: &DatabaseConnection) {
+    execute(db, "INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at)
+        VALUES ('00000000-0000-4000-8000-000000000001','https://idp.test','machine','service','app','service',1000)").await.unwrap();
+    execute(db, "INSERT INTO security_credential (issuer,jti,principal_kind,subject,credential_kind,token_use,audience,application,bounds,binding,grant_id,signing_key_id,issued_at,expires_at)
+        VALUES ('https://idp.test','parent','machine','service','access','security_service','aud','app','{\"grants\":[]}','{\"kind\":\"none\"}','00000000-0000-4000-8000-000000000001','key',1000,9000)").await.unwrap();
+}
+
+const PERMIT_INSERT: &str = "INSERT INTO security_permit (issuer,jti,parent_jti,grant_id,application,request_id,task_id,actor,presenter,operation,resource,request_digest,signing_key_id,signed_permit,checked_at,valid_until,issued_at,expires_at)
+    VALUES ('https://idp.test','permit-jti','parent','00000000-0000-4000-8000-000000000001','app',
+    '00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003',
+    '{\"issuer\":\"https://idp.test\",\"kind\":\"machine\",\"subject\":\"service\"}',
+    '{\"issuer\":\"https://idp.test\",\"kind\":\"machine\",\"subject\":\"cloud\"}',
+    'task:execute','{\"application\":\"app\",\"target\":{\"kind\":\"device\",\"gateway_id\":\"g\",\"device_id\":\"d\"}}',
+    decode(repeat('ab',32),'hex'),'key','test-signed-permit',1000,6000,1000,6000)";
+
+#[tokio::test]
+async fn security_t15_permit_task_request_and_parent_bindings_are_unique() {
+    use cobotusr::migration::{Migrator, MigratorTrait};
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    insert_permit_parent(&db).await;
+    assert!(
+        execute(&db, &PERMIT_INSERT.replace("'parent'", "'missing'"))
+            .await
+            .is_err()
+    );
+    assert!(
+        execute(
+            &db,
+            &PERMIT_INSERT.replace("1000,6000,1000,6000", "1000,6000,1000,7000")
+        )
+        .await
+        .is_err()
+    );
+    execute(&db, PERMIT_INSERT).await.unwrap();
+    // Neither a new request nor a new JWT can renew an already authorized task.
+    assert!(
+        execute(
+            &db,
+            &PERMIT_INSERT.replace("permit-jti", "new-permit").replace(
+                "00000000-0000-4000-8000-000000000002",
+                "00000000-0000-4000-8000-000000000004"
+            )
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        execute(
+            &db,
+            &PERMIT_INSERT.replace("permit-jti", "new-permit").replace(
+                "00000000-0000-4000-8000-000000000003",
+                "00000000-0000-4000-8000-000000000004"
+            )
+        )
+        .await
+        .is_err()
+    );
+    let non_task = PERMIT_INSERT
+        .replace("permit-jti", "read-permit")
+        .replace("task:execute", "device:read")
+        .replace("'00000000-0000-4000-8000-000000000003'", "NULL")
+        .replace(
+            "00000000-0000-4000-8000-000000000002",
+            "00000000-0000-4000-8000-000000000005",
+        );
+    execute(&db, &non_task).await.unwrap();
+    assert!(
+        execute(&db, &non_task.replace("read-permit", "other-read-permit"))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn security_t15_audit_and_security_fact_commit_or_rollback_together() {
+    use cobotusr::migration::{Migrator, MigratorTrait};
+    use sea_orm::TransactionTrait;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    insert_permit_parent(&db).await;
+    let audit = "INSERT INTO security_audit (id,event_type,actor,operation,resource,outcome,reason_code,occurred_at)
+        VALUES ('00000000-0000-4000-8000-000000000006','permit_issued',
+        '{\"issuer\":\"https://idp.test\",\"kind\":\"machine\",\"subject\":\"service\"}',
+        'task:execute','{\"application\":\"app\"}','success','issued',1000)";
+    for commit in [false, true] {
+        let txn = db.begin().await.unwrap();
+        for sql in [PERMIT_INSERT, audit] {
+            txn.execute_raw(Statement::from_string(DbBackend::Postgres, sql.to_owned()))
+                .await
+                .unwrap();
+        }
+        if commit {
+            txn.commit().await.unwrap();
+        } else {
+            txn.rollback().await.unwrap();
+        }
+        for table in ["security_permit", "security_audit"] {
+            let row = db
+                .query_one_raw(Statement::from_string(
+                    DbBackend::Postgres,
+                    format!("SELECT COUNT(*) AS count FROM {table}"),
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.try_get::<i64>("", "count").unwrap(), i64::from(commit));
+        }
+    }
+}
+
+#[tokio::test]
+async fn security_t16_entities_keep_stable_roots_audit_origin_and_revocation_parent_distinct() {
+    use cobotusr::{
+        entity::{
+            security_credential as credential, security_grant as grant,
+            security_refresh_family as family, security_session as session,
+        },
+        migration::{Migrator, MigratorTrait},
+    };
+    use sea_orm::EntityTrait;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    execute(&db, "INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at)
+        VALUES ('00000000-0000-4000-8000-000000000001','https://idp.test','user','alice','app','session',1000)").await.unwrap();
+    execute(
+        &db,
+        "INSERT INTO security_session (id,issuer,principal_kind,subject,created_at)
+        VALUES ('00000000-0000-4000-8000-000000000002','https://idp.test','user','alice',1000)",
+    )
+    .await
+    .unwrap();
+    execute(&db, "INSERT INTO security_refresh_family (id,issuer,principal_kind,subject,application,session_id,grant_id,created_at)
+        VALUES ('00000000-0000-4000-8000-000000000003','https://idp.test','user','alice','app',
+        '00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001',1000)").await.unwrap();
+    let access = "INSERT INTO security_credential (issuer,jti,principal_kind,subject,credential_kind,token_use,audience,application,bounds,binding,grant_id,session_id,family_id,signing_key_id,issued_at,expires_at)
+        VALUES ('https://idp.test','old-access','user','alice','access','user_session','aud','app','{\"grants\":[]}','{\"kind\":\"none\"}',
+        '00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003','key',1000,9000)";
+    execute(&db, access).await.unwrap();
+    let refresh = access
+        .replace("'old-access'", "'old-refresh'")
+        .replace("'access'", "'refresh'")
+        .replace("signing_key_id", "secret_digest")
+        .replace("'key'", "decode(repeat('ab',32),'hex')");
+    execute(&db, &refresh).await.unwrap();
+    execute(
+        &db,
+        &refresh
+            .replace("old-refresh", "new-refresh")
+            .replace("repeat('ab'", "repeat('cd'"),
+    )
+    .await
+    .unwrap();
+    execute(&db, "UPDATE security_credential SET consumed_at=2000,replacement_jti='new-refresh' WHERE jti='old-refresh'").await.unwrap();
+    execute(&db, &access.replace("old-access", "new-access"))
+        .await
+        .unwrap();
+    execute(&db, "UPDATE security_credential SET minted_by='{\"issuer\":\"https://idp.test\",\"jti\":\"old-refresh\"}' WHERE jti='new-access'").await.unwrap();
+    execute(
+        &db,
+        &access
+            .replace("old-access", "delegation")
+            .replace("user_session", "gateway_operation")
+            .replace("signing_key_id,", "revocation_parent_jti,signing_key_id,")
+            .replace("'key',", "'old-access','key',"),
+    )
+    .await
+    .unwrap();
+    let fresh =
+        credential::Entity::find_by_id(("https://idp.test".to_owned(), "new-access".to_owned()))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+    let old =
+        credential::Entity::find_by_id(("https://idp.test".to_owned(), "old-refresh".to_owned()))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+    let delegation =
+        credential::Entity::find_by_id(("https://idp.test".to_owned(), "delegation".to_owned()))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(fresh.minted_by.as_ref().unwrap()["jti"], "old-refresh");
+    assert!(fresh.revocation_parent_jti.is_none());
+    assert_eq!(
+        delegation.revocation_parent_jti.as_deref(),
+        Some("old-access")
+    );
+    assert_eq!(old.replacement_jti.as_deref(), Some("new-refresh"));
+    assert_eq!(old.consumed_at, Some(2000));
+    assert_eq!(old.secret_digest, Some(vec![0xab; 32]));
+    assert!(fresh.secret_digest.is_none());
+    let root = grant::Entity::find_by_id(fresh.grant_id)
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    let session = session::Entity::find_by_id(fresh.session_id.unwrap())
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    let family = family::Entity::find_by_id(fresh.family_id.unwrap())
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(family.grant_id, root.id);
+    assert_eq!(family.session_id, session.id);
+    assert_eq!(family.subject, "alice");
+    assert!(
+        root.revoked_at.is_none() && session.revoked_at.is_none() && family.revoked_at.is_none()
+    );
+    let columns = db.query_all_raw(Statement::from_string(DbBackend::Postgres,
+        "SELECT column_name FROM information_schema.columns WHERE table_name='security_credential'".to_owned())).await.unwrap();
+    let names: Vec<String> = columns
+        .iter()
+        .map(|row| row.try_get("", "column_name").unwrap())
+        .collect();
+    assert!(
+        !names
+            .iter()
+            .any(|name| ["refresh_token", "access_token", "secret", "token"]
+                .contains(&name.as_str()))
+    );
+}

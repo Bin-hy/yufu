@@ -97,3 +97,15 @@ checklist.md 全部条目保持未验证。只在取得对应实际证据后勾�
 - `cargo test --test mod --locked -- --test-threads=4`：退出码0，54 passed、0 failed、0 ignored。
 - `cargo clippy -p cobotusr --lib --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`：退出码0。依赖proc-macro-error2仍有工具链future-incompat提示，未把该提示算成本次lint失败。
 - T13、T14已完成（累计14/80）。当前只是持久化基础；旧令牌签发和业务路由尚未迁移到新仓储。
+
+## T15–T16 一次许可、审计与身份实体（2026-11-08）
+
+- T15先补测试，首轮退出码101，两项用例均实际报告security_permit不存在。新增第二项迁移：一次许可记录与结构化审计；许可按(application,request_id)及非空(application,task_id)唯一，外键绑定原凭据的issuer/grant/application，绝对有效期不能超过查询新鲜期。审计只提供结构化主体、资源、操作、原因和关联ID列，没有自由秘密载荷列。
+- `cargo test --test mod security_t15 --locked -- --nocapture`：退出码0，2 passed、0 failed、0 ignored；验证同任务新request/jti冲突、非任务请求去重、错误父/期限拒绝，以及许可和审计在同一数据库事务提交或回滚。实际业务签发/审计事务接入仍需T30/T64。
+- T16先补实体往返测试，首轮退出码101，四项实体尚未注册。新增credential/grant/session/refresh_family实体并注册；不提供请求反序列化入口，credential不存访问令牌或refresh明文。
+- 往返用例验证：消耗旧refresh后替代记录保留同一稳定grant/session/family；minted_by审计来源不自动成为revocation_parent，只有委托明确指向父凭据。该测试验证持久化表示，不替代后续生命周期有效状态测试。
+- `cargo test --test mod cobotusr::routes::security::security_t1 --locked -- --nocapture`：退出码0，6 passed、0 failed、0 ignored；包括再次运行两个新增迁移的down/up。
+- `cargo test --test mod --locked -- --test-threads=4`：退出码0，57 passed、0 failed、0 ignored。
+- `cargo clippy -p cobotusr --lib --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`：退出码0。
+- T15、T16已完成（累计16/80）；主库仓储、根状态判定及生产路由接入尚未实现，完整安全链和checklist仍未验收。
+- 额外验证集成测试目标：`cargo clippy --test mod --locked -- -D warnings` 退出码0；覆盖本组新增的实际PostgreSQL用例，不等于全workspace/all-features门禁通过。
