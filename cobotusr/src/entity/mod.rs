@@ -23,6 +23,7 @@ pub mod role_permission;
 pub mod security_binding;
 pub mod security_credential;
 pub mod security_grant;
+pub mod security_permit;
 pub mod security_refresh_family;
 pub mod security_session;
 pub mod user;

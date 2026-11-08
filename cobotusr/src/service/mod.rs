@@ -5,4 +5,5 @@ pub mod oidc;
 pub mod permission;
 pub mod recording;
 pub mod role;
+pub mod security;
 pub mod user;

@@ -109,3 +109,24 @@ checklist.md 全部条目保持未验证。只在取得对应实际证据后勾�
 - `cargo clippy -p cobotusr --lib --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`：退出码0。
 - T15、T16已完成（累计16/80）；主库仓储、根状态判定及生产路由接入尚未实现，完整安全链和checklist仍未验收。
 - 额外验证集成测试目标：`cargo clippy --test mod --locked -- -D warnings` 退出码0；覆盖本组新增的实际PostgreSQL用例，不等于全workspace/all-features门禁通过。
+
+## T17 主库安全仓储（2026-11-08）
+
+- 先新增仓储测试，首轮 `cargo test --test mod security_t17 --no-run --locked` 退出码101，security仓储模块尚未定义。实现时修正测试时钟的跨测试模块可见性，并处理SeaORM生成ModelEx的Debug要求；许可值改用脱敏数据库值类型，Model与ActiveModel的Debug均不显示签名原文。
+- 定义SecurityRepository/SecurityTransaction及PostgreSQL适配器；事务以REPEATABLE READ/READ WRITE启动，查询pg_is_in_recovery和transaction_read_only，拒绝备用/只读节点。主库连接由调用方配置注入；全部凭据、grant/session/family、父记录和身份绑定都在同一事务读取，没有副本或缓存回退。
+- 在获取连接前记录checked_at；SQL等待和事务结束使用继承预算，设置本地statement_timeout。刷新查找只将SHA-256摘要作为SQL参数，保留已消费记录供后续重放检测。
+- 机器绑定精确匹配issuer/主体/用途/application/audience，解析显式操作范围；设备绑定精确匹配主体/application；公钥精确匹配issuer/application/gateway/kid、启用状态和有效期，并验证2048–8192位RSA SPKI DER指纹。许可按application/request查询并校验结构，不能作为签名或执行证明。
+- 新增3项T17真实PostgreSQL用例，覆盖未知/禁用绑定、跨issuer摘要查找、空范围、消费记录保留、许可与ActiveModel秘密输出、设备跨应用隔离、一致快照、公钥作用域/有效期/指纹，以及下一事务看到已提交禁用。主库保护在独立PostgreSQL实例上检查，未把该测试宣称为物理复制集演练。
+
+## T18 当前凭据与撤销根检查（2026-11-08）
+
+- 先新增生命周期测试，首轮 `cargo test --test mod security_t18 --no-run --locked` 退出码101，lifecycle模块缺失；实现后覆盖合法用户、机器、设备和MCP记录及单层委托。
+- CredentialLifecycle加载同一快照的凭据、稳定根与绑定，拒绝未知、非access记录、过期/尚未生效、已撤销/被替代、缺失或错误用途/根/资源绑定。存储格式损坏作为安全依赖错误失败关闭，不补默认授权。
+- 单层委托要求父凭据仍活动，主体、应用、grant/session/family一致，子期限不晚于父；拒绝再委托、循环依赖及不匹配目标。minted_by仅为审计信息，不沿其撤销替代凭据。
+- 实现CurrentCredentialChecker：真实RS256/JWKS验签后，必须与主库claims及签名kid完全一致才产生可用上下文；同一claims换用另一可信kid、已签名但未知jti、篡改到期值均被拒绝。实际StrictAccessState接入生产仓储的隔离测试通过，但各业务服务组装仍待后续任务。
+- 新增6项T18用例，覆盖凭据/grant撤销、会话/族与独立MCP根隔离、父撤销/期限/循环、设备当前归属、真实JWT状态接入及数据库锁/断连/不健康时钟。锁等待使用100ms子预算，实际断言1秒内结束且不返回可用结论；未将该子链测试当作全链2秒验收。
+- 源头有效期从查询开始计算，最多5秒并取当前/父凭据最短期限，提交后复核新鲜度。StreamConnect仍失败关闭，受限浏览器票据生命周期尚未接入。
+- `cargo test --test mod cobotusr::routes::security::security_t1 --locked -- --test-threads=4`：退出码0，15 passed、0 failed、0 ignored（其中T17/T18共9项）。后续补充公钥时间边界与ActiveModel断言，已由下面完整回归覆盖。
+- `cargo test --test mod --locked -- --test-threads=4`：退出码0，66 passed、0 failed、0 ignored。
+- T17、T18组件任务已完成（累计18/80）。URI/application权限适配、生命周期写入和业务入口接线仍未完成，checklist保持未验收；原有8项文档示例失败尚待T79修正。
+- `cargo test -p auth -p cobotusr --lib --locked`：退出码0，auth 42 passed、cobotusr 22 passed，均0 failed、0 ignored。`cargo clippy -p cobotusr --lib --locked -- -D warnings`、`cargo clippy --test mod --locked -- -D warnings`、`cargo fmt --all -- --check`及`git diff --check`均退出码0；未运行或宣称通过完整workspace/all-features门禁。

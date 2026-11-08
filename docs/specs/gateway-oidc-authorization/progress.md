@@ -20,8 +20,8 @@
 | T14 | 完成 | 见 evidence.md |
 | T15 | 完成 | 见 evidence.md |
 | T16 | 完成 | 见 evidence.md |
-| T17 | 未开始 | 尚未执行 |
-| T18 | 未开始 | 尚未执行 |
+| T17 | 完成 | 见 evidence.md |
+| T18 | 完成 | 见 evidence.md |
 | T19 | 未开始 | 尚未执行 |
 | T20 | 未开始 | 尚未执行 |
 | T21 | 未开始 | 尚未执行 |

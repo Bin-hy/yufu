@@ -1,5 +1,5 @@
 mod authorization;
-mod common;
+pub(crate) mod common;
 mod execution;
 mod gateway;
 mod mcp;
