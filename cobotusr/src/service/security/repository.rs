@@ -167,6 +167,13 @@ pub trait SecurityRepository: Send + Sync {
 #[allow(clippy::double_must_use)]
 pub trait SecurityTransaction: Send {
     fn checked_at(&self) -> u64;
+    async fn local_user(&mut self, username: &str) -> Result<Option<user::Model>, SecurityError>;
+    async fn register_local_user(
+        &mut self,
+        username: &str,
+        password_hash: &SecretToken,
+        nickname: &str,
+    ) -> Result<user::Model, SecurityError>;
     async fn oidc_client(
         &mut self,
         client_id: &str,
@@ -262,7 +269,7 @@ pub trait SecurityTransaction: Send {
 
 /// Trusted lifecycle output. No access JWT or refresh plaintext is persisted.
 pub struct SessionRegistration {
-    pub(super) client_id: String,
+    pub(super) client_id: Option<String>,
     pub(super) claims: SecurityAccessClaims,
     pub(super) key_id: String,
     pub(super) refresh_jti: String,
@@ -437,6 +444,57 @@ impl PgSecurityTransaction {
 }
 #[async_trait::async_trait]
 impl SecurityTransaction for PgSecurityTransaction {
+    async fn local_user(&mut self, username: &str) -> Result<Option<user::Model>, SecurityError> {
+        self.run(
+            user::Entity::find()
+                .filter(user::Column::Username.eq(username))
+                .one(&self.transaction),
+        )
+        .await
+    }
+    async fn register_local_user(
+        &mut self,
+        username: &str,
+        password_hash: &SecretToken,
+        nickname: &str,
+    ) -> Result<user::Model, SecurityError> {
+        let role = self
+            .run(role::Entity::find_by_id(role::RoleEnum::User.default_id()).one(&self.transaction))
+            .await?
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        if role.name != role::RoleEnum::User.get_name() {
+            return Err(SecurityError::DependencyUnavailable);
+        }
+        let time = chrono::DateTime::from_timestamp_millis(
+            i64::try_from(now(self.clock.as_ref())?)
+                .map_err(|_| SecurityError::DependencyUnavailable)?,
+        )
+        .ok_or(SecurityError::DependencyUnavailable)?
+        .naive_utc();
+        let insert = user::ActiveModel {
+            id: sea_orm::ActiveValue::NotSet,
+            username: Set(username.to_owned()),
+            password: Set(Some(password_hash.expose_secret().to_owned())),
+            nickname: Set(Some(nickname.to_owned())),
+            role_id: Set(role.id),
+            create_time: Set(time),
+            update_time: Set(time),
+            description: Set(None),
+        };
+        self.budget
+            .run(insert.insert(&self.transaction))
+            .await?
+            .map_err(|error| {
+                if matches!(
+                    error.sql_err(),
+                    Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+                ) {
+                    SecurityError::Conflict
+                } else {
+                    unavailable(error)
+                }
+            })
+    }
     async fn session_client(
         &mut self,
         issuer: &str,
@@ -705,7 +763,7 @@ impl SecurityTransaction for PgSecurityTransaction {
             session_id: Set(Some(session_id)),
             family_id: Set(Some(family_id)),
             paired_access_jti: Set(None),
-            oidc_client_id: Set(Some(r.client_id)),
+            oidc_client_id: Set(r.client_id),
             revocation_parent_jti: Set(None),
             minted_by: Set(r
                 .minted_by

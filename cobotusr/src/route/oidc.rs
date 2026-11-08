@@ -403,7 +403,7 @@ fn session_token_response(
 ) -> TokenResponse {
     TokenResponse {
         access_token: set.access_token.expose_secret().into(),
-        id_token: Some(set.id_token.expose_secret().into()),
+        id_token: set.id_token.map(|token| token.expose_secret().into()),
         refresh_token: Some(set.refresh_token.expose_secret().into()),
         token_type: "Bearer".into(),
         expires_in: state.oidc_access_token_exp(),

@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use super::repository::{
-    CredentialSnapshot, RegisteredState, SecurityRepository, SessionRegistration, decode, now,
-    refresh_digest,
+    CredentialSnapshot, RegisteredState, SecurityRepository, SecurityTransaction,
+    SessionRegistration, decode, now, refresh_digest,
 };
 use auth::security::{
     budget::{Clock, SecurityBudget},
@@ -36,6 +36,44 @@ pub struct RefreshRequest<'a> {
     pub client_id: &'a str,
     pub client_secret: Option<&'a SecretToken>,
 }
+#[derive(Clone, Copy)]
+enum SessionClient<'a> {
+    Local,
+    Oidc {
+        client_id: &'a str,
+        client_secret: Option<&'a SecretToken>,
+    },
+}
+
+/// bcrypt consumes at most 72 bytes. Reject longer input instead of accepting
+/// a silently truncated password; spaces remain valid password characters.
+pub struct LocalPassword(String);
+impl LocalPassword {
+    pub fn new(value: String) -> Result<Self, SecurityError> {
+        if value.is_empty() || value.len() > 72 {
+            return Err(SecurityError::InvalidCredential);
+        }
+        Ok(Self(value))
+    }
+}
+impl std::fmt::Debug for LocalPassword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LocalPassword([REDACTED])")
+    }
+}
+pub struct LocalLoginRequest<'a> {
+    pub username: &'a str,
+    pub password: &'a LocalPassword,
+}
+pub struct LocalRegisterRequest<'a> {
+    pub username: &'a str,
+    pub password: &'a LocalPassword,
+    pub nickname: &'a str,
+}
+pub struct LocalSession {
+    pub tokens: SessionTokenSet,
+    pub user: crate::entity::user::UserVO,
+}
 
 /// Injectable signing boundary. Implementations must use the dedicated RS256
 /// access profile; secrets and backend errors never enter Debug or storage.
@@ -59,7 +97,7 @@ pub trait SessionTokenSigner: Send + Sync {
 #[derive(Debug)]
 pub struct SessionTokenSet {
     pub access_token: SecretToken,
-    pub id_token: SecretToken,
+    pub id_token: Option<SecretToken>,
     pub refresh_token: SecretToken,
     pub claims: SecurityAccessClaims,
 }
@@ -71,6 +109,119 @@ pub struct CredentialLifecycle {
 impl CredentialLifecycle {
     pub fn new(repository: Arc<dyn SecurityRepository>, clock: Arc<dyn Clock>) -> Self {
         Self { repository, clock }
+    }
+    pub async fn login_local(
+        &self,
+        request: LocalLoginRequest<'_>,
+        config: &SessionTokenConfig,
+        signer: &dyn SessionTokenSigner,
+        budget: &SecurityBudget,
+    ) -> Result<LocalSession, SecurityError> {
+        validate_local_username(request.username)?;
+        let mut txn = self.repository.begin(budget).await?;
+        let user = txn
+            .local_user(request.username)
+            .await?
+            .ok_or(SecurityError::InvalidCredential)?;
+        let password_hash = user
+            .password
+            .clone()
+            .ok_or(SecurityError::InvalidCredential)?;
+        let password = request.password.0.clone();
+        let valid = budget
+            .run(tokio::task::spawn_blocking(move || {
+                bcrypt::verify(password, &password_hash)
+            }))
+            .await?
+            .map_err(|_| SecurityError::DependencyUnavailable)?
+            .map_err(|_| SecurityError::InvalidCredential)?;
+        if !valid {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let tokens = self
+            .mint_local_session(txn.as_mut(), user.id, config, signer, budget)
+            .await?;
+        txn.commit().await?;
+        Ok(LocalSession {
+            tokens,
+            user: user.into(),
+        })
+    }
+    pub async fn register_local(
+        &self,
+        request: LocalRegisterRequest<'_>,
+        config: &SessionTokenConfig,
+        signer: &dyn SessionTokenSigner,
+        budget: &SecurityBudget,
+    ) -> Result<LocalSession, SecurityError> {
+        validate_local_username(request.username)?;
+        if request.nickname.chars().count() > 255 {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let password = request.password.0.clone();
+        let password_hash = budget
+            .run(tokio::task::spawn_blocking(move || {
+                bcrypt::hash(password, bcrypt::DEFAULT_COST)
+            }))
+            .await?
+            .map_err(|_| SecurityError::DependencyUnavailable)?
+            .map_err(|_| SecurityError::DependencyUnavailable)?;
+        let password_hash = SecretToken::new(password_hash)?;
+        let mut txn = self.repository.begin(budget).await?;
+        let user = txn
+            .register_local_user(request.username, &password_hash, request.nickname)
+            .await?;
+        let tokens = self
+            .mint_local_session(txn.as_mut(), user.id, config, signer, budget)
+            .await?;
+        txn.commit().await?;
+        Ok(LocalSession {
+            tokens,
+            user: user.into(),
+        })
+    }
+    async fn mint_local_session(
+        &self,
+        txn: &mut dyn SecurityTransaction,
+        user_id: crate::IdType,
+        config: &SessionTokenConfig,
+        signer: &dyn SessionTokenSigner,
+        budget: &SecurityBudget,
+    ) -> Result<SessionTokenSet, SecurityError> {
+        let mut claims = session_claims(
+            config,
+            user_id,
+            "cobotusr".into(),
+            "cobotusr".into(),
+            now(self.clock.as_ref())?,
+        )?;
+        claims.bounds = txn.session_bounds(&claims).await?;
+        let (set, registration) = mint_session_pair(
+            SessionMint {
+                claims,
+                client_id: None,
+                nonce: None,
+                minted_by: None,
+                new_roots: true,
+            },
+            config,
+            signer,
+            budget,
+        )
+        .await?;
+        txn.register_session_pair(registration).await?;
+        budget.remaining()?;
+        Ok(set)
+    }
+    pub async fn rotate_local_refresh(
+        &self,
+        refresh: &SecretToken,
+        config: &SessionTokenConfig,
+        signer: &dyn SessionTokenSigner,
+        budget: &SecurityBudget,
+    ) -> Result<SessionTokenSet, SecurityError> {
+        self.rotate_session(refresh, SessionClient::Local, config, signer, budget)
+            .await
     }
     /// Preserve the existing OIDC refresh revocation endpoint while it migrates
     /// to the shared registry. Broader logout/application scopes belong to T25.
@@ -115,12 +266,32 @@ impl CredentialLifecycle {
         signer: &dyn SessionTokenSigner,
         budget: &SecurityBudget,
     ) -> Result<SessionTokenSet, SecurityError> {
+        self.rotate_session(
+            request.refresh_token,
+            SessionClient::Oidc {
+                client_id: request.client_id,
+                client_secret: request.client_secret,
+            },
+            config,
+            signer,
+            budget,
+        )
+        .await
+    }
+    async fn rotate_session(
+        &self,
+        refresh: &SecretToken,
+        client: SessionClient<'_>,
+        config: &SessionTokenConfig,
+        signer: &dyn SessionTokenSigner,
+        budget: &SecurityBudget,
+    ) -> Result<SessionTokenSet, SecurityError> {
         // A REPEATABLE READ loser must reopen its snapshot to observe a consumed
         // refresh. Every attempt inherits the caller's original deadline.
         for attempt in 0..4 {
             budget.remaining()?;
             match self
-                .rotate_refresh_once(&request, config, signer, budget)
+                .rotate_refresh_once(refresh, client, config, signer, budget)
                 .await
             {
                 Err(SecurityError::Conflict) if attempt < 3 => tokio::task::yield_now().await,
@@ -132,30 +303,44 @@ impl CredentialLifecycle {
 
     async fn rotate_refresh_once(
         &self,
-        request: &RefreshRequest<'_>,
+        refresh: &SecretToken,
+        source: SessionClient<'_>,
         config: &SessionTokenConfig,
         signer: &dyn SessionTokenSigner,
         budget: &SecurityBudget,
     ) -> Result<SessionTokenSet, SecurityError> {
         let mut txn = self.repository.begin(budget).await?;
-        let client = txn
-            .oidc_client(request.client_id)
-            .await?
-            .ok_or(SecurityError::InvalidCredential)?;
-        authenticate_session_client(&client, request.client_secret, "refresh_token", budget)
-            .await?;
-        let binding = txn
-            .session_client(&config.issuer, &client.client_id)
-            .await?
-            .ok_or(SecurityError::InvalidCredential)?;
+        let (client_id, audience, application) = match source {
+            SessionClient::Local => (None, "cobotusr".to_owned(), "cobotusr".to_owned()),
+            SessionClient::Oidc {
+                client_id,
+                client_secret,
+            } => {
+                let client = txn
+                    .oidc_client(client_id)
+                    .await?
+                    .ok_or(SecurityError::InvalidCredential)?;
+                authenticate_session_client(&client, client_secret, "refresh_token", budget)
+                    .await?;
+                let binding = txn
+                    .session_client(&config.issuer, &client.client_id)
+                    .await?
+                    .ok_or(SecurityError::InvalidCredential)?;
+                (
+                    Some(client.client_id),
+                    binding.audience,
+                    binding.application,
+                )
+            }
+        };
         let snapshot = txn
-            .lock_refresh(&config.issuer, request.refresh_token)
+            .lock_refresh(&config.issuer, refresh)
             .await?
             .ok_or(SecurityError::InvalidCredential)?;
         let row = &snapshot.current.credential;
-        if row.audience != binding.audience
-            || row.application != binding.application
-            || row.oidc_client_id.as_deref() != Some(client.client_id.as_str())
+        if row.audience != audience
+            || row.application != application
+            || row.oidc_client_id != client_id
             || row.principal_kind != "user"
             || row.token_use != "user_session"
             || row.revocation_parent_jti.is_some()
@@ -198,7 +383,7 @@ impl CredentialLifecycle {
         let (set, registration) = mint_session_pair(
             SessionMint {
                 claims,
-                client_id: &client.client_id,
+                client_id: client_id.as_deref(),
                 nonce: None,
                 minted_by: Some(snapshot.reference().clone()),
                 new_roots: false,
@@ -275,30 +460,19 @@ impl CredentialLifecycle {
                 return Err(SecurityError::InvalidCredential);
             }
         }
-        let mut claims = SecurityAccessClaims {
-            iss: config.issuer.clone(),
-            sub: code.user_id.to_string(),
-            aud: binding.audience,
-            application: binding.application,
-            iat: at / 1000,
-            exp: expiry(at / 1000, config.access_ttl_seconds)?,
-            nbf: None,
-            jti: uuid::Uuid::new_v4().to_string(),
-            principal_kind: PrincipalKind::User,
-            token_use: TokenUse::UserSession,
-            grant_id: uuid::Uuid::new_v4().to_string(),
-            session_id: Some(uuid::Uuid::new_v4().to_string()),
-            family_id: Some(uuid::Uuid::new_v4().to_string()),
-            binding: IdentityBinding::None,
-            bounds: CredentialBounds::new(vec![]),
-        };
-        PrincipalRef::new(&claims.iss, claims.principal_kind, &claims.sub)?;
+        let mut claims = session_claims(
+            config,
+            code.user_id,
+            binding.audience,
+            binding.application,
+            at,
+        )?;
         claims.bounds = txn.session_bounds(&claims).await?;
         txn.consume_code(code.id, now(self.clock.as_ref())?).await?;
         let (set, registration) = mint_session_pair(
             SessionMint {
                 claims,
-                client_id: &client.client_id,
+                client_id: Some(&client.client_id),
                 nonce: code.nonce.as_deref(),
                 minted_by: None,
                 new_roots: true,
@@ -742,9 +916,47 @@ fn expiry(at: u64, ttl: u64) -> Result<u64, SecurityError> {
         .filter(|v| v.checked_mul(1000).is_some_and(|m| m <= i64::MAX as u64))
         .ok_or(SecurityError::InvalidCredential)
 }
+fn validate_local_username(username: &str) -> Result<(), SecurityError> {
+    if username.trim().is_empty()
+        || username.chars().count() > 255
+        || username.chars().any(char::is_control)
+    {
+        return Err(SecurityError::InvalidCredential);
+    }
+    Ok(())
+}
+fn session_claims(
+    config: &SessionTokenConfig,
+    user_id: crate::IdType,
+    audience: String,
+    application: String,
+    at: u64,
+) -> Result<SecurityAccessClaims, SecurityError> {
+    if user_id <= 0 {
+        return Err(SecurityError::InvalidCredential);
+    }
+    PrincipalRef::new(&config.issuer, PrincipalKind::User, user_id.to_string())?;
+    Ok(SecurityAccessClaims {
+        iss: config.issuer.clone(),
+        sub: user_id.to_string(),
+        aud: audience,
+        application,
+        iat: at / 1000,
+        exp: expiry(at / 1000, config.access_ttl_seconds)?,
+        nbf: None,
+        jti: uuid::Uuid::new_v4().to_string(),
+        principal_kind: PrincipalKind::User,
+        token_use: TokenUse::UserSession,
+        grant_id: uuid::Uuid::new_v4().to_string(),
+        session_id: Some(uuid::Uuid::new_v4().to_string()),
+        family_id: Some(uuid::Uuid::new_v4().to_string()),
+        binding: IdentityBinding::None,
+        bounds: CredentialBounds::new(vec![]),
+    })
+}
 struct SessionMint<'a> {
     claims: SecurityAccessClaims,
-    client_id: &'a str,
+    client_id: Option<&'a str>,
     nonce: Option<&'a str>,
     minted_by: Option<CredentialRef>,
     new_roots: bool,
@@ -773,12 +985,17 @@ async fn mint_session_pair(
     budget.remaining()?;
     let access_token = budget.run(signer.sign_access(&claims)).await??;
     budget.remaining()?;
-    let id_token = budget
-        .run(signer.sign_id(&claims, client_id, nonce, &access_token))
-        .await??;
+    let id_token = match client_id {
+        Some(client_id) => Some(
+            budget
+                .run(signer.sign_id(&claims, client_id, nonce, &access_token))
+                .await??,
+        ),
+        None => None,
+    };
     budget.remaining()?;
     let registration = SessionRegistration {
-        client_id: client_id.into(),
+        client_id: client_id.map(str::to_owned),
         claims: claims.clone(),
         key_id: signer.key_id().into(),
         refresh_jti: uuid::Uuid::new_v4().to_string(),

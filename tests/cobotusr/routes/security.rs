@@ -2718,6 +2718,458 @@ impl cobotusr::service::security::lifecycle::SessionTokenSigner for SessionTestS
     }
 }
 const SESSION_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const LOCAL_PASSWORD: &str = "test password";
+
+async fn local_fixture() -> (
+    testcontainers::ContainerAsync<testcontainers::GenericImage>,
+    DatabaseConnection,
+    std::sync::Arc<crate::cobotsrv::common::SecurityTestClock>,
+    std::sync::Arc<cobotusr::service::security::lifecycle::CredentialLifecycle>,
+) {
+    let fixture = session_fixture().await;
+    // Fixed bcrypt fixture for "test password"; production registration uses DEFAULT_COST.
+    let hash = "$2y$04$FAiHSb5/5zp.oDR1GjBYSex5RVBJYW1BdEVBwqpdg4Phfk1i7YIPu";
+    fixture
+        .1
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE \"user\" SET password=$1 WHERE id=1",
+            [hash.into()],
+        ))
+        .await
+        .unwrap();
+    execute(
+        &fixture.1,
+        "SELECT setval(pg_get_serial_sequence('\"user\"','id'),100)",
+    )
+    .await
+    .unwrap();
+    fixture
+}
+async fn login_local_session(
+    lifecycle: &cobotusr::service::security::lifecycle::CredentialLifecycle,
+    signer: &dyn cobotusr::service::security::lifecycle::SessionTokenSigner,
+    budget: &auth::security::budget::SecurityBudget,
+) -> Result<
+    cobotusr::service::security::lifecycle::LocalSession,
+    auth::security::error::SecurityError,
+> {
+    use cobotusr::service::security::lifecycle::{LocalLoginRequest, LocalPassword};
+    let password = LocalPassword::new(LOCAL_PASSWORD.into()).unwrap();
+    lifecycle
+        .login_local(
+            LocalLoginRequest {
+                username: "session-user",
+                password: &password,
+            },
+            &session_config(),
+            signer,
+            budget,
+        )
+        .await
+}
+async fn register_local_session(
+    lifecycle: &cobotusr::service::security::lifecycle::CredentialLifecycle,
+    username: &str,
+    signer: &dyn cobotusr::service::security::lifecycle::SessionTokenSigner,
+    budget: &auth::security::budget::SecurityBudget,
+) -> Result<
+    cobotusr::service::security::lifecycle::LocalSession,
+    auth::security::error::SecurityError,
+> {
+    use cobotusr::service::security::lifecycle::{LocalPassword, LocalRegisterRequest};
+    let password = LocalPassword::new(LOCAL_PASSWORD.into()).unwrap();
+    lifecycle
+        .register_local(
+            LocalRegisterRequest {
+                username,
+                password: &password,
+                nickname: "local-user",
+            },
+            &session_config(),
+            signer,
+            budget,
+        )
+        .await
+}
+#[tokio::test]
+async fn security_t24_local_registration_and_login_commit_registered_idp_sessions() {
+    use auth::security::{credential::CredentialRef, identity::TokenUse};
+    let (_container, db, clock, lifecycle) = local_fixture().await;
+    execute(&db, "INSERT INTO authority (id,name,authority_uri,method,create_time,update_time) VALUES (9001,'local-allow','/local-allow','GET',NOW(),NOW()),(9002,'local-deny','/local-deny','GET',NOW(),NOW())").await.unwrap();
+    execute(&db, "INSERT INTO user_authority (user_id,authority_id,allow,create_time,update_time) VALUES (1,9002,FALSE,NOW(),NOW())").await.unwrap();
+    let signer = SessionTestSigner::new();
+    let registered =
+        register_local_session(&lifecycle, "local-new", &signer, &security_budget(&clock))
+            .await
+            .unwrap();
+    assert_eq!(registered.user.role_id, 3);
+    let logged = login_local_session(&lifecycle, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    for local in [&registered, &logged] {
+        let claims = &local.tokens.claims;
+        assert_eq!(claims.aud, "cobotusr");
+        assert_eq!(claims.application, "cobotusr");
+        assert_eq!(claims.token_use, TokenUse::UserSession);
+        assert!(local.tokens.id_token.is_none());
+        assert!(claims.session_id.is_some() && claims.family_id.is_some());
+        assert_eq!(local.tokens.refresh_token.expose_secret().len(), 64);
+        lifecycle
+            .check_registered(
+                &CredentialRef::new(&claims.iss, &claims.jti).unwrap(),
+                &security_budget(&clock),
+            )
+            .await
+            .unwrap();
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        validation.set_audience(&["cobotusr"]);
+        validation.set_issuer(&["https://idp.test"]);
+        let decoded = jsonwebtoken::decode::<auth::security::credential::SecurityAccessClaims>(
+            local.tokens.access_token.expose_secret(),
+            &jsonwebtoken::DecodingKey::from_rsa_pem(
+                security_signing_fixture().public_pem.as_bytes(),
+            )
+            .unwrap(),
+            &validation,
+        )
+        .unwrap();
+        assert_eq!(decoded.header.typ.as_deref(), Some("at+jwt"));
+        assert_eq!(decoded.claims.jti, claims.jti);
+    }
+    let bounds = serde_json::to_string(&logged.tokens.claims.bounds).unwrap();
+    assert!(bounds.contains("uri:9001"));
+    assert!(
+        !bounds.contains("uri:9002"),
+        "explicit deny survives superadmin"
+    );
+    assert_eq!(
+        session_count(&db, "security_credential WHERE oidc_client_id IS NULL").await,
+        4
+    );
+    for table in ["refresh_token", "oauth_token"] {
+        assert_eq!(session_count(&db, table).await, 0);
+    }
+}
+#[tokio::test]
+async fn security_t24_authentication_failures_and_signing_commit_failures_leave_no_session() {
+    use auth::security::error::SecurityError;
+    use cobotusr::service::security::lifecycle::{LocalLoginRequest, LocalPassword};
+    let (_container, db, clock, lifecycle) = local_fixture().await;
+    let signer = SessionTestSigner::new();
+    for (username, password) in [("unknown", LOCAL_PASSWORD), ("session-user", "wrong")] {
+        let password = LocalPassword::new(password.into()).unwrap();
+        assert_eq!(
+            lifecycle
+                .login_local(
+                    LocalLoginRequest {
+                        username,
+                        password: &password
+                    },
+                    &session_config(),
+                    &signer,
+                    &security_budget(&clock)
+                )
+                .await
+                .err(),
+            Some(SecurityError::InvalidCredential)
+        );
+    }
+    signer.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        register_local_session(
+            &lifecycle,
+            "signing-failed",
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::DependencyUnavailable)
+    );
+    assert_eq!(
+        login_local_session(&lifecycle, &signer, &security_budget(&clock))
+            .await
+            .err(),
+        Some(SecurityError::DependencyUnavailable)
+    );
+    signer
+        .fail
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    execute(&db, "CREATE FUNCTION reject_local_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test commit rejected'; END $$").await.unwrap();
+    execute(&db, "CREATE CONSTRAINT TRIGGER reject_local_commit AFTER INSERT ON security_credential DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_local_commit()").await.unwrap();
+    assert_eq!(
+        register_local_session(
+            &lifecycle,
+            "commit-failed",
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::DependencyUnavailable)
+    );
+    assert_eq!(
+        login_local_session(&lifecycle, &signer, &security_budget(&clock))
+            .await
+            .err(),
+        Some(SecurityError::DependencyUnavailable)
+    );
+    assert_eq!(session_count(&db, "\"user\"").await, 1);
+    for table in [
+        "security_credential",
+        "security_session",
+        "security_grant",
+        "security_refresh_family",
+        "refresh_token",
+    ] {
+        assert_eq!(session_count(&db, table).await, 0);
+    }
+    execute(
+        &db,
+        "DROP TRIGGER reject_local_commit ON security_credential",
+    )
+    .await
+    .unwrap();
+    register_local_session(
+        &lifecycle,
+        "commit-failed",
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn security_t24_concurrent_registration_and_local_refresh_have_one_replacement() {
+    use auth::security::{error::SecurityError, identity::SecretToken};
+    let (_container, db, clock, lifecycle) = local_fixture().await;
+    let signer = std::sync::Arc::new(SessionTestSigner::new());
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let mut jobs = vec![];
+    for _ in 0..2 {
+        let (lifecycle, signer, clock, barrier) = (
+            lifecycle.clone(),
+            signer.clone(),
+            clock.clone(),
+            barrier.clone(),
+        );
+        jobs.push(tokio::spawn(async move {
+            barrier.wait().await;
+            register_local_session(
+                &lifecycle,
+                "same-user",
+                signer.as_ref(),
+                &security_budget(&clock),
+            )
+            .await
+        }));
+    }
+    let mut sessions = vec![];
+    for job in jobs {
+        match job.await.unwrap() {
+            Ok(session) => sessions.push(session),
+            Err(error) => assert_eq!(error, SecurityError::Conflict),
+        }
+    }
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        session_count(&db, "\"user\" WHERE username='same-user'").await,
+        1
+    );
+    let original = sessions.pop().unwrap();
+    let refresh = std::sync::Arc::new(
+        SecretToken::new(original.tokens.refresh_token.expose_secret().into()).unwrap(),
+    );
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(16));
+    let mut jobs = vec![];
+    for _ in 0..16 {
+        let (lifecycle, signer, clock, barrier, refresh) = (
+            lifecycle.clone(),
+            signer.clone(),
+            clock.clone(),
+            barrier.clone(),
+            refresh.clone(),
+        );
+        jobs.push(tokio::spawn(async move {
+            barrier.wait().await;
+            lifecycle
+                .rotate_local_refresh(
+                    &refresh,
+                    &session_config(),
+                    signer.as_ref(),
+                    &security_budget(&clock),
+                )
+                .await
+        }));
+    }
+    let mut replacements = vec![];
+    for job in jobs {
+        match job.await.unwrap() {
+            Ok(set) => replacements.push(set),
+            Err(error) => assert!(matches!(
+                error,
+                SecurityError::CredentialRevoked | SecurityError::Conflict
+            )),
+        }
+    }
+    assert_eq!(replacements.len(), 1);
+    assert_eq!(
+        replacements[0].claims.grant_id,
+        original.tokens.claims.grant_id
+    );
+    assert_eq!(
+        replacements[0].claims.session_id,
+        original.tokens.claims.session_id
+    );
+    assert_eq!(
+        replacements[0].claims.family_id,
+        original.tokens.claims.family_id
+    );
+    assert_eq!(session_count(&db, "security_credential").await, 4);
+    assert_eq!(
+        session_count(&db, "security_refresh_family WHERE revoked_at IS NOT NULL").await,
+        1
+    );
+}
+#[tokio::test]
+async fn security_t24_refresh_preserves_bounds_rejects_oidc_and_observes_revoked_roots() {
+    use auth::security::{credential::CredentialRef, error::SecurityError};
+    let (_container, db, clock, lifecycle) = local_fixture().await;
+    let signer = SessionTestSigner::new();
+    let original = login_local_session(&lifecycle, &signer, &security_budget(&clock))
+        .await
+        .unwrap()
+        .tokens;
+    let bounds = original.claims.bounds.clone();
+    execute(&db, "INSERT INTO authority (id,name,authority_uri,method,create_time,update_time) VALUES (9003,'new-authority','/new-authority','POST',NOW(),NOW())").await.unwrap();
+    let rotated = lifecycle
+        .rotate_local_refresh(
+            &original.refresh_token,
+            &session_config(),
+            &signer,
+            &security_budget(&clock),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rotated.claims.bounds, bounds);
+    assert_eq!(
+        lifecycle
+            .check_registered(
+                &CredentialRef::new(&original.claims.iss, &original.claims.jti).unwrap(),
+                &security_budget(&clock)
+            )
+            .await
+            .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &rotated.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    execute(
+        &db,
+        "UPDATE security_session_client SET audience='cobotusr',application='cobotusr'",
+    )
+    .await
+    .unwrap();
+    let code = session_code(&db, "session-test").await;
+    let oidc = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    assert_eq!(
+        lifecycle
+            .rotate_local_refresh(
+                &oidc.refresh_token,
+                &session_config(),
+                &signer,
+                &security_budget(&clock)
+            )
+            .await
+            .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    lifecycle
+        .check_registered(
+            &CredentialRef::new(&oidc.claims.iss, &oidc.claims.jti).unwrap(),
+            &security_budget(&clock),
+        )
+        .await
+        .unwrap();
+    execute(
+        &db,
+        &format!(
+            "UPDATE security_session SET revoked_at=created_at WHERE id='{}'",
+            rotated.claims.session_id.as_ref().unwrap()
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        lifecycle
+            .rotate_local_refresh(
+                &rotated.refresh_token,
+                &session_config(),
+                &signer,
+                &security_budget(&clock)
+            )
+            .await
+            .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+}
+#[tokio::test]
+async fn security_t24_inherited_budget_and_invalid_password_fail_without_partial_user() {
+    use auth::security::error::SecurityError;
+    use cobotusr::service::security::lifecycle::LocalPassword;
+    let (_container, db, clock, lifecycle) = local_fixture().await;
+    assert_eq!(
+        LocalPassword::new("".into()).err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    assert_eq!(
+        LocalPassword::new("x".repeat(73)).err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    assert!(LocalPassword::new("x".repeat(72)).is_ok());
+    assert_eq!(
+        format!("{:?}", LocalPassword::new(LOCAL_PASSWORD.into()).unwrap()),
+        "LocalPassword([REDACTED])"
+    );
+    let signer = SessionTestSigner {
+        delay: std::time::Duration::from_millis(600),
+        fail: std::sync::atomic::AtomicBool::new(false),
+    };
+    let budget = security_budget(&clock)
+        .child(std::time::Duration::from_millis(100))
+        .unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(
+        login_local_session(&lifecycle, &signer, &budget)
+            .await
+            .err(),
+        Some(SecurityError::DeadlineExceeded)
+    );
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
+    let budget = security_budget(&clock)
+        .child(std::time::Duration::from_millis(1))
+        .unwrap();
+    assert_eq!(
+        register_local_session(&lifecycle, "too-slow", &SessionTestSigner::new(), &budget)
+            .await
+            .err(),
+        Some(SecurityError::DeadlineExceeded)
+    );
+    assert_eq!(session_count(&db, "\"user\"").await, 1);
+    assert_eq!(session_count(&db, "security_credential").await, 0);
+}
 const SESSION_REDIRECT: &str = "http://localhost/callback";
 fn session_config() -> cobotusr::service::security::lifecycle::SessionTokenConfig {
     cobotusr::service::security::lifecycle::SessionTokenConfig {
