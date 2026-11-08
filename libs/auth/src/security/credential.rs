@@ -132,6 +132,8 @@ pub struct SecurityAccessClaims {
 /// roots and the signing-key binding. Return registered claims, never echo the request.
 #[async_trait::async_trait]
 pub trait CurrentCredentialChecker: Send + Sync {
+    // async_trait emits a redundant must_use on its boxed Future on Rust 1.99.
+    #[allow(clippy::double_must_use)]
     async fn check_current(
         &self,
         verified: &VerifiedCredential,

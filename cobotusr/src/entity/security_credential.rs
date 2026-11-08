@@ -22,6 +22,9 @@ pub struct Model {
     pub grant_id: Uuid,
     pub session_id: Option<Uuid>,
     pub family_id: Option<Uuid>,
+    /// Explicit refresh/access pairing; audit origin is not a liveness parent.
+    pub paired_access_jti: Option<String>,
+    pub oidc_client_id: Option<String>,
     /// Only delegated operations depend on a still-active parent credential.
     pub revocation_parent_jti: Option<String>,
     /// Audit source only; consumption/revocation of this source does not revoke

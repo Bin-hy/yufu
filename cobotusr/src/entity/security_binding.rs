@@ -20,6 +20,26 @@ pub struct Model {
 }
 impl ActiveModelBehavior for ActiveModel {}
 
+/// A browser client's access audience is server configuration, independent of
+/// the client audience carried by its ID Token.
+pub mod session_client {
+    use sea_orm::entity::prelude::*;
+
+    #[sea_orm::model]
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "security_session_client")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub issuer: String,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub client_id: String,
+        pub audience: String,
+        pub application: String,
+        pub enabled: bool,
+    }
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod device {
     use sea_orm::entity::prelude::*;
 

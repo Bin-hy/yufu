@@ -1611,6 +1611,8 @@ async fn authenticated_policy_user(
         grant_id: Set(grant_id),
         session_id: Set(Some(session_id)),
         family_id: Set(None),
+        paired_access_jti: Set(None),
+        oidc_client_id: Set(None),
         revocation_parent_jti: Set(None),
         minted_by: Set(None),
         signing_key_id: Set(Some("key".into())),
@@ -1895,11 +1897,18 @@ async fn security_t19_registration_repairs_missing_methods_without_granting_user
         .unwrap();
     let db = Database::connect(url).await.unwrap();
     let migrations = Migrator::migrations();
-    assert_eq!(
-        migrations.last().unwrap().name(),
-        "m20261107_000003_security_operations"
+    let operation_seed = migrations
+        .iter()
+        .position(|migration| migration.name() == "m20261107_000003_security_operations")
+        .unwrap();
+    assert!(
+        operation_seed
+            > migrations
+                .iter()
+                .position(|migration| migration.name() == "m20261107_000001_security_identity")
+                .unwrap()
     );
-    Migrator::up(&db, Some(migrations.len() as u32 - 1))
+    Migrator::up(&db, Some(operation_seed as u32))
         .await
         .unwrap();
     // Simulate a pre-existing administrator-managed registration with no User
@@ -2655,5 +2664,1075 @@ async fn security_t20_machine_uses_current_binding_without_falling_back_to_same_
             .await
             .err(),
         Some(SecurityError::CredentialRevoked)
+    );
+}
+
+struct SessionTestSigner {
+    delay: std::time::Duration,
+    fail: std::sync::atomic::AtomicBool,
+}
+impl SessionTestSigner {
+    fn new() -> Self {
+        Self {
+            delay: std::time::Duration::ZERO,
+            fail: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+#[sea_orm::prelude::async_trait::async_trait]
+impl cobotusr::service::security::lifecycle::SessionTokenSigner for SessionTestSigner {
+    fn key_id(&self) -> &str {
+        "key"
+    }
+    async fn sign_access(
+        &self,
+        claims: &auth::security::credential::SecurityAccessClaims,
+    ) -> Result<auth::security::identity::SecretToken, auth::security::error::SecurityError> {
+        tokio::time::sleep(self.delay).await;
+        if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(auth::security::error::SecurityError::DependencyUnavailable);
+        }
+        Ok(sign_security_claims(claims, "key"))
+    }
+    async fn sign_id(
+        &self,
+        claims: &auth::security::credential::SecurityAccessClaims,
+        client_id: &str,
+        nonce: Option<&str>,
+        _access: &auth::security::identity::SecretToken,
+    ) -> Result<auth::security::identity::SecretToken, auth::security::error::SecurityError> {
+        let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
+        header.kid = Some("key".into());
+        let id = auth::claims::IdTokenClaims {
+            iss: claims.iss.clone(),
+            sub: claims.sub.clone(),
+            aud: Some(client_id.into()),
+            iat: claims.iat,
+            exp: claims.exp,
+            nonce: nonce.map(str::to_owned),
+            at_hash: None,
+        };
+        auth::security::identity::SecretToken::new(
+            jsonwebtoken::encode(&header, &id, &security_signing_fixture().encoding).unwrap(),
+        )
+    }
+}
+const SESSION_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const SESSION_REDIRECT: &str = "http://localhost/callback";
+fn session_config() -> cobotusr::service::security::lifecycle::SessionTokenConfig {
+    cobotusr::service::security::lifecycle::SessionTokenConfig {
+        issuer: "https://idp.test".into(),
+        access_ttl_seconds: 300,
+        refresh_ttl_seconds: 3600,
+    }
+}
+async fn session_code(
+    db: &DatabaseConnection,
+    client: &str,
+) -> auth::security::identity::SecretToken {
+    use cobotusr::service::oidc::{CreateAuthCodeParams, OidcService};
+    auth::security::identity::SecretToken::new(
+        OidcService::create_authorization_code(
+            db,
+            CreateAuthCodeParams {
+                user_id: 1,
+                client_id: client.into(),
+                redirect_uri: Some(SESSION_REDIRECT.into()),
+                code_challenge: Some("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".into()),
+                code_challenge_method: "S256".into(),
+                scope: Some("openid".into()),
+                state: None,
+                nonce: Some("nonce".into()),
+            },
+        )
+        .await
+        .unwrap(),
+    )
+    .unwrap()
+}
+async fn session_fixture() -> (
+    testcontainers::ContainerAsync<testcontainers::GenericImage>,
+    DatabaseConnection,
+    std::sync::Arc<crate::cobotsrv::common::SecurityTestClock>,
+    std::sync::Arc<cobotusr::service::security::lifecycle::CredentialLifecycle>,
+) {
+    use cobotusr::{
+        migration::{Migrator, MigratorTrait},
+        service::{
+            oidc::OidcService,
+            security::{lifecycle::CredentialLifecycle, repository::PgSecurityRepository},
+        },
+    };
+    let (container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    execute(&db, "INSERT INTO \"user\" (id,username,role_id,create_time,update_time) VALUES (1,'session-user',1,NOW(),NOW())").await.unwrap();
+    OidcService::register_client(
+        &db,
+        1,
+        "session-test".into(),
+        "session".into(),
+        vec![SESSION_REDIRECT.into()],
+        vec!["openid".into()],
+        vec!["authorization_code".into(), "refresh_token".into()],
+        true,
+    )
+    .await
+    .unwrap();
+    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','session-test','cobotsrv','cobotsrv',TRUE)").await.unwrap();
+    let clock = std::sync::Arc::new(crate::cobotsrv::common::SecurityTestClock::new(
+        chrono::Utc::now().timestamp() as u64 * 1000,
+    ));
+    let repo = std::sync::Arc::new(PgSecurityRepository::new(db.clone(), clock.clone()));
+    let lifecycle = std::sync::Arc::new(CredentialLifecycle::new(repo, clock.clone()));
+    (container, db, clock, lifecycle)
+}
+async fn redeem_session(
+    lifecycle: &cobotusr::service::security::lifecycle::CredentialLifecycle,
+    code: &auth::security::identity::SecretToken,
+    signer: &dyn cobotusr::service::security::lifecycle::SessionTokenSigner,
+    budget: &auth::security::budget::SecurityBudget,
+) -> Result<
+    cobotusr::service::security::lifecycle::SessionTokenSet,
+    auth::security::error::SecurityError,
+> {
+    use cobotusr::service::security::lifecycle::CodeExchangeRequest;
+    let verifier = auth::security::identity::SecretToken::new(SESSION_VERIFIER.into()).unwrap();
+    lifecycle
+        .consume_authorization_code(
+            CodeExchangeRequest {
+                code,
+                client_id: "session-test",
+                client_secret: None,
+                redirect_uri: Some(SESSION_REDIRECT),
+                code_verifier: Some(&verifier),
+            },
+            &session_config(),
+            signer,
+            budget,
+        )
+        .await
+}
+async fn session_count(db: &DatabaseConnection, table: &str) -> i64 {
+    db.query_one_raw(Statement::from_string(
+        DbBackend::Postgres,
+        format!("SELECT count(*) AS count FROM {table}"),
+    ))
+    .await
+    .unwrap()
+    .unwrap()
+    .try_get("", "count")
+    .unwrap()
+}
+#[tokio::test]
+async fn security_t21_wrong_client_redirect_or_pkce_never_burns_code() {
+    use auth::security::{error::SecurityError, identity::SecretToken};
+    use cobotusr::service::security::lifecycle::CodeExchangeRequest;
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let code = session_code(&db, "session-test").await;
+    let signer = SessionTestSigner::new();
+    let good = SecretToken::new(SESSION_VERIFIER.into()).unwrap();
+    let bad = SecretToken::new("wrong-verifier".into()).unwrap();
+    for (client, redirect, verifier) in [
+        ("unknown", Some(SESSION_REDIRECT), Some(&good)),
+        ("session-test", Some("http://localhost/other"), Some(&good)),
+        ("session-test", None, Some(&good)),
+        ("session-test", Some(SESSION_REDIRECT), Some(&bad)),
+        ("session-test", Some(SESSION_REDIRECT), None),
+    ] {
+        assert_eq!(
+            lifecycle
+                .consume_authorization_code(
+                    CodeExchangeRequest {
+                        code: &code,
+                        client_id: client,
+                        client_secret: None,
+                        redirect_uri: redirect,
+                        code_verifier: verifier
+                    },
+                    &session_config(),
+                    &signer,
+                    &security_budget(&clock)
+                )
+                .await
+                .err(),
+            Some(SecurityError::InvalidCredential)
+        );
+        assert_eq!(session_count(&db, "security_credential").await, 0);
+        assert_eq!(
+            session_count(&db, "oauth_authorization_code WHERE used").await,
+            0
+        );
+    }
+    let issued = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    assert_eq!(issued.claims.sub, "1");
+    assert_eq!(
+        issued.claims.token_use,
+        auth::security::identity::TokenUse::UserSession
+    );
+    assert_eq!(session_count(&db, "security_credential").await, 2);
+    assert_eq!(session_count(&db, "security_grant").await, 1);
+    assert_eq!(
+        session_count(&db, "oauth_authorization_code WHERE used").await,
+        1
+    );
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn security_t21_concurrent_code_exchange_commits_one_registered_pair() {
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let code = std::sync::Arc::new(session_code(&db, "session-test").await);
+    let signer = std::sync::Arc::new(SessionTestSigner::new());
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(16));
+    let mut jobs = Vec::new();
+    for _ in 0..16 {
+        let (code, lifecycle, signer, clock, barrier) = (
+            code.clone(),
+            lifecycle.clone(),
+            signer.clone(),
+            clock.clone(),
+            barrier.clone(),
+        );
+        jobs.push(tokio::spawn(async move {
+            barrier.wait().await;
+            redeem_session(&lifecycle, &code, signer.as_ref(), &security_budget(&clock)).await
+        }));
+    }
+    let mut successes = Vec::new();
+    for job in jobs {
+        if let Ok(set) = job.await.unwrap() {
+            successes.push(set);
+        }
+    }
+    assert_eq!(successes.len(), 1);
+    assert_eq!(session_count(&db, "security_credential").await, 2);
+    assert_eq!(session_count(&db, "security_session").await, 1);
+    let reference = auth::security::credential::CredentialRef::new(
+        "https://idp.test",
+        &successes[0].claims.jti,
+    )
+    .unwrap();
+    lifecycle
+        .check_registered(&reference, &security_budget(&clock))
+        .await
+        .unwrap();
+}
+#[tokio::test]
+async fn security_t21_signing_and_deferred_commit_failure_roll_back_code_and_roots() {
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let code = session_code(&db, "session-test").await;
+    let signer = SessionTestSigner::new();
+    signer.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+            .await
+            .is_err()
+    );
+    signer
+        .fail
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    execute(&db, "CREATE FUNCTION fail_session_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test commit rejected'; END $$;").await.unwrap();
+    execute(&db, "CREATE CONSTRAINT TRIGGER reject_session_commit AFTER INSERT ON security_credential DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_session_commit()").await.unwrap();
+    assert!(
+        redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+            .await
+            .is_err()
+    );
+    for table in [
+        "security_credential",
+        "security_grant",
+        "security_session",
+        "security_refresh_family",
+        "oauth_authorization_code WHERE used",
+    ] {
+        assert_eq!(session_count(&db, table).await, 0);
+    }
+    execute(
+        &db,
+        "DROP TRIGGER reject_session_commit ON security_credential",
+    )
+    .await
+    .unwrap();
+    redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+}
+
+async fn rotate_session(
+    lifecycle: &cobotusr::service::security::lifecycle::CredentialLifecycle,
+    refresh: &auth::security::identity::SecretToken,
+    signer: &dyn cobotusr::service::security::lifecycle::SessionTokenSigner,
+    budget: &auth::security::budget::SecurityBudget,
+) -> Result<
+    cobotusr::service::security::lifecycle::SessionTokenSet,
+    auth::security::error::SecurityError,
+> {
+    use cobotusr::service::security::lifecycle::RefreshRequest;
+    lifecycle
+        .rotate_refresh(
+            RefreshRequest {
+                refresh_token: refresh,
+                client_id: "session-test",
+                client_secret: None,
+            },
+            &session_config(),
+            signer,
+            budget,
+        )
+        .await
+}
+#[tokio::test]
+async fn security_t22_rotation_keeps_roots_bounds_and_explicit_access_pair() {
+    use cobotusr::entity::security_credential as credential;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    execute(&db, r#"INSERT INTO permission (id,application_id,name,action,resource_type,resource_pattern,create_time,update_time) VALUES (777,(SELECT id FROM application WHERE app_key='cobotsrv'),'device:read','read','device','{"application":"cobotsrv","scope":{"scope":"gateway","gateway_id":"g1","kind":"device"}}',NOW(),NOW())"#).await.unwrap();
+    execute(
+        &db,
+        "INSERT INTO role_permission (role_id,permission_id,create_time) VALUES (1,777,NOW())",
+    )
+    .await
+    .unwrap();
+    let code = session_code(&db, "session-test").await;
+    let signer = SessionTestSigner::new();
+    let first = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    assert_eq!(first.claims.aud, "cobotsrv");
+    assert_eq!(first.claims.application, "cobotsrv");
+    assert!(!first.claims.bounds.grants().is_empty());
+    execute(&db, r#"UPDATE permission SET resource_pattern='{"application":"cobotsrv","scope":{"scope":"gateway","gateway_id":"g2","kind":"device"}}' WHERE id=777"#).await.unwrap();
+    let second = rotate_session(
+        &lifecycle,
+        &first.refresh_token,
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.claims.grant_id, second.claims.grant_id);
+    assert_eq!(first.claims.session_id, second.claims.session_id);
+    assert_eq!(first.claims.family_id, second.claims.family_id);
+    assert_eq!(first.claims.bounds, second.claims.bounds);
+    assert_ne!(first.claims.jti, second.claims.jti);
+    let old_access =
+        auth::security::credential::CredentialRef::new("https://idp.test", &first.claims.jti)
+            .unwrap();
+    assert_eq!(
+        lifecycle
+            .check_registered(&old_access, &security_budget(&clock))
+            .await
+            .err(),
+        Some(auth::security::error::SecurityError::CredentialRevoked)
+    );
+    let current =
+        credential::Entity::find_by_id(("https://idp.test".to_owned(), second.claims.jti.clone()))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+    assert!(current.revocation_parent_jti.is_none());
+    assert!(current.minted_by.is_some());
+    let consumed = credential::Entity::find()
+        .filter(credential::Column::ConsumedAt.is_not_null())
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        consumed.paired_access_jti.as_deref(),
+        Some(first.claims.jti.as_str())
+    );
+    assert!(consumed.secret_digest.is_some());
+    assert!(consumed.replacement_jti.is_some());
+    lifecycle
+        .check_registered(
+            &auth::security::credential::CredentialRef::new("https://idp.test", &second.claims.jti)
+                .unwrap(),
+            &security_budget(&clock),
+        )
+        .await
+        .unwrap();
+    // Expired access does not prevent a still-live refresh from rotating.
+    clock.set_wall_time((second.claims.exp + 2) * 1000);
+    let third = rotate_session(
+        &lifecycle,
+        &second.refresh_token,
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.claims.bounds, third.claims.bounds);
+    assert_eq!(session_count(&db, "security_credential").await, 6);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn security_t22_concurrent_refresh_creates_only_one_replacement_pair() {
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let signer = std::sync::Arc::new(SessionTestSigner::new());
+    let code = session_code(&db, "session-test").await;
+    let first = std::sync::Arc::new(
+        redeem_session(&lifecycle, &code, signer.as_ref(), &security_budget(&clock))
+            .await
+            .unwrap(),
+    );
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(16));
+    let mut jobs = Vec::new();
+    for _ in 0..16 {
+        let (lifecycle, first, signer, clock, barrier) = (
+            lifecycle.clone(),
+            first.clone(),
+            signer.clone(),
+            clock.clone(),
+            barrier.clone(),
+        );
+        jobs.push(tokio::spawn(async move {
+            barrier.wait().await;
+            rotate_session(
+                &lifecycle,
+                &first.refresh_token,
+                signer.as_ref(),
+                &security_budget(&clock),
+            )
+            .await
+        }));
+    }
+    let mut successes = 0;
+    for job in jobs {
+        if job.await.unwrap().is_ok() {
+            successes += 1;
+        }
+    }
+    assert_eq!(successes, 1);
+    assert_eq!(session_count(&db, "security_credential").await, 4);
+    assert_eq!(
+        session_count(&db, "security_credential WHERE consumed_at IS NOT NULL").await,
+        1
+    );
+    assert_eq!(session_count(&db, "security_refresh_family").await, 1);
+}
+#[tokio::test]
+async fn security_t22_failed_signing_or_commit_leaves_old_pair_usable() {
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let signer = SessionTestSigner::new();
+    let code = session_code(&db, "session-test").await;
+    let first = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    signer.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .is_err()
+    );
+    signer
+        .fail
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    execute(&db, "CREATE FUNCTION fail_refresh_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test commit rejected'; END $$;").await.unwrap();
+    execute(&db, "CREATE CONSTRAINT TRIGGER reject_refresh_commit AFTER INSERT ON security_credential DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_refresh_commit()").await.unwrap();
+    assert!(
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(session_count(&db, "security_credential").await, 2);
+    assert_eq!(
+        session_count(
+            &db,
+            "security_credential WHERE consumed_at IS NOT NULL OR revoked_at IS NOT NULL"
+        )
+        .await,
+        0
+    );
+    execute(
+        &db,
+        "DROP TRIGGER reject_refresh_commit ON security_credential",
+    )
+    .await
+    .unwrap();
+    rotate_session(
+        &lifecycle,
+        &first.refresh_token,
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+}
+#[tokio::test]
+async fn security_t22_wrong_client_revoked_roots_and_inherited_lock_budget_fail_closed() {
+    use auth::security::{error::SecurityError, identity::SecretToken};
+    use cobotusr::service::security::lifecycle::RefreshRequest;
+    use sea_orm::TransactionTrait;
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let signer = SessionTestSigner::new();
+    let code = session_code(&db, "session-test").await;
+    let first = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    assert_eq!(
+        lifecycle
+            .rotate_refresh(
+                RefreshRequest {
+                    refresh_token: &first.refresh_token,
+                    client_id: "unknown",
+                    client_secret: None
+                },
+                &session_config(),
+                &signer,
+                &security_budget(&clock)
+            )
+            .await
+            .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    let unknown = SecretToken::new("unknown".into()).unwrap();
+    assert_eq!(
+        rotate_session(&lifecycle, &unknown, &signer, &security_budget(&clock))
+            .await
+            .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    let lock = db.begin().await.unwrap();
+    lock.execute_raw(Statement::from_string(
+        DbBackend::Postgres,
+        "LOCK TABLE security_credential IN ACCESS EXCLUSIVE MODE".to_owned(),
+    ))
+    .await
+    .unwrap();
+    let short = security_budget(&clock)
+        .child(std::time::Duration::from_millis(100))
+        .unwrap();
+    let started = std::time::Instant::now();
+    assert!(matches!(
+        rotate_session(&lifecycle, &first.refresh_token, &signer, &short).await,
+        Err(SecurityError::DeadlineExceeded | SecurityError::DependencyUnavailable)
+    ));
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    lock.rollback().await.unwrap();
+    execute(
+        &db,
+        &format!(
+            "UPDATE security_session SET revoked_at={} WHERE id='{}'",
+            first.claims.iat * 1000,
+            first.claims.session_id.as_ref().unwrap()
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(
+        session_count(&db, "security_credential WHERE consumed_at IS NOT NULL").await,
+        0
+    );
+}
+
+#[tokio::test]
+async fn security_t23_consumed_refresh_revokes_only_its_family_and_descendants() {
+    use auth::security::{credential::CredentialRef, error::SecurityError};
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let signer = SessionTestSigner::new();
+    let first_code = session_code(&db, "session-test").await;
+    let unrelated_code = session_code(&db, "session-test").await;
+    let first = redeem_session(&lifecycle, &first_code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    let unrelated = redeem_session(
+        &lifecycle,
+        &unrelated_code,
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+    let second = rotate_session(
+        &lifecycle,
+        &first.refresh_token,
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+    let third = rotate_session(
+        &lifecycle,
+        &second.refresh_token,
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+    use cobotusr::entity::security_credential as credential;
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    let mut child: credential::ActiveModel =
+        credential::Entity::find_by_id(("https://idp.test".to_owned(), third.claims.jti.clone()))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+    child.jti = Set("delegated-child".into());
+    child.token_use = Set("gateway_operation".into());
+    child.oidc_client_id = Set(None);
+    child.audience = Set("cobotlet:g1".into());
+    child.binding = Set(serde_json::json!({"kind":"gateway","gateway_id":"g1"}));
+    child.revocation_parent_jti = Set(Some(third.claims.jti.clone()));
+    child.insert(&db).await.unwrap();
+    lifecycle
+        .check_registered(
+            &CredentialRef::new("https://idp.test", "delegated-child").unwrap(),
+            &security_budget(&clock),
+        )
+        .await
+        .unwrap();
+    execute(&db, &format!("UPDATE security_credential SET minted_by='{{\"issuer\":\"https://idp.test\",\"jti\":\"{}\"}}' WHERE jti='{}'", third.claims.jti, unrelated.claims.jti)).await.unwrap();
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(
+        lifecycle
+            .check_registered(
+                &CredentialRef::new("https://idp.test", &third.claims.jti).unwrap(),
+                &security_budget(&clock)
+            )
+            .await
+            .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &third.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(
+        lifecycle
+            .check_registered(
+                &CredentialRef::new("https://idp.test", "delegated-child").unwrap(),
+                &security_budget(&clock)
+            )
+            .await
+            .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(
+        session_count(
+            &db,
+            "security_credential WHERE jti='delegated-child' AND revoked_at IS NOT NULL"
+        )
+        .await,
+        1
+    );
+    lifecycle
+        .check_registered(
+            &CredentialRef::new("https://idp.test", &unrelated.claims.jti).unwrap(),
+            &security_budget(&clock),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        session_count(&db, "security_refresh_family WHERE revoked_at IS NOT NULL").await,
+        1
+    );
+    assert_eq!(
+        session_count(&db, "security_grant WHERE revoked_at IS NOT NULL").await,
+        0
+    );
+    assert_eq!(
+        session_count(&db, "security_session WHERE revoked_at IS NOT NULL").await,
+        0
+    );
+    assert_eq!(
+        session_count(&db, "security_credential WHERE consumed_at IS NOT NULL").await,
+        2
+    );
+}
+#[tokio::test]
+async fn security_t23_wrong_client_and_unknown_digest_cannot_revoke_consumed_family() {
+    use auth::security::{credential::CredentialRef, error::SecurityError, identity::SecretToken};
+    use cobotusr::service::{oidc::OidcService, security::lifecycle::RefreshRequest};
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let signer = SessionTestSigner::new();
+    let code = session_code(&db, "session-test").await;
+    let first = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    clock.set_wall_time((first.claims.iat + session_config().refresh_ttl_seconds - 100) * 1000);
+    let second = rotate_session(
+        &lifecycle,
+        &first.refresh_token,
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+    OidcService::register_client(
+        &db,
+        1,
+        "other-session".into(),
+        "other".into(),
+        vec![SESSION_REDIRECT.into()],
+        vec!["openid".into()],
+        vec!["refresh_token".into()],
+        true,
+    )
+    .await
+    .unwrap();
+    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','other-session','cobotsrv','cobotsrv',TRUE)").await.unwrap();
+    assert_eq!(
+        lifecycle
+            .rotate_refresh(
+                RefreshRequest {
+                    refresh_token: &first.refresh_token,
+                    client_id: "other-session",
+                    client_secret: None
+                },
+                &session_config(),
+                &signer,
+                &security_budget(&clock)
+            )
+            .await
+            .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &SecretToken::new("unknown-refresh-marker".into()).unwrap(),
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    assert_eq!(
+        session_count(&db, "security_refresh_family WHERE revoked_at IS NOT NULL").await,
+        0
+    );
+    lifecycle
+        .check_registered(
+            &CredentialRef::new("https://idp.test", &second.claims.jti).unwrap(),
+            &security_budget(&clock),
+        )
+        .await
+        .unwrap();
+    let rows = db
+        .query_all_raw(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_jsonb(c) AS data FROM security_credential c".to_owned(),
+        ))
+        .await
+        .unwrap();
+    for row in rows {
+        let value: serde_json::Value = row.try_get("", "data").unwrap();
+        assert!(
+            !value
+                .to_string()
+                .contains(first.refresh_token.expose_secret())
+        );
+        assert!(
+            !value
+                .to_string()
+                .contains(second.refresh_token.expose_secret())
+        );
+    }
+    // Replaying an expired consumed ancestor still protects its live descendants.
+    clock.set_wall_time((first.claims.iat + session_config().refresh_ttl_seconds + 10) * 1000);
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert!(
+        second.claims.exp * 1000
+            > (first.claims.iat + session_config().refresh_ttl_seconds + 10) * 1000
+    );
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &second.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(
+        session_count(&db, "security_refresh_family WHERE revoked_at IS NOT NULL").await,
+        1
+    );
+}
+#[tokio::test]
+async fn security_t23_replay_revocation_commit_failure_is_not_reported_as_durable() {
+    use auth::security::{credential::CredentialRef, error::SecurityError};
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let signer = SessionTestSigner::new();
+    let code = session_code(&db, "session-test").await;
+    let first = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    let second = rotate_session(
+        &lifecycle,
+        &first.refresh_token,
+        &signer,
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+    execute(&db, "CREATE FUNCTION fail_replay_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test commit rejected'; END $$;").await.unwrap();
+    execute(&db, "CREATE CONSTRAINT TRIGGER reject_replay_commit AFTER UPDATE ON security_refresh_family DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_replay_commit()").await.unwrap();
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::DependencyUnavailable)
+    );
+    assert_eq!(
+        session_count(&db, "security_refresh_family WHERE revoked_at IS NOT NULL").await,
+        0
+    );
+    lifecycle
+        .check_registered(
+            &CredentialRef::new("https://idp.test", &second.claims.jti).unwrap(),
+            &security_budget(&clock),
+        )
+        .await
+        .unwrap();
+    execute(
+        &db,
+        "DROP TRIGGER reject_replay_commit ON security_refresh_family",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+    assert_eq!(session_count(&db, "security_credential").await, 4);
+    assert_eq!(
+        session_count(&db, "security_refresh_family WHERE revoked_at IS NOT NULL").await,
+        1
+    );
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn security_t23_replay_and_rotation_across_instances_cannot_restore_family() {
+    use auth::security::credential::CredentialRef;
+    use cobotusr::service::security::{
+        lifecycle::CredentialLifecycle, repository::PgSecurityRepository,
+    };
+    use std::sync::Arc;
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let second_instance = Arc::new(CredentialLifecycle::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+    ));
+    let signer = Arc::new(SessionTestSigner::new());
+    let code = session_code(&db, "session-test").await;
+    let first = redeem_session(&lifecycle, &code, signer.as_ref(), &security_budget(&clock))
+        .await
+        .unwrap();
+    let second = rotate_session(
+        &lifecycle,
+        &first.refresh_token,
+        signer.as_ref(),
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let (b1, b2) = (barrier.clone(), barrier.clone());
+    let (s1, s2) = (signer.clone(), signer.clone());
+    let (c1, c2) = (clock.clone(), clock.clone());
+    let replay = tokio::spawn(async move {
+        b1.wait().await;
+        rotate_session(
+            &lifecycle,
+            &first.refresh_token,
+            s1.as_ref(),
+            &security_budget(&c1),
+        )
+        .await
+    });
+    let rotation = tokio::spawn(async move {
+        b2.wait().await;
+        rotate_session(
+            &second_instance,
+            &second.refresh_token,
+            s2.as_ref(),
+            &security_budget(&c2),
+        )
+        .await
+    });
+    assert!(replay.await.unwrap().is_err());
+    let checker = CredentialLifecycle::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+    );
+    if let Ok(set) = rotation.await.unwrap() {
+        assert!(
+            checker
+                .check_registered(
+                    &CredentialRef::new("https://idp.test", &set.claims.jti).unwrap(),
+                    &security_budget(&clock)
+                )
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(
+        session_count(&db, "security_refresh_family WHERE revoked_at IS NOT NULL").await,
+        1
+    );
+    assert!(session_count(&db, "security_credential").await <= 6);
+}
+
+#[tokio::test]
+async fn security_t21_signing_wait_uses_original_budget_and_rolls_back() {
+    use auth::security::{budget::SecurityBudget, error::SecurityError};
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let code = session_code(&db, "session-test").await;
+    let signer = SessionTestSigner {
+        delay: std::time::Duration::from_millis(600),
+        ..SessionTestSigner::new()
+    };
+    let budget = SecurityBudget::new(clock.clone())
+        .unwrap()
+        .child(std::time::Duration::from_millis(100))
+        .unwrap();
+    let start = std::time::Instant::now();
+    assert_eq!(
+        redeem_session(&lifecycle, &code, &signer, &budget)
+            .await
+            .err(),
+        Some(SecurityError::DeadlineExceeded)
+    );
+    assert!(start.elapsed() < std::time::Duration::from_millis(400));
+    assert_eq!(session_count(&db, "security_credential").await, 0);
+    redeem_session(
+        &lifecycle,
+        &code,
+        &SessionTestSigner::new(),
+        &security_budget(&clock),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn security_t21_client_binding_is_required_and_cannot_change_refresh_audience() {
+    use auth::security::error::SecurityError;
+    let (_container, db, clock, lifecycle) = session_fixture().await;
+    let code = session_code(&db, "session-test").await;
+    let signer = SessionTestSigner::new();
+    execute(&db, "UPDATE security_session_client SET enabled=FALSE")
+        .await
+        .unwrap();
+    assert_eq!(
+        redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+            .await
+            .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    assert_eq!(session_count(&db, "security_credential").await, 0);
+    execute(&db, "DELETE FROM security_session_client")
+        .await
+        .unwrap();
+    assert_eq!(
+        redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+            .await
+            .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    execute(&db, "INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','session-test','cobotsrv','cobotsrv',TRUE)").await.unwrap();
+    let set = redeem_session(&lifecycle, &code, &signer, &security_budget(&clock))
+        .await
+        .unwrap();
+    assert_eq!(set.claims.aud, "cobotsrv");
+    execute(
+        &db,
+        "UPDATE security_session_client SET audience='cobotusr',application='cobotusr'",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        rotate_session(
+            &lifecycle,
+            &set.refresh_token,
+            &signer,
+            &security_budget(&clock)
+        )
+        .await
+        .err(),
+        Some(SecurityError::InvalidCredential)
+    );
+    assert_eq!(
+        session_count(&db, "security_credential WHERE consumed_at IS NOT NULL").await,
+        0
     );
 }

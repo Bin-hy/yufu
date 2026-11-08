@@ -233,6 +233,23 @@ pub struct IdTokenSigner {
 }
 
 impl IdTokenSigner {
+    pub fn sign_security_access(
+        &self,
+        claims: &crate::security::credential::SecurityAccessClaims,
+    ) -> Result<crate::security::identity::SecretToken, crate::security::error::SecurityError> {
+        use crate::security::{error::SecurityError, identity::SecretToken};
+        let key = self
+            .rsa_encoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        let mut header = Header::new(Algorithm::RS256);
+        header.typ = Some("at+jwt".into());
+        header.kid = Some(self.kid.clone());
+        SecretToken::new(
+            encode(&header, claims, key).map_err(|_| SecurityError::DependencyUnavailable)?,
+        )
+    }
+
     /// Sign only the dedicated operation profile; never fall back to shared HMAC.
     pub fn sign_gateway_operation(
         &self,

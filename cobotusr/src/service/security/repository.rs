@@ -14,14 +14,16 @@ use auth::security::{
     },
 };
 use sea_orm::{
-    AccessMode, ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbBackend,
-    DbErr, EntityTrait, IsolationLevel, QueryFilter, Statement, TransactionTrait,
+    AccessMode, ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    DatabaseTransaction, DbBackend, DbErr, EntityTrait, IsolationLevel, QueryFilter, Set,
+    Statement, TransactionTrait,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::entity::{
-    application, authority, authority_role, permission, role, role_permission,
+    application, authority, authority_role, oauth_authorization_code, oauth_client, permission,
+    role, role_permission,
     security_binding::{self, device, gateway_key},
     security_credential as credential, security_grant as grant, security_permit as permit,
     security_refresh_family as family, security_session as session, user, user_authority,
@@ -50,7 +52,15 @@ pub fn gateway_key_fingerprint(pem: &str) -> Result<[u8; 32], SecurityError> {
         .map_err(|_| SecurityError::InvalidCredential)?;
     Ok(Sha256::digest(der.as_bytes()).into())
 }
-fn unavailable(_: DbErr) -> SecurityError {
+fn unavailable(error: DbErr) -> SecurityError {
+    if let DbErr::Exec(sea_orm::RuntimeErr::SqlxError(e))
+    | DbErr::Query(sea_orm::RuntimeErr::SqlxError(e)) = &error
+        && e.as_database_error()
+            .and_then(|e| e.code())
+            .is_some_and(|code| code == "40001" || code == "40P01")
+    {
+        return SecurityError::Conflict;
+    }
     SecurityError::DependencyUnavailable
 }
 pub(super) fn decode<T: serde::de::DeserializeOwned>(
@@ -108,6 +118,7 @@ impl ServiceBinding {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct RegisteredState {
     pub credential: credential::Model,
     pub grant: grant::Model,
@@ -141,6 +152,8 @@ impl std::fmt::Debug for CredentialSnapshot {
 }
 
 #[async_trait::async_trait]
+// async_trait emits redundant must_use attributes on boxed Futures on Rust 1.99.
+#[allow(clippy::double_must_use)]
 pub trait SecurityRepository: Send + Sync {
     async fn begin(
         &self,
@@ -151,8 +164,57 @@ pub trait SecurityRepository: Send + Sync {
 /// Writes/conditional consumption are added by their lifecycle tasks, using the
 /// same transaction boundary. Queries retain consumed refresh rows for replay detection.
 #[async_trait::async_trait]
+#[allow(clippy::double_must_use)]
 pub trait SecurityTransaction: Send {
     fn checked_at(&self) -> u64;
+    async fn oidc_client(
+        &mut self,
+        client_id: &str,
+    ) -> Result<Option<oauth_client::Model>, SecurityError>;
+    async fn authorization_code(
+        &mut self,
+        secret: &SecretToken,
+    ) -> Result<Option<oauth_authorization_code::Model>, SecurityError>;
+    async fn session_client(
+        &mut self,
+        issuer: &str,
+        client_id: &str,
+    ) -> Result<Option<security_binding::session_client::Model>, SecurityError>;
+    async fn consume_code(&mut self, id: i32, at: u64) -> Result<(), SecurityError>;
+    async fn session_bounds(
+        &mut self,
+        claims: &SecurityAccessClaims,
+    ) -> Result<CredentialBounds, SecurityError>;
+    async fn register_session_pair(
+        &mut self,
+        registration: SessionRegistration,
+    ) -> Result<(), SecurityError>;
+    async fn lock_refresh(
+        &mut self,
+        issuer: &str,
+        secret: &SecretToken,
+    ) -> Result<Option<CredentialSnapshot>, SecurityError>;
+    async fn consume_refresh_pair(
+        &mut self,
+        old: &CredentialRef,
+        paired_access: &CredentialRef,
+        at: u64,
+    ) -> Result<(), SecurityError>;
+    async fn link_refresh_replacement(
+        &mut self,
+        old: &CredentialRef,
+        replacement: &str,
+    ) -> Result<(), SecurityError>;
+    async fn revoke_refresh_family(
+        &mut self,
+        consumed: &CredentialRef,
+        at: u64,
+    ) -> Result<(), SecurityError>;
+    async fn revoke_session_pair(
+        &mut self,
+        refresh: &CredentialRef,
+        at: u64,
+    ) -> Result<(), SecurityError>;
     async fn application_policy(
         &mut self,
         claims: &SecurityAccessClaims,
@@ -196,6 +258,18 @@ pub trait SecurityTransaction: Send {
     ) -> Result<Option<permit::Model>, SecurityError>;
     async fn commit(self: Box<Self>) -> Result<(), SecurityError>;
     async fn rollback(self: Box<Self>) -> Result<(), SecurityError>;
+}
+
+/// Trusted lifecycle output. No access JWT or refresh plaintext is persisted.
+pub struct SessionRegistration {
+    pub(super) client_id: String,
+    pub(super) claims: SecurityAccessClaims,
+    pub(super) key_id: String,
+    pub(super) refresh_jti: String,
+    pub(super) refresh_digest: [u8; 32],
+    pub(super) refresh_expires_at: u64,
+    pub(super) minted_by: Option<CredentialRef>,
+    pub(super) new_roots: bool,
 }
 
 pub struct PgSecurityRepository {
@@ -363,8 +437,398 @@ impl PgSecurityTransaction {
 }
 #[async_trait::async_trait]
 impl SecurityTransaction for PgSecurityTransaction {
+    async fn session_client(
+        &mut self,
+        issuer: &str,
+        client_id: &str,
+    ) -> Result<Option<security_binding::session_client::Model>, SecurityError> {
+        use security_binding::session_client;
+        self.run(
+            session_client::Entity::find_by_id((issuer.to_owned(), client_id.to_owned()))
+                .filter(session_client::Column::Enabled.eq(true))
+                .one(&self.transaction),
+        )
+        .await
+    }
     fn checked_at(&self) -> u64 {
         self.checked_at
+    }
+    async fn oidc_client(
+        &mut self,
+        client_id: &str,
+    ) -> Result<Option<oauth_client::Model>, SecurityError> {
+        self.run(
+            oauth_client::Entity::find()
+                .filter(oauth_client::Column::ClientId.eq(client_id))
+                .one(&self.transaction),
+        )
+        .await
+    }
+    async fn authorization_code(
+        &mut self,
+        secret: &SecretToken,
+    ) -> Result<Option<oauth_authorization_code::Model>, SecurityError> {
+        self.run(
+            oauth_authorization_code::Entity::find()
+                .filter(oauth_authorization_code::Column::Code.eq(secret.expose_secret()))
+                .one(&self.transaction),
+        )
+        .await
+    }
+    async fn consume_code(&mut self, id: i32, at: u64) -> Result<(), SecurityError> {
+        let deadline = chrono::DateTime::from_timestamp_millis(
+            i64::try_from(
+                at.checked_add(1000)
+                    .ok_or(SecurityError::InvalidCredential)?,
+            )
+            .map_err(|_| SecurityError::InvalidCredential)?,
+        )
+        .ok_or(SecurityError::InvalidCredential)?
+        .naive_utc();
+        let result = self
+            .run(
+                oauth_authorization_code::Entity::update_many()
+                    .col_expr(
+                        oauth_authorization_code::Column::Used,
+                        sea_orm::sea_query::Expr::value(true),
+                    )
+                    .filter(oauth_authorization_code::Column::Id.eq(id))
+                    .filter(oauth_authorization_code::Column::Used.eq(false))
+                    .filter(oauth_authorization_code::Column::ExpiresAt.gt(deadline))
+                    .exec(&self.transaction),
+            )
+            .await?;
+        if result.rows_affected != 1 {
+            return Err(SecurityError::InvalidCredential);
+        }
+        Ok(())
+    }
+    async fn session_bounds(
+        &mut self,
+        claims: &SecurityAccessClaims,
+    ) -> Result<CredentialBounds, SecurityError> {
+        use crate::service::{
+            authority::{uri_operation, uri_resource},
+            permission::{registered_operation, resource_selector},
+        };
+        let Some((user, role)) = self.policy_user(claims).await? else {
+            return Err(SecurityError::InvalidCredential);
+        };
+        let superadmin = role
+            .as_ref()
+            .is_some_and(|r| r.name == role::RoleEnum::Superadmin.get_name());
+        let mut grants = Vec::new();
+        if claims.application == "cobotusr" {
+            let rows = self
+                .run(authority::Entity::find().all(&self.transaction))
+                .await?;
+            let overrides = self
+                .run(
+                    user_authority::Entity::find()
+                        .filter(user_authority::Column::UserId.eq(user.id))
+                        .all(&self.transaction),
+                )
+                .await?;
+            let allowed = self
+                .run(
+                    authority_role::Entity::find()
+                        .filter(authority_role::Column::RoleId.eq(user.role_id))
+                        .all(&self.transaction),
+                )
+                .await?;
+            for row in rows {
+                if overrides
+                    .iter()
+                    .any(|r| r.authority_id == row.id && !r.allow)
+                {
+                    continue;
+                }
+                if overrides
+                    .iter()
+                    .any(|r| r.authority_id == row.id && r.allow)
+                    || (role.is_some()
+                        && (superadmin || allowed.iter().any(|r| r.authority_id == row.id)))
+                {
+                    let resource =
+                        uri_resource(&claims.application, &row.method, &row.authority_uri)?;
+                    grants.push(ScopedOperation::new(
+                        uri_operation(row.id)?,
+                        vec![ResourceSelector::new(
+                            &claims.application,
+                            ResourceScope::Exact {
+                                target: resource.target().clone(),
+                            },
+                        )?],
+                    )?);
+                }
+            }
+        } else if let Some(app) = self
+            .run(
+                application::Entity::find()
+                    .filter(application::Column::AppKey.eq(&claims.application))
+                    .one(&self.transaction),
+            )
+            .await?
+        {
+            let rows = self
+                .run(
+                    permission::Entity::find()
+                        .filter(permission::Column::ApplicationId.eq(app.id))
+                        .all(&self.transaction),
+                )
+                .await?;
+            let overrides = self
+                .run(
+                    user_permission::Entity::find()
+                        .filter(user_permission::Column::UserId.eq(user.id))
+                        .all(&self.transaction),
+                )
+                .await?;
+            let allowed = self
+                .run(
+                    role_permission::Entity::find()
+                        .filter(role_permission::Column::RoleId.eq(user.role_id))
+                        .all(&self.transaction),
+                )
+                .await?;
+            for row in rows {
+                if overrides
+                    .iter()
+                    .any(|r| r.permission_id == row.id && !r.allow)
+                {
+                    continue;
+                }
+                if overrides
+                    .iter()
+                    .any(|r| r.permission_id == row.id && r.allow)
+                    || (role.is_some()
+                        && (superadmin || allowed.iter().any(|r| r.permission_id == row.id)))
+                {
+                    // Legacy or incomplete metadata confers no authority. An
+                    // invalid selector must never become a wildcard at issuance.
+                    let Some(operation) = registered_operation(&row) else {
+                        continue;
+                    };
+                    let Ok(selector) = resource_selector(&row, &claims.application) else {
+                        continue;
+                    };
+                    grants.push(ScopedOperation::new(operation, vec![selector])?);
+                }
+            }
+        }
+        Ok(CredentialBounds::new(grants))
+    }
+    async fn register_session_pair(&mut self, r: SessionRegistration) -> Result<(), SecurityError> {
+        fn uuid(value: &str) -> Result<Uuid, SecurityError> {
+            value.parse().map_err(|_| SecurityError::InvalidCredential)
+        }
+        fn millis(seconds: u64) -> Result<i64, SecurityError> {
+            i64::try_from(
+                seconds
+                    .checked_mul(1000)
+                    .ok_or(SecurityError::InvalidCredential)?,
+            )
+            .map_err(|_| SecurityError::InvalidCredential)
+        }
+        let c = r.claims;
+        let grant_id = uuid(&c.grant_id)?;
+        let session_id = uuid(
+            c.session_id
+                .as_deref()
+                .ok_or(SecurityError::InvalidCredential)?,
+        )?;
+        let family_id = uuid(
+            c.family_id
+                .as_deref()
+                .ok_or(SecurityError::InvalidCredential)?,
+        )?;
+        let issued_at = millis(c.iat)?;
+        if r.new_roots {
+            self.run(
+                grant::ActiveModel {
+                    id: Set(grant_id),
+                    issuer: Set(c.iss.clone()),
+                    principal_kind: Set("user".into()),
+                    subject: Set(c.sub.clone()),
+                    application: Set(c.application.clone()),
+                    grant_kind: Set("session".into()),
+                    created_at: Set(issued_at),
+                    revoked_at: Set(None),
+                }
+                .insert(&self.transaction),
+            )
+            .await?;
+            self.run(
+                session::ActiveModel {
+                    id: Set(session_id),
+                    issuer: Set(c.iss.clone()),
+                    principal_kind: Set("user".into()),
+                    subject: Set(c.sub.clone()),
+                    created_at: Set(issued_at),
+                    revoked_at: Set(None),
+                }
+                .insert(&self.transaction),
+            )
+            .await?;
+            self.run(
+                family::ActiveModel {
+                    id: Set(family_id),
+                    issuer: Set(c.iss.clone()),
+                    principal_kind: Set("user".into()),
+                    subject: Set(c.sub.clone()),
+                    application: Set(c.application.clone()),
+                    grant_id: Set(grant_id),
+                    session_id: Set(session_id),
+                    created_at: Set(issued_at),
+                    revoked_at: Set(None),
+                }
+                .insert(&self.transaction),
+            )
+            .await?;
+        }
+        let access = credential::ActiveModel {
+            issuer: Set(c.iss.clone()),
+            jti: Set(c.jti.clone()),
+            principal_kind: Set("user".into()),
+            subject: Set(c.sub),
+            credential_kind: Set("access".into()),
+            token_use: Set("user_session".into()),
+            audience: Set(c.aud),
+            application: Set(c.application),
+            bounds: Set(
+                serde_json::to_value(c.bounds).map_err(|_| SecurityError::InvalidCredential)?
+            ),
+            binding: Set(
+                serde_json::to_value(c.binding).map_err(|_| SecurityError::InvalidCredential)?
+            ),
+            grant_id: Set(grant_id),
+            session_id: Set(Some(session_id)),
+            family_id: Set(Some(family_id)),
+            paired_access_jti: Set(None),
+            oidc_client_id: Set(Some(r.client_id)),
+            revocation_parent_jti: Set(None),
+            minted_by: Set(r
+                .minted_by
+                .map(|v| serde_json::json!({"issuer":v.issuer(),"jti":v.jti()}))),
+            signing_key_id: Set(Some(r.key_id)),
+            secret_digest: Set(None),
+            issued_at: Set(issued_at),
+            not_before: Set(None),
+            expires_at: Set(millis(c.exp)?),
+            revoked_at: Set(None),
+            consumed_at: Set(None),
+            replacement_jti: Set(None),
+        };
+        self.run(access.clone().insert(&self.transaction)).await?;
+        let mut refresh = access;
+        refresh.jti = Set(r.refresh_jti);
+        refresh.credential_kind = Set("refresh".into());
+        refresh.paired_access_jti = Set(Some(c.jti));
+        refresh.signing_key_id = Set(None);
+        refresh.secret_digest = Set(Some(r.refresh_digest.to_vec()));
+        refresh.expires_at =
+            Set(i64::try_from(r.refresh_expires_at)
+                .map_err(|_| SecurityError::InvalidCredential)?);
+        self.run(refresh.insert(&self.transaction)).await?;
+        Ok(())
+    }
+    async fn lock_refresh(
+        &mut self,
+        issuer: &str,
+        secret: &SecretToken,
+    ) -> Result<Option<CredentialSnapshot>, SecurityError> {
+        use sea_orm::QuerySelect;
+        let Some(snapshot) = self.refresh(issuer, secret).await? else {
+            return Ok(None);
+        };
+        let row = &snapshot.current.credential;
+        for (table, id) in [
+            ("security_grant", Some(row.grant_id)),
+            ("security_session", row.session_id),
+            ("security_refresh_family", row.family_id),
+        ] {
+            if let Some(id) = id {
+                self.run(
+                    self.transaction
+                        .query_one_raw(Statement::from_sql_and_values(
+                            DbBackend::Postgres,
+                            format!("SELECT id FROM {table} WHERE id=$1 FOR UPDATE"),
+                            [id.into()],
+                        )),
+                )
+                .await?;
+            }
+        }
+        let row = self
+            .run(
+                credential::Entity::find_by_id((issuer.to_owned(), row.jti.clone()))
+                    .lock_exclusive()
+                    .one(&self.transaction),
+            )
+            .await?
+            .ok_or(SecurityError::InvalidCredential)?;
+        self.snapshot(row).await.map(Some)
+    }
+    async fn consume_refresh_pair(
+        &mut self,
+        old: &CredentialRef,
+        paired: &CredentialRef,
+        at: u64,
+    ) -> Result<(), SecurityError> {
+        let at = i64::try_from(at).map_err(|_| SecurityError::InvalidCredential)?;
+        let result = self.run(self.transaction.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+            "UPDATE security_credential SET consumed_at=$3 WHERE issuer=$1 AND jti=$2 AND credential_kind='refresh' AND consumed_at IS NULL AND revoked_at IS NULL AND replacement_jti IS NULL",
+            [old.issuer().into(),old.jti().into(),at.into()]))).await?;
+        if result.rows_affected() != 1 {
+            return Err(SecurityError::Conflict);
+        }
+        let result = self.run(self.transaction.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+            "UPDATE security_credential SET revoked_at=$3 WHERE issuer=$1 AND jti=$2 AND credential_kind='access' AND revoked_at IS NULL",
+            [paired.issuer().into(),paired.jti().into(),at.into()]))).await?;
+        if result.rows_affected() != 1 {
+            return Err(SecurityError::CredentialRevoked);
+        }
+        Ok(())
+    }
+    async fn link_refresh_replacement(
+        &mut self,
+        old: &CredentialRef,
+        replacement: &str,
+    ) -> Result<(), SecurityError> {
+        let result = self.run(self.transaction.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+            "UPDATE security_credential SET replacement_jti=$3 WHERE issuer=$1 AND jti=$2 AND consumed_at IS NOT NULL AND replacement_jti IS NULL",
+            [old.issuer().into(),old.jti().into(),replacement.into()]))).await?;
+        if result.rows_affected() != 1 {
+            return Err(SecurityError::Conflict);
+        }
+        Ok(())
+    }
+    async fn revoke_refresh_family(
+        &mut self,
+        consumed: &CredentialRef,
+        at: u64,
+    ) -> Result<(), SecurityError> {
+        let at = i64::try_from(at).map_err(|_| SecurityError::InvalidCredential)?;
+        self.run(self.transaction.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+            "UPDATE security_refresh_family f SET revoked_at=COALESCE(f.revoked_at,$3) FROM security_credential c WHERE c.issuer=$1 AND c.jti=$2 AND c.credential_kind='refresh' AND c.consumed_at IS NOT NULL AND f.id=c.family_id AND f.issuer=c.issuer",
+            [consumed.issuer().into(),consumed.jti().into(),at.into()]))).await?;
+        // Only the explicit delegation edge propagates revocation. minted_by
+        // remains audit metadata and must never become a revocation parent.
+        self.run(self.transaction.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+            "WITH RECURSIVE descendants(jti) AS (SELECT c.jti FROM security_credential c JOIN security_credential old ON old.issuer=c.issuer AND old.family_id=c.family_id WHERE old.issuer=$1 AND old.jti=$2 UNION SELECT c.jti FROM security_credential c JOIN descendants d ON c.revocation_parent_jti=d.jti WHERE c.issuer=$1) UPDATE security_credential c SET revoked_at=COALESCE(c.revoked_at,$3) WHERE c.issuer=$1 AND c.jti IN (SELECT jti FROM descendants)",
+            [consumed.issuer().into(),consumed.jti().into(),at.into()]))).await?;
+        Ok(())
+    }
+    async fn revoke_session_pair(
+        &mut self,
+        refresh: &CredentialRef,
+        at: u64,
+    ) -> Result<(), SecurityError> {
+        let at = i64::try_from(at).map_err(|_| SecurityError::InvalidCredential)?;
+        self.run(self.transaction.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+            "UPDATE security_credential SET revoked_at=COALESCE(revoked_at,$3) WHERE issuer=$1 AND (jti=$2 OR jti=(SELECT paired_access_jti FROM security_credential WHERE issuer=$1 AND jti=$2))",
+            [refresh.issuer().into(), refresh.jti().into(), at.into()]))).await?;
+        Ok(())
     }
     async fn application_policy(
         &mut self,

@@ -22,6 +22,7 @@ mod m20260617_000001_create_mcp_token;
 mod m20260725_000001_add_oauth_client_public_client;
 mod m20261107_000001_security_identity;
 mod m20261107_000002_security_permit_audit;
+mod m20261108_000001_security_refresh_pair;
 
 use crate::seed;
 pub struct Migrator;
@@ -59,6 +60,7 @@ impl MigratorTrait for Migrator {
         migrations.push(Box::new(
             seed::m20261107_000003_security_operations::Migration,
         ));
+        migrations.push(Box::new(m20261108_000001_security_refresh_pair::Migration));
         migrations
     }
 }
