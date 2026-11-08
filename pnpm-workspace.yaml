@@ -5,3 +5,4 @@ packages:
   - "cobotimx"
 allowBuilds:
   esbuild: true
+  playwright-webkit: false

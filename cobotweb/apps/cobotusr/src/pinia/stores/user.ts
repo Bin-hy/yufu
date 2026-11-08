@@ -1,69 +1,99 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getToken, setToken, removeToken } from "@/common/cache/cookies.ts";
-
-// 用户信息接口
+import { getToken, setToken, removeToken } from '@/common/cache/cookies'
+import { getCurrentUser } from '@/pages/profile/api'
+import { establishSession, sessionEpoch, resetSession, onSessionReset } from '@/workspace/session'
 export interface UserInfo {
-  username: string
-  token: string
-  nickname: string
-  // 可以根据需要添加其他用户信息字段
+    id?: number
+    username: string
+    token?: string
+    nickname: string | null
 }
-
-// 创建用户 store
 export const useUserStore = defineStore('user', () => {
-  // 用户信息状态
-  const userInfo = ref<UserInfo | null>(null)
-  const isLoggedIn = ref(false)
-
-  // 设置用户信息
-  const setUserInfo = (info: UserInfo) => {
-    userInfo.value = info
-    isLoggedIn.value = true
-
-    // token 仅存入 cookie，不放 localStorage（降低 XSS 风险）
-    setToken(info.token)
-    const { token: _token, ...safeInfo } = info
-    localStorage.setItem('userInfo', JSON.stringify(safeInfo))
-  }
-
-  // 清除用户信息
-  const clearUserInfo = () => {
-    userInfo.value = null
-    isLoggedIn.value = false
-
-    // 从本地存储清除用户信息
-    removeToken()
-    localStorage.removeItem('userInfo')
-  }
-
-  // 退出登录（清除用户信息的别名方法）
-  const logout = () => {
-    clearUserInfo()
-  }
-
-  // 初始化用户信息（从本地存储恢复）
-  const initUserInfo = () => {
-    const storedUserInfo = localStorage.getItem('userInfo')
-    const token = getToken()
-    if (storedUserInfo && token) {
-      try {
-        const info = JSON.parse(storedUserInfo)
-        userInfo.value = { ...info, token }
-        isLoggedIn.value = true
-      } catch (error) {
-        console.error('Failed to parse stored user info:', error)
-        localStorage.removeItem('userInfo')
-      }
+    const userInfo = ref<UserInfo | null>(null),
+        isLoggedIn = ref(false),
+        loading = ref(false),
+        identityError = ref<string | null>(null)
+    let restoring: Promise<void> | null = null
+    function persist(info: UserInfo) {
+        try {
+            localStorage.setItem(
+                'userInfo',
+                JSON.stringify({ username: info.username, nickname: info.nickname }),
+            )
+        } catch {
+            /* 内存继续 */
+        }
     }
-  }
-
-  return {
-    userInfo,
-    isLoggedIn,
-    setUserInfo,
-    clearUserInfo,
-    logout,
-    initUserInfo
-  }
+    function setUserInfo(info: UserInfo) {
+        userInfo.value = info
+        isLoggedIn.value = true
+        if (info.token) setToken(info.token)
+        persist(info)
+    }
+    function clearLocal() {
+        restoring = null
+        loading.value = false
+        identityError.value = null
+        userInfo.value = null
+        isLoggedIn.value = false
+        removeToken()
+        try {
+            localStorage.removeItem('userInfo')
+        } catch {
+            /* 内存继续 */
+        }
+    }
+    function logout() {
+        resetSession()
+        clearLocal()
+    }
+    onSessionReset(clearLocal)
+    function initUserInfo() {
+        if (!getToken()) return
+        isLoggedIn.value = true
+        try {
+            const info = JSON.parse(localStorage.getItem('userInfo') ?? 'null')
+            if (info?.username)
+                userInfo.value = { username: info.username, nickname: info.nickname }
+        } catch {
+            /* 当前身份接口恢复 */
+        }
+    }
+    async function ensureSession(): Promise<void> {
+        if (restoring) return restoring
+        if (!getToken()) return
+        const epoch = sessionEpoch.value
+        loading.value = true
+        identityError.value = null
+        const current: Promise<void> = getCurrentUser({ errorPresentation: 'local' })
+            .then((info) => {
+                if (epoch !== sessionEpoch.value) return
+                establishSession(info.id)
+                userInfo.value = { id: info.id, username: info.username, nickname: info.nickname }
+                isLoggedIn.value = true
+                persist(userInfo.value)
+            })
+            .catch((error) => {
+                if (epoch === sessionEpoch.value)
+                    identityError.value = error.message ?? '身份加载失败，请重试'
+            })
+            .finally(() => {
+                if (restoring === current) restoring = null
+                if (epoch === sessionEpoch.value) loading.value = false
+            })
+        restoring = current
+        return current
+    }
+    return {
+        userInfo,
+        isLoggedIn,
+        loading,
+        identityError,
+        setUserInfo,
+        clearUserInfo: logout,
+        logout,
+        initUserInfo,
+        ensureSession,
+    }
 })

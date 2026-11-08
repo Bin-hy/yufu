@@ -1,0 +1,240 @@
+{
+  "directory": "/var/folders/qy/vgvyq3hn42d7q4j2gyvh3fzr0000gp/T/cobotusr-verification-zwpci71s",
+  "temporaryDirectoryRemoved": true,
+  "assetsBefore": "7c94e171575f971f3f5a20ec387241ded4356c0121cb3bb7b298f1876d00b6f0",
+  "assetsAfter": "7c94e171575f971f3f5a20ec387241ded4356c0121cb3bb7b298f1876d00b6f0",
+  "files": [
+    {
+      "file": "assets/403-BcStY9ed.js",
+      "bytes": 261,
+      "gzipBytes": 223
+    },
+    {
+      "file": "assets/404-CYVHO98h.js",
+      "bytes": 261,
+      "gzipBytes": 223
+    },
+    {
+      "file": "assets/application-list-C5zyOPyh.js",
+      "bytes": 19942,
+      "gzipBytes": 7222
+    },
+    {
+      "file": "assets/auth-layout.vue_vue_type_script_setup_true_lang-BXSqy60h.js",
+      "bytes": 1876,
+      "gzipBytes": 1027
+    },
+    {
+      "file": "assets/authority-assign-DaGhhfUL.js",
+      "bytes": 837,
+      "gzipBytes": 410
+    },
+    {
+      "file": "assets/authority-list-iv7riLvi.js",
+      "bytes": 889,
+      "gzipBytes": 439
+    },
+    {
+      "file": "assets/authorized-apps-list-BIbHEG21.js",
+      "bytes": 2844,
+      "gzipBytes": 1582
+    },
+    {
+      "file": "assets/blocks-3Wvl4Ews.js",
+      "bytes": 287,
+      "gzipBytes": 230
+    },
+    {
+      "file": "assets/checkbox.vue_vue_type_script_setup_true_lang-C9WEht7a.js",
+      "bytes": 679,
+      "gzipBytes": 415
+    },
+    {
+      "file": "assets/dashboard-home-WQQZ6A7A.js",
+      "bytes": 3859,
+      "gzipBytes": 1985
+    },
+    {
+      "file": "assets/data-state.vue_vue_type_script_setup_true_lang-CzW0K3Pr.js",
+      "bytes": 3099,
+      "gzipBytes": 1617
+    },
+    {
+      "file": "assets/error-page.vue_vue_type_script_setup_true_lang-Blq1_YEK.js",
+      "bytes": 2040,
+      "gzipBytes": 1251
+    },
+    {
+      "file": "assets/index-7FF9xlb-.js",
+      "bytes": 5514,
+      "gzipBytes": 2272
+    },
+    {
+      "file": "assets/index-B3beAHyS.js",
+      "bytes": 1341,
+      "gzipBytes": 422
+    },
+    {
+      "file": "assets/index-BUgFg-Y_.css",
+      "bytes": 25632,
+      "gzipBytes": 6245
+    },
+    {
+      "file": "assets/index-BlK1LvpT.js",
+      "bytes": 471,
+      "gzipBytes": 283
+    },
+    {
+      "file": "assets/index-Bpvq3KNf.js",
+      "bytes": 3271,
+      "gzipBytes": 1783
+    },
+    {
+      "file": "assets/index-C8kj-v44.js",
+      "bytes": 454,
+      "gzipBytes": 339
+    },
+    {
+      "file": "assets/index-CN5g7uBr.js",
+      "bytes": 294152,
+      "gzipBytes": 103458
+    },
+    {
+      "file": "assets/index-CXMpdRcb.js",
+      "bytes": 461,
+      "gzipBytes": 274
+    },
+    {
+      "file": "assets/index-DDGfFx8h.js",
+      "bytes": 442,
+      "gzipBytes": 229
+    },
+    {
+      "file": "assets/index-DcG5lA_j.js",
+      "bytes": 343,
+      "gzipBytes": 209
+    },
+    {
+      "file": "assets/index-FDPpI9q6.js",
+      "bytes": 1503,
+      "gzipBytes": 379
+    },
+    {
+      "file": "assets/input.vue_vue_type_script_setup_true_lang-cPiSIWn4.js",
+      "bytes": 691,
+      "gzipBytes": 415
+    },
+    {
+      "file": "assets/login-form.vue_vue_type_script_setup_true_lang-B8IxZ7dM.js",
+      "bytes": 3425,
+      "gzipBytes": 1752
+    },
+    {
+      "file": "assets/page-header.vue_vue_type_script_setup_true_lang-DouTsb6Q.js",
+      "bytes": 565,
+      "gzipBytes": 344
+    },
+    {
+      "file": "assets/pagination.vue_vue_type_script_setup_true_lang-BEbtLfaW.js",
+      "bytes": 3880,
+      "gzipBytes": 1774
+    },
+    {
+      "file": "assets/permission-assign-GLovnbrV.js",
+      "bytes": 834,
+      "gzipBytes": 400
+    },
+    {
+      "file": "assets/permission-assignment.vue_vue_type_script_setup_true_lang-C46lafNG.js",
+      "bytes": 8277,
+      "gzipBytes": 3556
+    },
+    {
+      "file": "assets/permission-catalog.vue_vue_type_script_setup_true_lang-D30mSJZ1.js",
+      "bytes": 11234,
+      "gzipBytes": 3993
+    },
+    {
+      "file": "assets/permission-list-CZurGh-R.js",
+      "bytes": 891,
+      "gzipBytes": 434
+    },
+    {
+      "file": "assets/plus-DpNHjzM3.js",
+      "bytes": 174,
+      "gzipBytes": 165
+    },
+    {
+      "file": "assets/recordings-list-UchKdxB8.js",
+      "bytes": 4539,
+      "gzipBytes": 2125
+    },
+    {
+      "file": "assets/refresh-cw-Cxvs0bXW.js",
+      "bytes": 342,
+      "gzipBytes": 243
+    },
+    {
+      "file": "assets/register-BBFLBgw4.js",
+      "bytes": 3115,
+      "gzipBytes": 1583
+    },
+    {
+      "file": "assets/role-list-B6oEcd6a.js",
+      "bytes": 4169,
+      "gzipBytes": 1969
+    },
+    {
+      "file": "assets/search-x-BGjDQAY3.js",
+      "bytes": 278,
+      "gzipBytes": 217
+    },
+    {
+      "file": "assets/select.vue_vue_type_script_setup_true_lang-dzYYHcBP.js",
+      "bytes": 741,
+      "gzipBytes": 443
+    },
+    {
+      "file": "assets/use-async-mutation-DiJwvY3Q.js",
+      "bytes": 605,
+      "gzipBytes": 392
+    },
+    {
+      "file": "assets/use-form-draft-DsCUBa1R.js",
+      "bytes": 1189,
+      "gzipBytes": 706
+    },
+    {
+      "file": "assets/use-page-query-TJDbrFhj.js",
+      "bytes": 1427,
+      "gzipBytes": 724
+    },
+    {
+      "file": "assets/use-paged-options-my9Ve21-.js",
+      "bytes": 1417,
+      "gzipBytes": 862
+    },
+    {
+      "file": "assets/user-create-Bdm5gv0Q.js",
+      "bytes": 5000,
+      "gzipBytes": 2354
+    },
+    {
+      "file": "assets/user-list-DjyjE41k.js",
+      "bytes": 11572,
+      "gzipBytes": 4414
+    },
+    {
+      "file": "cobotusr.svg",
+      "bytes": 218,
+      "gzipBytes": 179
+    },
+    {
+      "file": "index.html",
+      "bytes": 1109,
+      "gzipBytes": 559
+    }
+  ],
+  "totalBytes": 436150,
+  "totalGzipBytes": 162120
+}

@@ -1,0 +1,23 @@
+{
+  "date": "2026-11-08",
+  "os": "darwin",
+  "arch": "arm64",
+  "node": "v24.21.0",
+  "engines": {
+    "chromium": "158.0.8127.18",
+    "firefox": "159.0",
+    "webkit": "26.5"
+  },
+  "viewports": [
+    "1440×960",
+    "1280×800",
+    "768×1024",
+    "390×844",
+    "360×800"
+  ],
+  "data": "All business fetch/XHR intercepted by mock fixture",
+  "webkitNote": "macOS 14 frozen WebKit revision 2251, driver playwright-webkit 1.61.0; runner 1.65.0; Option+Tab uses platform default full traversal; real Safari/iOS unverified",
+  "osVersion": "macOS 14.6 (23G80)",
+  "kernel": "23.6.0",
+  "pnpm": "12.10.1"
+}

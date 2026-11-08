@@ -1,156 +1,135 @@
-<template>
-  <aside
-    class="h-full bg-muted dark:bg-neutral-900 border-r border-border dark:border-neutral-800 overflow-y-auto transition-all duration-300 ease-in-out"
-    :class="collapsed ? 'w-16' : 'w-64'"
-  >
-    <!-- 内容区 -->
-    <nav class="flex flex-col p-3 space-y-1 font-inter text-sm">
-      <!-- 标题 -->
-      <div v-if="!collapsed" class="px-3 pt-2 pb-1 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
-        导航
-      </div>
-
-      <!-- 首页 -->
-      <router-link
-        v-if="!hasDashboard"
-        to="/dashboard"
-        class="flex items-center gap-3 rounded-md px-3 py-2 transition-all duration-150"
-        :class="[
-          isActivePath('/dashboard')
-            ? 'bg-primary/10 text-primary font-semibold'
-            : 'text-muted-foreground hover:bg-accent'
-        ]"
-      >
-        <span v-if="collapsed" class="font-bold text-lg">🏠</span>
-        <span v-else>首页</span>
-      </router-link>
-
-      <!-- 菜单循环 -->
-      <div v-for="m in menus" :key="m.key">
-        <!-- 有子菜单 -->
-        <div v-if="m.children && m.children.length">
-          <UiButton
-            variant="ghost"
-            :class="cn(
-              'flex w-full items-center justify-between rounded-md px-3 py-2 text-left font-medium transition-colors duration-150',
-              isParentOpen(m) ? 'bg-muted text-primary' : 'text-muted-foreground hover:bg-accent'
-            )"
-            @click="toggleParent(m.key)"
-          >
-            <span class="truncate">
-              <span v-if="collapsed" class="font-bold text-lg">{{ getIconText(m) }}</span>
-              <span v-else>{{ m.title }}</span>
-            </span>
-            <svg
-              v-if="!collapsed"
-              class="h-4 w-4 transform transition-transform duration-200"
-              :class="{ 'rotate-90': isParentOpen(m) }"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-            </svg>
-          </UiButton>
-
-          <!-- 子菜单 -->
-          <transition name="fade">
-            <ul
-              v-show="isParentOpen(m)"
-              class="ml-3 border-l border-border mt-1 space-y-1 pl-3"
-            >
-              <li v-for="c in m.children" :key="c.key">
-                <router-link
-                  :to="c.path"
-                  class="block rounded-md px-3 py-1.5 text-sm transition-all duration-150"
-                  :class="[
-                    isActivePath(c.path)
-                      ? 'text-primary bg-primary/10 font-medium'
-                      : 'text-muted-foreground hover:text-primary hover:bg-accent'
-                  ]"
-                >
-                  <span v-if="collapsed">{{ getIconText(c) }}</span>
-                  <span v-else>{{ c.title }}</span>
-                </router-link>
-              </li>
-            </ul>
-          </transition>
-        </div>
-
-        <!-- 无子菜单 -->
-        <router-link
-          v-else
-          :to="m.path"
-          class="flex items-center rounded-md px-3 py-2 transition-all duration-150"
-          :class="[
-            isActivePath(m.path)
-              ? 'bg-primary/10 text-primary font-semibold'
-              : 'text-muted-foreground hover:bg-accent'
-          ]"
-        >
-          <span v-if="collapsed" class="font-bold text-lg">{{ getIconText(m) }}</span>
-          <span v-else>{{ m.title }}</span>
-        </router-link>
-      </div>
-    </nav>
-  </aside>
-</template>
-
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { useMenu, type MenuItem } from '@/composables/use-menu.ts'
-import UiButton from '@/components/ui/button/button.vue'
-import { cn } from '@/lib/utils'
-
-const props = defineProps<{ collapsed?: boolean }>()
-const collapsed = computed(() => props.collapsed ?? false)
-
-const route = useRoute()
-const { menus } = useMenu('/')
-
-const isActivePath = (path: string) => route.path === path || route.path.startsWith(path + '/')
-
-const hasDashboard = computed(() =>
-  (menus.value || []).some(m => m.path === '/dashboard' || (m.children || []).some(c => c.path === '/dashboard'))
-)
-
-const getIconText = (m: MenuItem) => (m.title?.trim()?.[0]?.toUpperCase() ?? '*')
-
-const openKeys = ref<Set<string>>(new Set())
-const isParentOpen = (m: MenuItem) => !collapsed.value && openKeys.value.has(m.key)
-const toggleParent = (key: string) => {
-  const s = new Set(openKeys.value)
-  s.has(key) ? s.delete(key) : s.add(key)
-  openKeys.value = s
+import { useRoute, useRouter } from 'vue-router'
+import { DropdownMenuItem } from 'reka-ui'
+import { ChevronsLeft, ChevronsRight, ArrowUpRight } from '@lucide/vue'
+import Logo from '@/layouts/components/Logo/index.vue'
+import Tooltip from '@/components/ui/tooltip/tooltip.vue'
+import DropdownMenu from '@/components/ui/dropdown-menu/dropdown-menu.vue'
+import { navigationGroups, assignmentLinks, activeNavigation } from '@/router/navigation'
+import { navigateWorkspace } from '@/workspace/coordinator'
+import { useLayoutStore } from '@/pinia/stores/layout'
+defineProps<{ collapsed?: boolean; mobile?: boolean }>()
+const emit = defineEmits<{ navigate: [] }>()
+const route = useRoute(),
+    router = useRouter(),
+    layout = useLayoutStore()
+async function navigate(event: MouseEvent, name: string) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+    event.preventDefault()
+    const outcome = await navigateWorkspace(router, { name })
+    if (outcome === 'success' || outcome === 'unchanged') emit('navigate')
 }
-
-const initOpenKeys = () => {
-  const s = new Set<string>()
-  for (const m of menus.value || []) {
-    if ((m.children || []).some(c => isActivePath(c.path)) || isActivePath(m.path)) s.add(m.key)
-  }
-  openKeys.value = s
-}
-onMounted(initOpenKeys)
 </script>
-
-<style scoped>
-aside::-webkit-scrollbar {
-  width: 6px;
-}
-aside::-webkit-scrollbar-thumb {
-  background-color: hsl(var(--b3));
-  border-radius: 9999px;
-}
-.fade-enter-active,
-.fade-leave-active {
-  transition: all 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(-2px);
-}
-</style>
+<template>
+    <div class="flex h-full min-h-0 flex-col">
+        <Logo :collapsed="collapsed" />
+        <nav class="flex-1 overflow-y-auto pb-4">
+            <div
+                v-for="group in navigationGroups"
+                :key="group.title"
+                class="nav-group"
+                :class="{ '!px-2': collapsed }"
+            >
+                <p v-if="!collapsed" class="nav-group-title">{{ group.title }}</p>
+                <template v-for="item in group.items" :key="item.name"
+                    ><template v-if="collapsed && 'children' in item"
+                        ><DropdownMenu
+                            ><template #trigger
+                                ><button
+                                    class="nav-link w-full justify-center"
+                                    :class="{
+                                        'is-active':
+                                            activeNavigation(route.name)?.name === item.name,
+                                    }"
+                                    :aria-label="item.title"
+                                    type="button"
+                                >
+                                    <component
+                                        :is="item.icon"
+                                        :size="18"
+                                        aria-hidden="true"
+                                    /></button></template
+                            ><DropdownMenuItem as-child
+                                ><router-link
+                                    class="dropdown-item"
+                                    :to="{ name: item.name }"
+                                    @click="navigate($event, item.name)"
+                                    >{{ item.title }}</router-link
+                                ></DropdownMenuItem
+                            ><DropdownMenuItem v-for="child in item.children" :key="child" as-child
+                                ><router-link
+                                    class="dropdown-item"
+                                    :to="{ name: child }"
+                                    @click="navigate($event, child)"
+                                    >{{ router.resolve({ name: child }).meta.title }}</router-link
+                                ></DropdownMenuItem
+                            ></DropdownMenu
+                        ></template
+                    ><Tooltip v-else-if="collapsed" :text="item.title"
+                        ><router-link
+                            :to="{ name: item.name }"
+                            class="nav-link justify-center"
+                            :class="{
+                                'is-active': activeNavigation(route.name)?.name === item.name,
+                            }"
+                            :aria-label="item.title"
+                            @click="navigate($event, item.name)"
+                            ><component
+                                :is="item.icon"
+                                :size="18"
+                                aria-hidden="true" /></router-link></Tooltip
+                    ><template v-else
+                        ><router-link
+                            :to="{ name: item.name }"
+                            class="nav-link"
+                            :class="{
+                                'is-active': activeNavigation(route.name)?.name === item.name,
+                            }"
+                            :aria-current="route.name === item.name ? 'page' : undefined"
+                            @click="navigate($event, item.name)"
+                            ><component :is="item.icon" :size="18" aria-hidden="true" /><span>{{
+                                item.title
+                            }}</span></router-link
+                        ><router-link
+                            v-for="child in 'children' in item ? item.children : []"
+                            :key="child"
+                            :to="{ name: child }"
+                            class="nav-sublink"
+                            :class="{ 'is-active': route.name === child }"
+                            @click="navigate($event, child)"
+                            >{{ router.resolve({ name: child }).meta.title }}</router-link
+                        ></template
+                    ></template
+                >
+            </div>
+            <div v-if="!collapsed" class="nav-group">
+                <p class="nav-group-title">快捷工作流</p>
+                <router-link
+                    v-for="link in assignmentLinks"
+                    :key="link.name"
+                    :to="{ name: link.name }"
+                    class="nav-link"
+                    @click="navigate($event, link.name)"
+                    ><component :is="link.icon" :size="17" aria-hidden="true" />{{ link.title
+                    }}<ArrowUpRight :size="13" class="ml-auto" aria-hidden="true"
+                /></router-link>
+            </div>
+        </nav>
+        <div class="nav-footer">
+            <button
+                v-if="!mobile"
+                type="button"
+                class="flex min-h-9 w-full items-center gap-2 rounded px-1"
+                aria-label="切换侧栏"
+                @click="layout.toggleSidebar"
+            >
+                <component
+                    :is="collapsed ? ChevronsRight : ChevronsLeft"
+                    :size="16"
+                    aria-hidden="true"
+                /><span v-if="!collapsed">收起导航</span>
+            </button>
+            <p v-if="!collapsed" class="mt-3">身份 · 权限 · 应用</p>
+        </div>
+    </div>
+</template>

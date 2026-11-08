@@ -1,0 +1,210 @@
+{
+  "home": {
+    "route": "/dashboard/introduction",
+    "tabs": [
+      {
+        "path": "/dashboard",
+        "title": "仪表盘首页",
+        "affix": true
+      },
+      {
+        "title": "系统介绍",
+        "path": "/dashboard/introduction",
+        "affix": true
+      }
+    ],
+    "activePath": "/dashboard/introduction"
+  },
+  "initialUserRequests": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "query": "?page_number=3&page_size=10"
+    },
+    {
+      "method": "GET",
+      "path": "/users",
+      "query": "?page_number=3&page_size=10"
+    }
+  ],
+  "usersBeforeSwitch": {
+    "route": "/users?page_number=3&page_size=10",
+    "tabs": [
+      {
+        "path": "/dashboard",
+        "title": "仪表盘首页",
+        "affix": true
+      },
+      {
+        "title": "系统介绍",
+        "path": "/dashboard/introduction",
+        "affix": true
+      },
+      {
+        "title": "用户列表",
+        "path": "/users",
+        "affix": false
+      }
+    ],
+    "activePath": "/users"
+  },
+  "usersAfterTabReturn": {
+    "route": "/users?page_number=1&page_size=10",
+    "tabs": [
+      {
+        "path": "/dashboard",
+        "title": "仪表盘首页",
+        "affix": true
+      },
+      {
+        "title": "系统介绍",
+        "path": "/dashboard/introduction",
+        "affix": true
+      },
+      {
+        "title": "用户列表",
+        "path": "/users",
+        "affix": false
+      },
+      {
+        "title": "角色列表",
+        "path": "/roles",
+        "affix": false
+      }
+    ],
+    "activePath": "/users"
+  },
+  "collapsedSidebar": {
+    "width": 64,
+    "visibleLinks": [
+      {
+        "text": "系",
+        "href": "/dashboard/introduction"
+      }
+    ],
+    "buttons": [
+      "仪",
+      "用",
+      "角",
+      "权",
+      "操",
+      "应",
+      "资",
+      "已"
+    ]
+  },
+  "collapsedLinksAfterClick": 0,
+  "mobile": {
+    "viewport": 390,
+    "documentWidth": 390,
+    "bodyWidth": 390,
+    "content": {
+      "x": 256,
+      "width": 134,
+      "right": 390
+    }
+  },
+  "outOfOrderPagination": {
+    "state": {
+      "route": "/users?page_number=3&page_size=10",
+      "tabs": [
+        {
+          "path": "/dashboard",
+          "title": "仪表盘首页",
+          "affix": true
+        },
+        {
+          "title": "系统介绍",
+          "path": "/dashboard/introduction",
+          "affix": true
+        },
+        {
+          "title": "用户列表",
+          "path": "/users",
+          "affix": false
+        },
+        {
+          "title": "角色列表",
+          "path": "/roles",
+          "affix": false
+        }
+      ],
+      "activePath": "/users"
+    },
+    "tableText": "用户信息\t角色权限\t操作\n\naudit-page-2\n审查示例用户\n\t\n管理员\n保存\n\t\n删除用户\n权限覆写\n踢下线"
+  },
+  "dialogBeforeConfirm": {
+    "semanticDialogCount": 0,
+    "titleVisible": true
+  },
+  "dialogWhilePending": {
+    "titleVisible": false
+  },
+  "dialogAfterFailure": {
+    "titleVisible": false,
+    "appStillVisible": true
+  },
+  "beforeLogout": {
+    "route": "/users?page_number=1&page_size=10",
+    "tabs": [
+      {
+        "path": "/dashboard",
+        "title": "仪表盘首页",
+        "affix": true
+      },
+      {
+        "title": "系统介绍",
+        "path": "/dashboard/introduction",
+        "affix": true
+      },
+      {
+        "title": "用户列表",
+        "path": "/users",
+        "affix": false
+      },
+      {
+        "title": "角色列表",
+        "path": "/roles",
+        "affix": false
+      },
+      {
+        "title": "已授权应用",
+        "path": "/authorized-apps",
+        "affix": false
+      }
+    ],
+    "activePath": "/users"
+  },
+  "afterSecondLogin": {
+    "route": "/dashboard/introduction",
+    "tabs": [
+      {
+        "path": "/dashboard",
+        "title": "仪表盘首页",
+        "affix": true
+      },
+      {
+        "title": "系统介绍",
+        "path": "/dashboard/introduction",
+        "affix": true
+      },
+      {
+        "title": "用户列表",
+        "path": "/users",
+        "affix": false
+      },
+      {
+        "title": "角色列表",
+        "path": "/roles",
+        "affix": false
+      },
+      {
+        "title": "已授权应用",
+        "path": "/authorized-apps",
+        "affix": false
+      }
+    ],
+    "activePath": "/dashboard/introduction"
+  },
+  "pageErrors": []
+}

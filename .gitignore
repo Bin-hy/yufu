@@ -95,6 +95,10 @@ data/
 
 # upload files
 storage
+!cobotweb/apps/cobotusr/src/storage/
+!cobotweb/apps/cobotusr/src/storage/**
+cobotweb/apps/cobotusr/test-results/
+cobotweb/apps/cobotusr/playwright-report/
 # Configuration
 cobotsrv.toml
 cobotlet.toml

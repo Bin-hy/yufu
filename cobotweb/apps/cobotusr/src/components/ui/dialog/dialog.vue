@@ -1,105 +1,129 @@
 <script setup lang="ts">
-import { ref, watchEffect, computed } from 'vue'
+import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription } from 'reka-ui'
+import { X, LoaderCircle } from '@lucide/vue'
+import { nextTick, watch, inject, useId } from 'vue'
+import { pageContextKey } from '@/workspace/page-context'
+import { captureFocusOrigin, returnFocus } from '@/utils/focus'
+import UiButton from '@/components/ui/button/button.vue'
 const props = withDefaults(
-  defineProps<{
-    open?: boolean
-    title?: string
-    size?: 'md' | 'lg' | 'xl'
-    contentScrollable?: boolean
-    hideFooter?: boolean
-    confirmText?: string
-    cancelText?: string
-    confirmDisabled?: boolean
-    closeOnConfirm?: boolean
-  }>(),
-  {
-    open: false,
-    size: 'md',
-    contentScrollable: true,
-    hideFooter: false,
-    confirmText: '确认',
-    cancelText: '取消',
-    confirmDisabled: false,
-    closeOnConfirm: true,
-  }
+    defineProps<{
+        open?: boolean
+        title?: string
+        description?: string
+        size?: 'md' | 'lg' | 'xl'
+        contentScrollable?: boolean
+        hideFooter?: boolean
+        confirmText?: string
+        cancelText?: string
+        confirmDisabled?: boolean
+        closeOnConfirm?: boolean
+        busy?: boolean
+        error?: string | null
+        beforeClose?: () => boolean | Promise<boolean>
+        side?: boolean
+        focusOrigin?: HTMLElement | null
+    }>(),
+    {
+        open: false,
+        title: '确认操作',
+        size: 'md',
+        contentScrollable: true,
+        hideFooter: false,
+        confirmText: '确认',
+        cancelText: '取消',
+        busy: false,
+    },
 )
-const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'confirm'): void; (e: 'cancel'): void }>()
-const visible = ref(props.open)
-watchEffect(() => { visible.value = !!props.open })
-function close() { emit('update:open', false) }
-function onConfirm() { emit('confirm'); if (props.closeOnConfirm) close() }
-function onCancel() { emit('cancel'); close() }
-
-const sizeClass = computed(() => {
-  switch (props.size) {
-    case 'xl': return 'max-w-4xl'
-    case 'lg': return 'max-w-2xl'
-    default: return 'max-w-md'
-  }
-})
+const emit = defineEmits<{ 'update:open': [value: boolean]; confirm: []; cancel: [] }>()
+let trigger: HTMLElement | null = null
+const contentId = useId()
+function openFocus(event: Event) {
+    const content = document.getElementById(contentId)
+    const field = content?.querySelector<HTMLElement>(
+        '[autofocus]:not(:disabled), .dialog-body input:not(:disabled), .dialog-body select:not(:disabled), .dialog-body textarea:not(:disabled)',
+    )
+    if (field) {
+        event.preventDefault()
+        void nextTick(() => field.focus())
+    }
+}
+const pageContext = inject(pageContextKey, null)
+let closing = false
+watch(
+    () => props.open,
+    (open) => {
+        if (open) trigger = props.focusOrigin ?? captureFocusOrigin()
+    },
+    { immediate: true, flush: 'sync' },
+)
+async function close() {
+    if (closing || props.busy) return
+    closing = true
+    try {
+        if (props.beforeClose && !(await props.beforeClose())) return
+        emit('cancel')
+        emit('update:open', false)
+    } finally {
+        closing = false
+    }
+}
+function preventBusy(event: Event) {
+    if (props.busy) event.preventDefault()
+}
+function restoreFocus(event: Event) {
+    event.preventDefault()
+    void nextTick(() => {
+        returnFocus(trigger)
+    })
+}
 </script>
-
 <template>
-  <Teleport to="body">
-    <transition
-      enter-active-class="transition-all duration-200 ease-out"
-      leave-active-class="transition-all duration-150 ease-in"
-      enter-from-class="opacity-0"
-      leave-to-class="opacity-0"
+    <DialogRoot
+        :open="open && (pageContext?.active.value ?? true)"
+        @update:open="
+            (value) => {
+                if (!value) close()
+            }
+        "
     >
-      <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <!-- 背景遮罩 -->
-        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="onCancel" />
-
-        <!-- 弹窗主体 -->
-        <transition
-          enter-active-class="transition-all duration-200 ease-out"
-          leave-active-class="transition-all duration-150 ease-in"
-          enter-from-class="opacity-0 scale-95 translate-y-2"
-          leave-to-class="opacity-0 scale-95 translate-y-2"
-        >
-          <div
-            v-if="visible"
-            class="relative z-10 w-full rounded-2xl border border-border bg-card text-card-foreground shadow-2xl"
-            :class="sizeClass"
-          >
-            <!-- 标题栏 -->
-            <div class="flex items-center justify-between px-6 pt-6 pb-4">
-              <h3 class="text-base font-semibold text-foreground">{{ props.title }}</h3>
-              <button
-                class="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                @click="onCancel"
-              >
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <!-- 内容区 -->
-            <div class="px-6 pb-6" :class="props.contentScrollable ? 'max-h-[60vh] overflow-y-auto' : ''">
-              <slot />
-            </div>
-
-            <!-- 底部按钮 -->
-            <div v-if="!props.hideFooter" class="flex items-center justify-end gap-2 px-6 py-4 border-t border-border bg-muted/40 rounded-b-2xl">
-              <button
-                class="inline-flex h-9 items-center justify-center rounded-xl border border-input bg-background px-4 text-sm font-medium text-foreground hover:bg-accent transition-colors"
-                @click="onCancel"
-              >
-                {{ props.cancelText }}
-              </button>
-              <button
-                class="inline-flex h-9 items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                :disabled="props.confirmDisabled"
-                @click="onConfirm"
-              >
-                {{ props.confirmText }}
-              </button>
-            </div>
-          </div>
-        </transition>
-      </div>
-    </transition>
-  </Teleport>
+        <DialogPortal>
+            <DialogOverlay class="dialog-overlay" />
+            <DialogContent
+                :id="contentId"
+                class="dialog-content"
+                :class="[side ? 'dialog-drawer' : '', 'dialog-' + size]"
+                :aria-busy="busy"
+                @open-auto-focus="openFocus"
+                @escape-key-down="preventBusy"
+                @pointer-down-outside="preventBusy"
+                @close-auto-focus="restoreFocus"
+            >
+                <header class="dialog-header">
+                    <div>
+                        <DialogTitle class="dialog-title">{{ title }}</DialogTitle
+                        ><DialogDescription :class="description ? 'dialog-description' : 'sr-only'">{{
+                            description || '查看内容后选择确认或取消。'
+                        }}</DialogDescription>
+                    </div>
+                    <button type="button" class="icon-button" aria-label="关闭弹窗" :disabled="busy" @click="close">
+                        <X :size="18" aria-hidden="true" />
+                    </button>
+                </header>
+                <div class="dialog-body" :class="{ 'dialog-scroll': contentScrollable }">
+                    <slot />
+                    <p v-if="error" class="inline-error mt-4" role="alert">{{ error }}</p>
+                </div>
+                <footer v-if="!hideFooter" class="dialog-footer">
+                    <slot name="footer"
+                        ><UiButton variant="outline" :disabled="busy" @click="close">{{ cancelText }}</UiButton
+                        ><UiButton :disabled="busy || confirmDisabled" @click="emit('confirm')"
+                            ><LoaderCircle v-if="busy" class="animate-spin" :size="16" aria-hidden="true" />{{
+                                busy ? '处理中…' : confirmText
+                            }}</UiButton
+                        ></slot
+                    >
+                </footer>
+            </DialogContent>
+        </DialogPortal>
+    </DialogRoot>
 </template>

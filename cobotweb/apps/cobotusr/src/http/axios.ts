@@ -1,171 +1,108 @@
-import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios"
-import { getToken, setToken } from "@/common/cache/cookies"
-import { get, merge } from "lodash-es"
-import { useUserStore } from "@/pinia/stores/user"
-import { emitToast } from "@/utils/toast"
-import { router } from "@/router"
-import { refreshTokenRequest } from "@/pages/login/api"
-
-/** 退出登录并强制刷新页面（会重定向到登录页） */
-function logout() {
-  const userStore = useUserStore()
-  userStore.logout()
-  const currentRoute = router.currentRoute.value
-  // OIDC 登录页退出时保留 query 参数（避免 client_id 等 OIDC 参数丢失）
-  if (currentRoute.name === 'oidc-login') {
-    router.push({ name: 'oidc-login', query: currentRoute.query })
-  } else {
-    router.push('/login')
-  }
+import axios, { type AxiosRequestConfig, type AxiosInstance } from 'axios'
+import { getToken, setToken } from '@/common/cache/cookies'
+import { emitToast } from '@/utils/toast'
+import { expireSession, sessionEpoch } from '@/workspace/session'
+export interface RequestOptions extends AxiosRequestConfig {
+    errorPresentation?: 'local' | 'global'
 }
-
-/** 创建请求实例 */
-function createInstance() {
-  // 创建一个 axios 实例命名为 instance
-  const instance = axios.create()
-  // 刷新令牌并发控制
-  let isRefreshing = false
-  let refreshPromise: Promise<string> | null = null
-  const subscribers: Array<(token: string) => void> = []
-  const subscribeTokenRefresh = (cb: (token: string) => void) => { subscribers.push(cb) }
-  const onRefreshed = (token: string) => { subscribers.forEach(cb => cb(token)); subscribers.length = 0 }
-  // 请求拦截器
-  instance.interceptors.request.use(
-    // 发送之前
-    config => config,
-    // 发送失败
-    error => Promise.reject(error)
-  )
-  // 响应拦截器（可根据具体业务作出相应的调整）
-  instance.interceptors.response.use(
-    (response) => {
-      return response.data
-    },
-    (error) => {
-      const status = get(error, "response.status") as number | undefined
-      const message = get(error, "response.data") || get(error, "message") || "请求错误"
-      const originalConfig = (error?.config || {}) as AxiosRequestConfig & { _retry?: boolean }
-
-      if (status === 401) {
-        const reqUrl = String(get(error, "config.url") || "")
-        // 登录接口失败直接 reject，不走 refresh 逻辑
-        if (/login$/i.test(reqUrl)) {
-          return Promise.reject(error)
-        }
-        // 避免刷新接口自身循环
-        if (/refresh$/i.test(reqUrl)) {
-          emitToast({ type: 'error', message: "登录已过期，请重新登录" })
-          setTimeout(() => { logout() }, 300)
-          return Promise.reject(error)
-        }
-        // 已重试仍失败则退出
-        if (originalConfig._retry) {
-          setTimeout(() => { logout() }, 0)
-          return Promise.reject(error)
-        }
-
-        if (!isRefreshing) {
-          isRefreshing = true
-          refreshPromise = refreshTokenRequest()
-            .then((data) => {
-              const newToken = data?.access_token
-              if (!newToken) throw new Error("刷新失败：未返回 access_token")
-              setToken(newToken)
-              isRefreshing = false
-              onRefreshed(newToken)
-              return newToken
-            })
-            .catch((e) => {
-              isRefreshing = false
-              emitToast({ type: 'error', message: "登录已过期，请重新登录" })
-              setTimeout(() => { logout() }, 0)
-              throw e
-            })
-        }
-
-        return new Promise((resolve, reject) => {
-          subscribeTokenRefresh((newToken) => {
-            if (!originalConfig.headers) originalConfig.headers = {}
-            originalConfig.headers["Authorization"] = `Bearer ${newToken}`
-            originalConfig._retry = true
-            resolve(instance(originalConfig))
-          })
-          refreshPromise?.catch(reject)
-        })
-      }
-
-      // 其他状态码处理
-      switch (status) {
-        case 400:
-          error.message = "请求错误"
-          break
-        case 403:
-          error.message = message || "拒绝访问"
-          break
-        case 404:
-          error.message = "请求地址出错"
-          break
-        case 408:
-          error.message = "请求超时"
-          break
-        case 409:
-          error.message = message || "已存在"
-          break
-        case 500:
-          error.message = "服务器内部错误"
-          break
-        case 501:
-          error.message = "服务未实现"
-          break
-        case 502:
-          error.message = "网关错误"
-          break
-        case 503:
-          error.message = "服务不可用"
-          break
-        case 504:
-          error.message = "网关超时"
-          break
-        case 505:
-          error.message = "HTTP 版本不受支持"
-          break
-      }
-      emitToast({ type: 'error', message: error.message || String(message) })
-      return Promise.reject(error)
+export function createHttpClient(options?: {
+    adapter?: AxiosRequestConfig['adapter']
+    refresh?: () => Promise<string>
+}) {
+    const instance: AxiosInstance = axios.create({ adapter: options?.adapter })
+    let refreshing: Promise<string> | null = null,
+        refreshingEpoch = -1
+    instance.interceptors.response.use(
+        (response) => {
+            if (
+                (response.config as RequestOptions & { _epoch?: number })._epoch !== undefined &&
+                (response.config as RequestOptions & { _epoch?: number })._epoch !==
+                    sessionEpoch.value
+            )
+                throw new axios.CanceledError('会话已改变')
+            return response.data
+        },
+        async (error) => {
+            if (axios.isCancel(error) || error?.code === 'ERR_CANCELED') throw error
+            const original = (error.config ?? {}) as RequestOptions & {
+                _retry?: boolean
+                _epoch?: number
+            }
+            const epoch = original._epoch ?? sessionEpoch.value
+            if (epoch !== sessionEpoch.value) throw new axios.CanceledError('会话已改变')
+            const status = error.response?.status
+            const url = String(original.url ?? '')
+            if (status === 401 && !/login$/i.test(url)) {
+                if (original._retry || /refresh$/i.test(url)) {
+                    expireSession()
+                    throw error
+                }
+                if (!refreshing || refreshingEpoch !== epoch) {
+                    refreshingEpoch = epoch
+                    const current = (
+                        options?.refresh
+                            ? options.refresh()
+                            : instance
+                                  .request({
+                                      url: 'refresh',
+                                      method: 'POST',
+                                      baseURL: import.meta.env.VITE_BASE_URL,
+                                      withCredentials: true,
+                                      _retry: true,
+                                      _epoch: epoch,
+                                  } as AxiosRequestConfig)
+                                  .then((data: unknown) => {
+                                      const token = (data as { access_token?: string }).access_token
+                                      if (!token) throw new Error('刷新未返回凭据')
+                                      return token
+                                  })
+                    )
+                        .then((token) => {
+                            if (epoch !== sessionEpoch.value)
+                                throw new axios.CanceledError('会话已改变')
+                            setToken(token)
+                            return token
+                        })
+                        .catch((e) => {
+                            if (epoch === sessionEpoch.value) expireSession()
+                            throw e
+                        })
+                        .finally(() => {
+                            if (refreshing === current) refreshing = null
+                        })
+                    refreshing = current
+                }
+                const token = await refreshing
+                if (original.signal?.aborted || epoch !== sessionEpoch.value)
+                    throw new axios.CanceledError('请求已取消')
+                return instance.request({
+                    ...original,
+                    _retry: true,
+                    headers: { ...original.headers, Authorization: 'Bearer ' + token },
+                } as AxiosRequestConfig)
+            }
+            const message =
+                typeof error.response?.data === 'string'
+                    ? error.response.data
+                    : (error.response?.data?.message ?? error.message ?? '请求失败，请重试')
+            error.message = message
+            if (original.errorPresentation !== 'local') emitToast({ type: 'error', message })
+            throw error
+        },
+    )
+    return function request<T>(config: RequestOptions): Promise<T> {
+        return instance.request({
+            baseURL: import.meta.env.VITE_BASE_URL,
+            timeout: 8000,
+            withCredentials: true,
+            ...config,
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: getToken() ? 'Bearer ' + getToken() : undefined,
+                ...config.headers,
+            },
+            _epoch: sessionEpoch.value,
+        } as AxiosRequestConfig) as Promise<T>
     }
-  )
-  return instance
 }
-
-/** 创建 json 请求方法 */
-function createRequest(instance: AxiosInstance) {
-  return <T>(config: AxiosRequestConfig): Promise<T> => {
-    const token = getToken()
-    // 默认配置
-    const defaultConfig: AxiosRequestConfig = {
-      // 接口地址
-      baseURL: import.meta.env.VITE_BASE_URL,
-      // 请求头
-      headers: {
-        // 携带 Token
-        "Authorization": token ? `Bearer ${token}` : undefined,
-        "Content-Type": "application/json"
-      },
-      // 请求体
-      data: {},
-      // 请求超时
-      timeout: 8000,
-      // 跨域请求时是否携带 Cookies
-      withCredentials: true
-    }
-    // 将默认配置 defaultConfig 和传入的自定义配置 config 进行合并成为 mergeConfig
-    const mergeConfig = merge(defaultConfig, config)
-    return instance(mergeConfig)
-  }
-}
-
-/** 用于请求的实例 */
-const instance = createInstance()
-
-/** 用于请求的方法 */
-export const request = createRequest(instance)
+export const request = createHttpClient()

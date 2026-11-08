@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-08",
+  "basis": "Final app source, configuration, public assets and lockfiles; deleted files excluded",
+  "sha256": "3a4a37713cfb9cba93f1c79121388c95be8ca60380f62a5edafd59da9e1d0255",
+  "fileCount": 163,
+  "baseline": "fa571d8",
+  "e2e": {
+    "passed": 213,
+    "failed": 0,
+    "skipped": 0
+  },
+  "unit": {
+    "passed": 42,
+    "failed": 0
+  }
+}

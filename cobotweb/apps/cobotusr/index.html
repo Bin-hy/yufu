@@ -1,13 +1,25 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>web</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <link rel="icon" type="image/svg+xml" href="/cobotusr.svg" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="theme-color" content="#f5f8f9" />
+        <script>
+            try {
+                var cobotusrTheme = localStorage.getItem('cobotusr:theme')
+                var cobotusrDark =
+                    cobotusrTheme === 'dark' ||
+                    (cobotusrTheme !== 'light' &&
+                        matchMedia('(prefers-color-scheme: dark)').matches)
+                document.documentElement.classList.toggle('dark', cobotusrDark)
+                document.documentElement.style.colorScheme = cobotusrDark ? 'dark' : 'light'
+            } catch (_) {}
+        </script>
+        <title>cobotusr · 身份与访问管理</title>
+    </head>
+    <body>
+        <div id="app"></div>
+        <script type="module" src="/src/main.ts"></script>
+    </body>
 </html>

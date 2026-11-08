@@ -1,143 +1,77 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import { useRouter } from 'vue-router';
-import Item from './item.vue';
-import { useUserStore } from '@/pinia/stores/user'
-import UiButton from '@/components/ui/button/button.vue'
+import { Menu, ChevronDown, LogOut, UserRound, PanelLeft } from '@lucide/vue'
+import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
+import { useRouter } from 'vue-router'
 import ThemeSwitcher from '@/components/ui/theme-switcher/theme-switcher.vue'
-import { logoutAndRedirect } from '@/common/utils/auth'
+import DropdownMenu from '@/components/ui/dropdown-menu/dropdown-menu.vue'
+import Breadcrumb from '@/layouts/components/Breadcrumb/index.vue'
 import { useLayoutStore } from '@/pinia/stores/layout'
-
-// 与 item.vue 保持一致的类型定义，避免模板中出现 unknown
-interface NavMeta {
-  title?: string
-  icon?: any
-  hidden?: boolean
-}
-interface NavItem {
-  path: string
-  meta?: NavMeta
-  children?: NavItem[]
-}
-
-const props = withDefaults(defineProps<{
-  type?: 'horizontal' | 'vertical'
-  items?: NavItem[]
-  activeItem?: string
-  collapsed?: boolean
-}>(), {
-  type: 'horizontal',
-  items: (_props) => [] as NavItem[],
-  activeItem: '',
-  collapsed: false
-})
-
-const router = useRouter();
-const userStore = useUserStore()
-const nickname = computed(() => userStore.userInfo?.nickname || userStore.userInfo?.username || '个人中心')
-
-const navClasses = computed(() => ({
-  'bg-background': true,
-  'border-b': true,
-  'border-border': true,
-  'shadow-sm': true,
-  'min-h-14': props.type === 'horizontal',
-  'transition-all': true,
-  'duration-300': true,
-  'flex': true,
-  'items-center': props.type === 'horizontal',
-  'flex-row': props.type === 'horizontal',
-  'flex-col': props.type === 'vertical'
-}));
-
-const projectName = computed(() => import.meta.env.VITE_APP_TITLE || 'Cobotrix')
-
-const layout = useLayoutStore()
-
-// 头像下拉
-const menuOpen = ref(false)
-const toggleMenu = () => { menuOpen.value = !menuOpen.value }
-const closeMenu = () => { menuOpen.value = false }
-
-const onDocClick = (e: MouseEvent) => {
-  const target = e.target as HTMLElement
-  // 点击在菜单内部不关闭；否则关闭
-  if (!target.closest?.('#user-menu-root')) {
-    closeMenu()
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('click', onDocClick)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocClick)
-})
-
-const imUrl = import.meta.env.VITE_IM_URL ?? '/im/'
-
-const handleLogout = async () => {
-  await logoutAndRedirect(router)
-}
+import { useUserStore } from '@/pinia/stores/user'
+import { logoutAndRedirect } from '@/common/utils/auth'
+import { useTheme } from '@/composables/use-theme'
+const { setTheme } = useTheme()
+const layout = useLayoutStore(),
+    user = useUserStore(),
+    router = useRouter()
 </script>
-
 <template>
-  <nav :class="navClasses">
-    <!-- 左侧：折叠按钮 + Logo -->
-    <div class="flex items-center h-full px-3 gap-2">
-      <UiButton variant="ghost" size="sm" aria-label="切换侧栏" @click="layout.toggleSidebar()">
-        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      </UiButton>
-      <slot name="logo">
-        <div class="flex items-center">
-          <svg class="h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          <span v-if="!collapsed" class="ml-2 text-base font-semibold">{{ projectName }}</span>
+    <header class="workspace-topbar">
+        <div class="flex min-w-0 items-center gap-3">
+            <button
+                type="button"
+                class="icon-button lg:hidden"
+                aria-label="打开导航"
+                @click="layout.mobileOpen = true"
+            >
+                <Menu :size="19" aria-hidden="true" /></button
+            ><button
+                type="button"
+                class="icon-button hidden lg:inline-flex"
+                aria-label="切换侧栏"
+                @click="layout.toggleSidebar"
+            >
+                <PanelLeft :size="17" aria-hidden="true" /></button
+            ><Breadcrumb />
         </div>
-      </slot>
-    </div>
-
-    <!-- 中间：导航项 -->
-    <div class="flex items-center h-full">
-      <slot name="items">
-        <div class="flex h-full">
-          <template v-for="(item, _index) in items" :key="item.path || _index">
-            <Item :item="item" :base-path="item.path" />
-          </template>
+        <div class="flex shrink-0 items-center gap-4">
+            <ThemeSwitcher /><DropdownMenu
+                ><template #trigger
+                    ><button
+                        class="flex min-h-11 min-w-11 sm:min-h-9 items-center justify-center gap-2 text-xs"
+                        type="button"
+                        aria-label="用户菜单"
+                    >
+                        <span
+                            class="flex h-7 w-7 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground"
+                            >{{
+                                (user.userInfo?.nickname || user.userInfo?.username || 'U').slice(
+                                    0,
+                                    1,
+                                )
+                            }}</span
+                        ><span class="hidden max-w-32 truncate sm:block">{{
+                            user.userInfo?.nickname || user.userInfo?.username || '当前用户'
+                        }}</span
+                        ><ChevronDown :size="14" aria-hidden="true" /></button></template
+                ><DropdownMenuItem as-child
+                    ><router-link to="/profile" class="dropdown-item"
+                        ><UserRound :size="15" aria-hidden="true" />个人中心</router-link
+                    ></DropdownMenuItem
+                ><DropdownMenuItem class="dropdown-item sm:hidden" @select="setTheme('light')"
+                    >主题：浅色</DropdownMenuItem
+                >
+                <DropdownMenuItem class="dropdown-item sm:hidden" @select="setTheme('dark')"
+                    >主题：暗色</DropdownMenuItem
+                >
+                <DropdownMenuItem class="dropdown-item sm:hidden" @select="setTheme('system')"
+                    >主题：跟随系统</DropdownMenuItem
+                >
+                <DropdownMenuSeparator class="my-1 h-px bg-border" /><DropdownMenuItem
+                    class="dropdown-item text-destructive"
+                    @select="logoutAndRedirect(router)"
+                    ><LogOut :size="15" aria-hidden="true" />退出登录</DropdownMenuItem
+                ></DropdownMenu
+            >
         </div>
-      </slot>
-    </div>
-
-    <!-- 右侧：操作区（主题切换 + 个人中心下拉） -->
-    <div class="ml-auto flex items-center h-full px-3 gap-2">
-      <slot name="actions">
-        <!-- 主题切换图标按钮 -->
-        <ThemeSwitcher :show-label="false" />
-        <div id="user-menu-root" class="relative">
-          <button type="button" class="flex items-center gap-2" @click="toggleMenu">
-            <div class="rounded-full bg-primary text-primary-foreground w-6 h-6 flex items-center justify-center">
-              <span class="text-xs">{{ (nickname || '访客')[0] }}</span>
-            </div>
-            <UiButton variant="ghost" size="sm" class="hidden sm:inline truncate max-w-[8rem]">{{ nickname }}</UiButton>
-            <svg class="h-4 w-4 text-muted-foreground hidden sm:block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          <div v-if="menuOpen" class="absolute right-0 top-full mt-2 w-40 rounded-md border border-border bg-popover text-popover-foreground shadow-lg">
-            <router-link to="/profile" class="block px-3 py-2 hover:bg-muted transition-colors" @click="closeMenu">个人中心</router-link>
-            <a :href="imUrl" target="_blank" class="block px-3 py-2 hover:bg-muted transition-colors" @click="closeMenu">即时通讯</a>
-            <button class="block w-full text-left px-3 py-2 hover:bg-muted transition-colors" @click="handleLogout">退出登录</button>
-          </div>
-        </div>
-      </slot>
-    </div>
-  </nav>
+    </header>
 </template>
-
-<style scoped>
-.title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-</style>
