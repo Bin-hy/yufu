@@ -2,6 +2,7 @@
 
 pub mod budget;
 pub mod credential;
+pub mod csrf;
 pub mod error;
 pub mod identity;
 pub mod message;

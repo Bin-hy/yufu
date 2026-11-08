@@ -233,6 +233,61 @@ pub struct IdTokenSigner {
 }
 
 impl IdTokenSigner {
+    /// Strict local verification uses only the configured RSA key and profile.
+    pub fn verify_security_credential(
+        &self,
+        token: &crate::security::identity::SecretToken,
+        expected: &crate::security::credential::CredentialExpectation,
+        clock: &dyn crate::security::budget::Clock,
+    ) -> Result<
+        crate::security::credential::VerifiedCredential,
+        crate::security::error::SecurityError,
+    > {
+        use crate::security::{
+            credential::{access_key_id, verify_access_with_key},
+            error::SecurityError,
+        };
+        let key = self
+            .rsa_decoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        if access_key_id(token)? != self.kid {
+            return Err(SecurityError::InvalidCredential);
+        }
+        verify_access_with_key(token, expected, key, clock)
+    }
+    /// A signed reference may target retired credentials for revocation. It is
+    /// deliberately not a VerifiedCredential or a usable authentication context.
+    pub fn revocation_reference(
+        &self,
+        token: &crate::security::identity::SecretToken,
+        issuer: &str,
+    ) -> Result<crate::security::credential::CredentialRef, crate::security::error::SecurityError>
+    {
+        use crate::security::{
+            credential::{CredentialRef, SecurityAccessClaims, access_key_id},
+            error::SecurityError,
+        };
+        let key = self
+            .rsa_decoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        if access_key_id(token)? != self.kid {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&[issuer]);
+        validation.validate_aud = false;
+        validation.validate_exp = false;
+        validation.validate_nbf = false;
+        let claims = decode::<SecurityAccessClaims>(token.expose_secret(), key, &validation)
+            .map_err(|_| SecurityError::InvalidCredential)?
+            .claims;
+        if claims.iss != issuer {
+            return Err(SecurityError::InvalidCredential);
+        }
+        CredentialRef::new(claims.iss, claims.jti)
+    }
     pub fn sign_security_access(
         &self,
         claims: &crate::security::credential::SecurityAccessClaims,

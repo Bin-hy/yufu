@@ -1,4 +1,6 @@
 //! Primary-only, deadline-bounded security transactions. No replica or cache fallback.
+#[path = "repository_revocation.rs"]
+mod revocation;
 use std::{future::Future, sync::Arc};
 
 use auth::security::{
@@ -167,6 +169,21 @@ pub trait SecurityRepository: Send + Sync {
 #[allow(clippy::double_must_use)]
 pub trait SecurityTransaction: Send {
     fn checked_at(&self) -> u64;
+    async fn lock_credential(
+        &mut self,
+        reference: &CredentialRef,
+    ) -> Result<Option<CredentialSnapshot>, SecurityError>;
+    async fn revoke_scope(
+        &mut self,
+        principal: &PrincipalRef,
+        scope: &super::revocation::StoredRevocationScope,
+        at: u64,
+    ) -> Result<(), SecurityError>;
+    async fn consent_application(
+        &mut self,
+        principal: &PrincipalRef,
+        consent_id: i32,
+    ) -> Result<String, SecurityError>;
     async fn local_user(&mut self, username: &str) -> Result<Option<user::Model>, SecurityError>;
     async fn register_local_user(
         &mut self,
@@ -444,6 +461,28 @@ impl PgSecurityTransaction {
 }
 #[async_trait::async_trait]
 impl SecurityTransaction for PgSecurityTransaction {
+    async fn lock_credential(
+        &mut self,
+        reference: &CredentialRef,
+    ) -> Result<Option<CredentialSnapshot>, SecurityError> {
+        self.lock_revocation_credential(reference).await
+    }
+    async fn revoke_scope(
+        &mut self,
+        principal: &PrincipalRef,
+        scope: &super::revocation::StoredRevocationScope,
+        at: u64,
+    ) -> Result<(), SecurityError> {
+        self.revoke_stored_scope(principal, scope, at).await
+    }
+    async fn consent_application(
+        &mut self,
+        principal: &PrincipalRef,
+        consent_id: i32,
+    ) -> Result<String, SecurityError> {
+        self.resolve_consent_application(principal, consent_id)
+            .await
+    }
     async fn local_user(&mut self, username: &str) -> Result<Option<user::Model>, SecurityError> {
         self.run(
             user::Entity::find()
@@ -677,6 +716,14 @@ impl SecurityTransaction for PgSecurityTransaction {
         Ok(CredentialBounds::new(grants))
     }
     async fn register_session_pair(&mut self, r: SessionRegistration) -> Result<(), SecurityError> {
+        if r.new_roots {
+            self.serialize_user_roots(&PrincipalRef::new(
+                &r.claims.iss,
+                r.claims.principal_kind,
+                &r.claims.sub,
+            )?)
+            .await?;
+        }
         fn uuid(value: &str) -> Result<Uuid, SecurityError> {
             value.parse().map_err(|_| SecurityError::InvalidCredential)
         }

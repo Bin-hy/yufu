@@ -255,42 +255,113 @@ impl StrictAccessState {
         let verified = self
             .jwks
             .verify_credential(&token, &self.expected, self.clock.as_ref())?;
-        budget.remaining()?;
-        let status = budget
-            .run(self.checker.check_current(&verified, &budget))
-            .await??;
-        if !status.active {
-            return Err(SecurityError::CredentialRevoked);
-        }
-        if status.claims != verified.claims {
-            return Err(SecurityError::InvalidCredential);
-        }
-        let expires = verified
-            .claims
-            .exp
-            .checked_mul(1000)
-            .ok_or(SecurityError::InvalidCredential)?;
-        if status.validity.valid_until() > expires {
-            return Err(SecurityError::InvalidCredential);
-        }
-        let validity = status
-            .validity
-            .bind_to_clock(self.clock.clone())
-            .map_err(|error| {
-                if error == SecurityError::DeadlineExceeded {
-                    SecurityError::InvalidCredential
-                } else {
-                    error
-                }
-            })?;
-        budget.remaining()?;
-        Ok(AuthenticatedContext {
+        establish_context(
             verified,
-            evidence: Arc::new(token),
-            validity,
+            token,
+            self.checker.as_ref(),
+            self.clock.clone(),
             budget,
-        })
+        )
+        .await
     }
+}
+
+/// IdP verification against its configured key, without an HTTP call to itself.
+pub struct LocalStrictAccessState {
+    signer: Arc<crate::token_manager::IdTokenSigner>,
+    expected: CredentialExpectation,
+    clock: Arc<dyn Clock>,
+    checker: Arc<dyn CurrentCredentialChecker>,
+}
+impl LocalStrictAccessState {
+    pub fn new(
+        signer: Arc<crate::token_manager::IdTokenSigner>,
+        expected: CredentialExpectation,
+        clock: Arc<dyn Clock>,
+        checker: Arc<dyn CurrentCredentialChecker>,
+    ) -> Self {
+        Self {
+            signer,
+            expected,
+            clock,
+            checker,
+        }
+    }
+    pub async fn authenticate(
+        &self,
+        headers: &http::HeaderMap,
+    ) -> Result<AuthenticatedContext, SecurityError> {
+        let budget = super::budget::SecurityBudget::new(self.clock.clone())?;
+        self.authenticate_with_budget(headers, &budget).await
+    }
+    pub async fn authenticate_with_budget(
+        &self,
+        headers: &http::HeaderMap,
+        budget: &super::budget::SecurityBudget,
+    ) -> Result<AuthenticatedContext, SecurityError> {
+        budget.remaining()?;
+        let token = extract_bearer(headers)?;
+        let (signer, expected, clock, evidence) = (
+            self.signer.clone(),
+            self.expected.clone(),
+            self.clock.clone(),
+            SecretToken::new(token.expose_secret().to_owned())?,
+        );
+        let verified = budget
+            .run(tokio::task::spawn_blocking(move || {
+                signer.verify_security_credential(&evidence, &expected, clock.as_ref())
+            }))
+            .await?
+            .map_err(|_| SecurityError::DependencyUnavailable)??;
+        establish_context(
+            verified,
+            token,
+            self.checker.as_ref(),
+            self.clock.clone(),
+            budget.clone(),
+        )
+        .await
+    }
+}
+async fn establish_context(
+    verified: VerifiedCredential,
+    token: SecretToken,
+    checker: &dyn CurrentCredentialChecker,
+    clock: Arc<dyn Clock>,
+    budget: super::budget::SecurityBudget,
+) -> Result<AuthenticatedContext, SecurityError> {
+    budget.remaining()?;
+    let status = budget
+        .run(checker.check_current(&verified, &budget))
+        .await??;
+    if !status.active {
+        return Err(SecurityError::CredentialRevoked);
+    }
+    if status.claims != verified.claims {
+        return Err(SecurityError::InvalidCredential);
+    }
+    let expires = verified
+        .claims
+        .exp
+        .checked_mul(1000)
+        .ok_or(SecurityError::InvalidCredential)?;
+    if status.validity.valid_until() > expires {
+        return Err(SecurityError::InvalidCredential);
+    }
+    let validity = status.validity.bind_to_clock(clock).map_err(|error| {
+        if error == SecurityError::DeadlineExceeded {
+            SecurityError::InvalidCredential
+        } else {
+            error
+        }
+    })?;
+    budget.remaining()?;
+    Ok(AuthenticatedContext {
+        verified,
+        evidence: Arc::new(token),
+        validity,
+        budget,
+    })
 }
 
 /// Only proves cryptographic/profile validity. A registry/status check is still required.

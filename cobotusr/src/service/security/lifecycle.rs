@@ -103,8 +103,8 @@ pub struct SessionTokenSet {
 }
 
 pub struct CredentialLifecycle {
-    repository: Arc<dyn SecurityRepository>,
-    clock: Arc<dyn Clock>,
+    pub(super) repository: Arc<dyn SecurityRepository>,
+    pub(super) clock: Arc<dyn Clock>,
 }
 impl CredentialLifecycle {
     pub fn new(repository: Arc<dyn SecurityRepository>, clock: Arc<dyn Clock>) -> Self {
@@ -518,7 +518,7 @@ impl CredentialLifecycle {
     }
 }
 
-fn validate_session_access(
+pub(super) fn validate_session_access(
     row: &crate::entity::security_credential::Model,
     access: &crate::entity::security_credential::Model,
 ) -> Result<(), SecurityError> {
@@ -540,7 +540,7 @@ fn validate_session_access(
     Ok(())
 }
 
-fn validate_refresh_roots(state: &RegisteredState) -> Result<(), SecurityError> {
+pub(super) fn validate_refresh_roots(state: &RegisteredState) -> Result<(), SecurityError> {
     let row = &state.credential;
     let session = state
         .session
@@ -875,14 +875,14 @@ fn validate_parent(
         .ok_or(SecurityError::InvalidCredential)
 }
 
-async fn authenticate_session_client(
+pub(super) async fn authenticate_session_client(
     client: &crate::entity::oauth_client::Model,
     secret: Option<&SecretToken>,
     grant: &str,
     budget: &SecurityBudget,
 ) -> Result<(), SecurityError> {
     use crate::service::oidc::OidcService;
-    if !OidcService::client_allows_grant_type(client, grant) {
+    if !grant.is_empty() && !OidcService::client_allows_grant_type(client, grant) {
         return Err(SecurityError::InvalidCredential);
     }
     if client.public_client {
