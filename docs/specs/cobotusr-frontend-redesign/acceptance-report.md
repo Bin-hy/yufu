@@ -34,7 +34,7 @@ gzip数值为逐文件压缩大小之和，不是实测首屏网络传输量；�
 
 ## C001–C078 逐项结果
 
-“通过”限于本条描述的已执行前端验证；有未执行子场景保持“部分通过”。真实认证Cookie契约的例外在C013明确列出，不把localStorage白名单当作所有浏览器存储都无token。
+“通过”限于本条描述的已执行前端验证；有未执行子场景保持“部分通过”。浏览器认证存储的例外在C013明确列出，不把localStorage白名单当作所有浏览器存储都无token。2026-11-08 后续真实登录联调见 [认证集成修复](login-security-integration.md)。
 
 | 检查 | 状态 | 可复现证据 | 未覆盖或限定 |
 |---|---|---|---|
@@ -50,7 +50,7 @@ gzip数值为逐文件压缩大小之和，不是实测首屏网络传输量；�
 | C010 | 通过 | [U001](evidence/after/test-index.md#u001) | 已执行范围见关联用例。 |
 | C011 | 通过 | [U028](evidence/after/test-index.md#u028)、[E071](evidence/after/test-index.md#e071)、[E031](evidence/after/test-index.md#e031) | 已执行范围见关联用例。 |
 | C012 | 部分通过 | [U029](evidence/after/test-index.md#u029)、[E071](evidence/after/test-index.md#e071) | 坏JSON、Storage读写拒绝已通过；过期版本和未知路由快照分支仅代码核对，未逐分支注入。 |
-| C013 | 部分通过 | [U028](evidence/after/test-index.md#u028)、[E018](evidence/after/test-index.md#e018)、[E034](evidence/after/test-index.md#e034) | localStorage/sessionStorage及工作台快照不写密码、密钥、授权参数和结果；既有认证Cookie仍保存token，严格“所有浏览器持久化无token”不成立，未改变后端认证契约。 |
+| C013 | 部分通过 | [U028](evidence/after/test-index.md#u028)、[E018](evidence/after/test-index.md#e018)、[E034](evidence/after/test-index.md#e034)、[认证集成修复](login-security-integration.md) | localStorage与工作台快照不写密码、密钥、授权参数和认证结果；长访问 JWT 改存当前标签页 sessionStorage，刷新 Token 保留后端 HttpOnly Cookie，CSRF 只在请求内存缓存。严格“所有浏览器持久化无token”仍不成立；同源 JavaScript 可读取访问 Token。 |
 | C014 | 通过 | [U025](evidence/after/test-index.md#u025)、[E061](evidence/after/test-index.md#e061)、[E060](evidence/after/test-index.md#e060) | 已执行范围见关联用例。 |
 | C015 | 通过 | [E056](evidence/after/test-index.md#e056)、[E061](evidence/after/test-index.md#e061) | 已执行范围见关联用例。 |
 | C016 | 通过 | [U018](evidence/after/test-index.md#u018)、[E068](evidence/after/test-index.md#e068)、[E013](evidence/after/test-index.md#e013) | 已执行范围见关联用例。 |

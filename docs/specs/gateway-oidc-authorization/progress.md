@@ -72,11 +72,11 @@
 | T64 | 未开始 | 尚未执行 |
 | T65 | 未开始 | 尚未执行 |
 | T66 | 未开始 | 尚未执行 |
-| T67 | 未开始 | 尚未执行 |
+| T67 | 部分完成 | cobotusr CSRF、刷新轮换、会话取消与真实浏览器退出已适配；其余受众/前端仍待后续 |
 | T68 | 未开始 | 尚未执行 |
 | T69 | 未开始 | 尚未执行 |
-| T70 | 未开始 | 尚未执行 |
-| T71 | 未开始 | 尚未执行 |
+| T70 | 部分完成 | cobotusr 时钟健康模板与显式 loopback Cookie 开发模式；三服务完整安全模板未完成 |
+| T71 | 部分完成 | cobotusr/cobotrix/cobotnil 注入真实时钟监控；完整云端控制就绪门禁未验收 |
 | T72 | 未开始 | 尚未执行 |
 | T73 | 未开始 | 尚未执行 |
 | T74 | 未开始 | 尚未执行 |
@@ -95,8 +95,10 @@ OIDC授权码和refresh实际路由已接入主库生命周期；移除了旧的
 
 T25已将本地logout/kickout、consent删除和OIDC revoke/logout接入主库登记及明确作用域。当前会话退出和用户踢出保留独立MCP根；撤销应用授权终止该用户在应用下的全部对应根，并在同一事务取消consent和未兑换授权码。只沿显式revocation_parent_jti传播撤销，minted_by仍只作审计。应用撤销/踢出与新会话根登记共用用户行写屏障，旧一致快照不能在撤销提交后再创建活动根。
 
-Cookie参与的登录/注册/刷新/退出与管理撤销需精确受信Origin和签名CSRF证据；GET /api/v1/csrf提供启动/当前refresh绑定的证据，成功轮换返回新证据。GET /oidc/logout仅确认，POST校验证据、登记会话及redirect后提交，再清Cookie和跳转。前端适配仍待T67等任务。
+Cookie参与的登录/注册/刷新/退出与管理撤销需精确受信Origin和签名CSRF证据；GET /api/v1/csrf提供启动/当前refresh绑定的证据，成功轮换返回新证据。GET /oidc/logout仅确认，POST校验证据、登记会话及redirect后提交，再清Cookie和跳转。cobotusr 前端本地认证适配已完成，其他受众和入口仍待T67等任务。
 
 T26/T27已将MCP新建、轮换、列表、重命名和删除接入本地严格RSA与主库登记的个人管理生命周期，仅接受cobotusr UserSession。新建固定cobotsrv、独立grant，权限取管理旧上界与当前目标权限交集；轮换再与旧MCP上界相交，沿显式委托撤销旧凭据后代，替代凭据保留原grant且无旧jti撤销父。MCP访问凭据以条件设置revoked_at原子消费，consumed_at/replacement_jti仍专用于refresh历史。新根复用用户行写屏障，按活动registry grant限制20根。兼容mcp_token只作元数据及撤销镜像，不升级未知旧记录；新插入的mcp:access种子采用typed Application selector，既有legacy条目未自动升级。
 
 生产宿主必须注入真实时钟健康监控并登记OIDC客户端绑定。普通serve入口没有时钟监控时，新OIDC兑换/刷新、本地签发/刷新、撤销及MCP管理入口失败关闭；不存在默认同步或HMAC access签发回退。普通API当前状态检查的完整接线仍待T32，旧OIDC introspect及MCP服务denylist adapter尚未迁移；当前测试不证明全部入口已拒绝旧access。跨服务十秒撤权、checklist和完整链路仍未验收。下一项从T28机器认证与引导继续。
+
+2026-11-08 本地登录故障修复：三种 IdP 启动方式已注入 NTP 健康监控，默认要求不同 IP 的至少两个可信来源区间一致且误差 <=1s；失败/过期/时间跳变后拒绝认证，库入口没有默认同步回退。普通 NTP 没有传输认证，生产部署应使用受信网络的来源或自有健康 Clock。cobotusr 前端已完成 CSRF 与长 JWT 的当前标签页存储适配，三浏览器隔离实际后端注册、管理员身份恢复、刷新和退出通过；HTTP 放宽需显式 loopback 配置。详见 [认证集成证据](../cobotusr-frontend-redesign/login-security-integration.md)。本轮不改变27/80完成计数，不将T67/T70/T71整体标为完成。

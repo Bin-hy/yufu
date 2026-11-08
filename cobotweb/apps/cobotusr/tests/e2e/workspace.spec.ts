@@ -132,18 +132,22 @@ test('用户菜单为有效菜单，退出清空标签与快照', async ({ page 
         'TEST_LOGIN_TOKEN',
     )
 })
-test('刷新恢复同一 owner 标签，存储失败仍可使用', async ({ page }) => {
+test('刷新恢复同一 owner 标签，工作台 localStorage 失败仍可使用', async ({ page }) => {
     await page.goto('/users?page_number=3')
     await expect(page.locator('tbody tr')).toHaveCount(10)
     await page.reload()
     await expect(page).toHaveURL(/page_number=3/)
     await expect(page.locator('.workspace-tab')).toHaveCount(2)
     await page.addInitScript(() => {
-        Storage.prototype.setItem = () => {
-            throw Error('quota')
+        const setItem = Storage.prototype.setItem
+        const getItem = Storage.prototype.getItem
+        Storage.prototype.setItem = function (key, value) {
+            if (this === localStorage) throw Error('quota')
+            return setItem.call(this, key, value)
         }
-        Storage.prototype.getItem = () => {
-            throw Error('blocked')
+        Storage.prototype.getItem = function (key) {
+            if (this === localStorage) throw Error('blocked')
+            return getItem.call(this, key)
         }
     })
     await page.reload()
@@ -153,4 +157,32 @@ test('刷新恢复同一 owner 标签，存储失败仍可使用', async ({ page
         .getByRole('link', { name: '角色管理', exact: true })
         .click()
     await expect(page.getByRole('heading', { name: '角色管理', exact: true })).toBeVisible()
+})
+
+test('所有 Storage 禁用时可内存登录、导航和退出，重新加载需要登录', async ({ page, mock }) => {
+    await page.context().clearCookies()
+    await page.addInitScript(() => {
+        for (const method of ['getItem', 'setItem', 'removeItem'] as const)
+            Storage.prototype[method] = () => { throw Error('storage blocked') }
+    })
+    await page.goto('/login')
+    const signIn = async () => {
+        await page.getByLabel('用户名', { exact: true }).fill('memory-user')
+        await page.getByLabel('密码', { exact: true }).fill('test password')
+        await page.getByRole('button', { name: '登录', exact: true }).click()
+        await expect(page).toHaveURL(/\/dashboard$/)
+    }
+    await signIn()
+    await page.locator('.workspace-sidebar').getByRole('link', { name: '用户管理', exact: true }).click()
+    await expect(page.locator('tbody tr')).toHaveCount(10)
+    await page.reload()
+    await expect(page).toHaveURL(/\/login\?redirect=/)
+    await page.getByLabel('用户名', { exact: true }).fill('memory-user')
+    await page.getByLabel('密码', { exact: true }).fill('test password')
+    await page.getByRole('button', { name: '登录', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '用户菜单' }).click()
+    await page.getByRole('menuitem', { name: '退出登录' }).click()
+    await expect(page).toHaveURL(/\/login$/)
+    expect(mock.calls.filter((call) => call.path === '/logout')).toHaveLength(1)
 })

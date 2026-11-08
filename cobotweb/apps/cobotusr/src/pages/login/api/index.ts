@@ -15,12 +15,8 @@ export async function loginApi(
             data,
         })
     } catch (e) {
-        // 登录接口失败时转换为可读的中文错误，避免 axios 拦截器显示英文原始消息
-        throw new Error(
-            typeof (e as { response?: { data: unknown } }).response?.data === 'string'
-                ? String((e as { response: { data: string } }).response.data)
-                : '用户名或密码错误',
-        )
+        // 保留 HTTP 层整理后的错误，地址或网络故障也需要可见的诊断信息。
+        throw new Error(e instanceof Error ? e.message : '登录失败，请稍后重试')
     }
 }
 

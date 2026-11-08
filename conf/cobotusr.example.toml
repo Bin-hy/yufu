@@ -4,7 +4,11 @@ listen = "127.0.0.1:4000"
 # api_prefix = "/api/v1"
 
 # Headers["Authorization"] = "Bearer {token}"
- [auth]
+[auth]
+# 默认 Cookie 带 Secure，生产浏览器入口应使用 HTTPS。
+# 本机 HTTP 开发（含 Safari）可以显式打开；监听地址和 issuer 必须是 loopback。
+# 独立启动也可用 CLI --allow-insecure-loopback-cookies，无须修改配置文件。
+# allow_insecure_loopback_cookies = false
 # JSON WEB TOKEN secret
 # secret = "<jwt_secret>"
 # static JWT token, superadmin, debuggger can use this token
@@ -142,3 +146,17 @@ connect_timeout = 30
 # token = "live777"
 # Live777 Address
 # url = "http://liveion-0.net4mqtt.local:7777"
+
+# 认证时钟健康检查：只测量宿主时间，不设置或校正 OS 时间。
+# 默认至少两个不同 IP 的来源一致且总误差 <= 1 秒，10 秒检查一次。
+# UDP/DNS 不可达、样本过期或时钟跳变时，认证入口返回 503；启动首次检查失败则退出。
+# 独立诊断：cobotusr --config <path> --check-security-clock（不打开数据库或 HTTP 服务）。
+# 运行后 GET /api/v1/health/ready 仅报告认证时钟就绪状态。
+# 普通 NTP 没有传输认证；生产应使用受信网络中的 NTP 来源，或由宿主通过
+# serve_with_security_clock 注入具备可信健康证据的 Clock。不要填公共来源来替代部署信任策略。
+[security_clock]
+servers = ["time.apple.com:123", "time.cloudflare.com:123", "ntp.aliyun.com:123"]
+min_agreeing_sources = 2
+poll_interval_seconds = 10
+sample_ttl_seconds = 30
+timeout_millis = 1500

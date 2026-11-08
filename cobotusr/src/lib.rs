@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, SET_COOKIE};
-use http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::future::Future;
@@ -28,11 +28,7 @@ use auth::access_middleware_local_rs256;
 use auth::claims::AccessTokenClaims;
 use auth::token_manager::{IdTokenSigner, TokenManager};
 
-#[cfg(feature = "webui")]
-#[derive(rust_embed::RustEmbed)]
-#[folder = "../assets/cobotusr/"]
-struct Assets;
-
+pub mod clock;
 pub mod config;
 pub mod entity;
 pub mod error;
@@ -45,6 +41,7 @@ pub mod route;
 mod seed;
 pub mod service;
 mod swagger_docs;
+mod webui;
 
 fn is_successful_http_exchange(status: StatusCode) -> bool {
     status.is_informational() || status.is_success()
@@ -225,6 +222,18 @@ async fn serve_internal<F>(
 ) where
     F: Future<Output = ()> + Send + 'static,
 {
+    if let Err(error) = cfg.validate_browser_cookie_policy() {
+        error!(reason = %error, "invalid browser cookie policy; server not started");
+        return;
+    }
+    if cfg.auth.allow_insecure_loopback_cookies
+        && !listener
+            .local_addr()
+            .is_ok_and(|address| address.ip().is_loopback())
+    {
+        error!("insecure development cookies require an actual loopback listener");
+        return;
+    }
     info!("Server listening on {}", listener.local_addr().unwrap());
 
     // Initialize database connection
@@ -405,7 +414,7 @@ async fn serve_internal<F>(
                 span
             }),
         )
-        .fallback(static_handler);
+        .fallback_service(webui::fallback(cfg.http.api_prefix.clone()));
     #[cfg(feature = "openapi")]
     {
         use crate::swagger_docs::doc::ApiDoc;
@@ -418,35 +427,6 @@ async fn serve_internal<F>(
         .with_graceful_shutdown(signal)
         .await
         .unwrap_or_else(|e| error!("Application error: {e}"));
-}
-
-#[cfg(feature = "webui")]
-async fn static_handler(uri: Uri) -> impl IntoResponse {
-    let path = uri.path().trim_start_matches('/');
-
-    let file_path = if path.is_empty() { "index.html" } else { path };
-
-    match Assets::get(file_path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
-            ([(http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
-        }
-        None => {
-            // fallback to index.html
-            match Assets::get("index.html") {
-                Some(index) => {
-                    let mime = mime_guess::from_path("index.html").first_or_octet_stream();
-                    ([(http::header::CONTENT_TYPE, mime.as_ref())], index.data).into_response()
-                }
-                None => (StatusCode::NOT_FOUND, "not found").into_response(),
-            }
-        }
-    }
-}
-
-#[cfg(not(feature = "webui"))]
-async fn static_handler(_: Uri) -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
 /// Middleware that loads the current user from DB based on a previously-verified
@@ -983,6 +963,32 @@ mod tests {
                 should_skip_body_logging(&path.parse().unwrap(), &headers, "/custom"),
                 "{path}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_http_development_cookie_policy_stops_before_database_init() {
+        for wildcard_listener in [false, true] {
+            let mut config = Config::default();
+            config.auth.allow_insecure_loopback_cookies = true;
+            config.database.url = "must-not-open-database".into();
+            config.http.listen = "127.0.0.1:4000".parse().unwrap();
+            if !wildcard_listener {
+                config.oidc.issuer = "https://remote.example.test".into();
+            }
+            let listener = TcpListener::bind(if wildcard_listener {
+                "0.0.0.0:0"
+            } else {
+                "127.0.0.1:0"
+            })
+            .await
+            .unwrap();
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                serve(config, listener, std::future::pending()),
+            )
+            .await
+            .unwrap();
         }
     }
 }

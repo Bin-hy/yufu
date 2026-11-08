@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const outDir = await mkdtemp(join(tmpdir(), 'cobotusr-e2e-'))
-const env = { ...process.env, VITE_BASE_URL: '/api/v1', VITE_SYSTEM_NAME: 'cobotusr-e2e' }
+// 空值覆盖本地环境，验证默认生产构建也能正确访问 /api/v1。
+const env = { ...process.env, VITE_BASE_URL: '', VITE_SYSTEM_NAME: 'cobotusr-e2e' }
 const build = spawn('pnpm', ['exec', 'vite', 'build', '--outDir', outDir], {
     env,
     stdio: 'inherit',

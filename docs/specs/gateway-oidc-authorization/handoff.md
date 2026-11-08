@@ -42,6 +42,8 @@
 
 ## 继续顺序
 
+2026-11-08 登录故障修订：cobotusr/cobotrix/cobotnil 已接入实际 NTP 时钟健康监控（默认不同 IP 的至少两个来源一致且误差 <=1s，故障/过期/跳变拒绝认证）；普通 serve 仍没有默认健康回退。cobotusr 前端 CSRF、刷新、退出及长访问 JWT 的 sessionStorage 适配已实现，三浏览器隔离实际 WebUI/后端认证通过；HTTP 开发 Cookie 必须显式开启且仅允许 loopback。原文中的“前端CSRF适配待完成”现在仅指其他前端与完整 T67；T70/T71 也仅部分完成。普通 NTP 缺传输认证，生产应使用受信网络来源或自有健康 Clock。详见 [认证集成修复](../cobotusr-frontend-redesign/login-security-integration.md)。完成计数保持27/80，下一主线任务仍为T28。
+
 1. 从T28机器认证与引导继续：先补client_credentials、本地机器状态、应用/用途/受众绑定及错误主体失败测试，再实现；不得递归调用自身PDP或将机器subject回退为用户0。
 2. 后续按依赖统一主体证据及专用安全服务入口，不恢复旧用户/MCP签发旁路。
 3. 后续按task.md依赖推进，T34仍需完整操作目录/路由覆盖/应用种子；T67等任务需适配当前CSRF/刷新/退出协议。不要将当前默认失败关闭误认为全入口迁移完成。

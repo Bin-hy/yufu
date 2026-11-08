@@ -63,19 +63,29 @@ async fn main() -> Result<()> {
     ));
 
     warn!("set log level: [{}]", log_level);
-    debug!("cobotusr config : {:?}", cobotusr_cfg);
-    debug!("cobotsrv config : {:?}", cobotsrv_cfg);
+    debug!(listen = %cobotusr_cfg.http.listen, api_prefix = %cobotusr_cfg.http.api_prefix, "cobotusr config loaded");
+    debug!(listen = %cobotsrv_cfg.http.listen, "cobotsrv config loaded");
 
     // Start cobotusr (IdP + PDP) as background task
+    cobotusr_cfg.validate_browser_cookie_policy()?;
+    if cobotusr_cfg.auth.allow_insecure_loopback_cookies {
+        warn!("explicit loopback HTTP development cookies enabled");
+    }
+    let clock_monitor = cobotusr::clock::ClockMonitor::start(&cobotusr_cfg.security_clock).await?;
     let cobotusr_listener = TcpListener::bind(&cobotusr_cfg.http.listen)
         .await
         .context("failed to bind cobotusr listener")?;
     info!("cobotusr listening on {}", cobotusr_listener.local_addr()?);
-    tokio::spawn(cobotusr::serve(
-        cobotusr_cfg,
-        cobotusr_listener,
-        utils::shutdown_signal(),
-    ));
+    tokio::spawn(async move {
+        cobotusr::serve_with_security_clock(
+            cobotusr_cfg,
+            cobotusr_listener,
+            utils::shutdown_signal(),
+            clock_monitor.clock(),
+        )
+        .await;
+        drop(clock_monitor);
+    });
 
     // Start cobotsrv (device management) — awaited, holds the process
     let cobotsrv_listener = TcpListener::bind(&cobotsrv_cfg.http.listen)

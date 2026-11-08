@@ -71,9 +71,24 @@ pub fn get_public_routes() -> Router<AppState> {
     Router::new()
         .route("/login", post(login))
         .route("/csrf", get(csrf_challenge))
+        .route("/health/ready", get(authentication_readiness))
         .route("/register", post(auth_register))
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
+}
+
+async fn authentication_readiness(
+    State(state): State<AppState>,
+) -> (http::StatusCode, Json<serde_json::Value>) {
+    let ready = state.security_clock().and_then(SecurityBudget::new).is_ok();
+    (
+        if ready {
+            http::StatusCode::OK
+        } else {
+            http::StatusCode::SERVICE_UNAVAILABLE
+        },
+        Json(serde_json::json!({"ready": ready, "security_clock_synchronized": ready})),
+    )
 }
 
 async fn csrf_challenge(
@@ -130,13 +145,7 @@ pub async fn auth_register(
     .await?;
 
     let mut headers = HeaderMap::new();
-    headers.insert(
-        SET_COOKIE,
-        http::HeaderValue::from_str(&format!(
-            "refresh_token={}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age={}",
-            refresh_token, state.config.auth.refresh_exp_seconds,
-        ))?,
-    );
+    headers.insert(SET_COOKIE, browser::refresh_cookie(&state, &refresh_token)?);
 
     let csrf = browser::issue_csrf(&state, Some(&refresh_token), &mut headers)?;
     let resp = RegistryRespData {
@@ -177,13 +186,7 @@ pub async fn login(
         UserService::auth(&state, username, password, &budget).await?;
 
     let mut headers = HeaderMap::new();
-    headers.insert(
-        SET_COOKIE,
-        http::HeaderValue::from_str(&format!(
-            "refresh_token={}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age={}",
-            refresh_token, state.config.auth.refresh_exp_seconds,
-        ))?,
-    );
+    headers.insert(SET_COOKIE, browser::refresh_cookie(&state, &refresh_token)?);
     let csrf = browser::issue_csrf(&state, Some(&refresh_token), &mut headers)?;
     let resp = LoginRespData {
         access_token,
@@ -223,11 +226,7 @@ pub async fn refresh(
     let mut headers = HeaderMap::new();
     headers.insert(
         SET_COOKIE,
-        format!(
-            "refresh_token={}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age={}",
-            new_refresh_token, state.config.auth.refresh_exp_seconds
-        )
-        .parse()?,
+        browser::refresh_cookie(&state, &new_refresh_token)?,
     );
 
     let csrf = browser::issue_csrf(&state, Some(&new_refresh_token), &mut headers)?;
@@ -261,7 +260,7 @@ pub async fn logout(
         .ok_or_else(|| AppError::BadRequest("missing refresh token".to_string()))?;
 
     let receipt = UserService::logout_by_refresh(&state, &refresh_token, None, &budget).await?;
-    Ok((browser::clear_session_cookies(), Json(receipt)))
+    Ok((browser::clear_session_cookies(&state)?, Json(receipt)))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(

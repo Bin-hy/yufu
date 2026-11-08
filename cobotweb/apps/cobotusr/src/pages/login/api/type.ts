@@ -7,6 +7,7 @@ export interface LoginRequestData {
 /** 登陆响应格式 */
 export type LoginResponseData = {
     access_token: string,
+    csrf_token: string,
     username: string,
     nickname: string,
  }
@@ -24,6 +25,7 @@ export type RegisterResponseData = LoginResponseData
 
 export interface RefreshRespData{
     access_token: string,
+    csrf_token: string,
 }
 
 export type LogoutRespData = RefreshRespData;

@@ -12,14 +12,12 @@ export async function logoutAndRedirect(router: Router): Promise<void> {
         ))
     )
         return
-    const request = logoutRequest().catch(() => undefined)
+    await logoutRequest({ errorPresentation: 'local' }).catch(() => undefined)
     useUserStore(pinia).logout()
     await router.replace('/login')
-    await request
 }
 export async function logoutOnly(router?: Router): Promise<void> {
-    const request = logoutRequest().catch(() => undefined)
+    await logoutRequest({ errorPresentation: 'local' }).catch(() => undefined)
     useUserStore(pinia).logout()
     if (router) await router.replace('/login')
-    await request
 }

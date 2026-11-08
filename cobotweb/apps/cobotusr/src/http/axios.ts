@@ -1,15 +1,97 @@
-import axios, { type AxiosRequestConfig, type AxiosInstance } from 'axios'
+import axios, { type AxiosRequestConfig, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
 import { getToken, setToken } from '@/common/cache/cookies'
 import { emitToast } from '@/utils/toast'
 import { expireSession, sessionEpoch } from '@/workspace/session'
 export interface RequestOptions extends AxiosRequestConfig {
     errorPresentation?: 'local' | 'global'
 }
+type InternalRequest = InternalAxiosRequestConfig & {
+    _retry?: boolean
+    _epoch?: number
+    _skipAuthRefresh?: boolean
+    errorPresentation?: 'local' | 'global'
+}
+const csrfLifetime = 5 * 60 * 1000
+const htmlResponseMessage = '接口返回了 HTML 页面，请检查 API 地址或代理配置'
+const browserRejectionMessages: Record<string, string> = {
+    csrf_origin_missing: '请求缺少来源信息，请通过浏览器页面登录',
+    csrf_origin_invalid: '请求来源信息无效，请使用完整的服务地址访问',
+    csrf_origin_not_allowed: '当前访问地址未获授权，请使用服务地址或在 auth.origins 中配置完整来源（含端口）',
+    csrf_cookie_invalid: '浏览器认证 Cookie 无效，请清除此站点的 Cookie 后重试',
+    csrf_cookie_missing: '浏览器未发送认证 Cookie，请检查 Cookie 设置并使用同一地址访问',
+    csrf_cookie_requires_https: '浏览器未发送安全认证 Cookie；本机 HTTP 开发启动需加 --allow-insecure-loopback-cookies，其他环境请使用 HTTPS',
+    csrf_proof_missing: '请求缺少认证校验信息，请强制刷新页面后重试',
+    csrf_proof_mismatch: '认证校验信息已变化，请重新点击登录或刷新页面后重试',
+    csrf_proof_invalid: '认证校验信息已失效，请刷新页面后重试',
+}
+function isHtmlResponse(response?: { data?: unknown; headers?: Record<string, unknown> }) {
+    return (
+        String(response?.headers?.['content-type'] ?? '').toLowerCase().includes('text/html') ||
+        (typeof response?.data === 'string' && /^\s*(?:<!doctype\s+html|<html\b)/i.test(response.data))
+    )
+}
 export function createHttpClient(options?: {
     adapter?: AxiosRequestConfig['adapter']
     refresh?: () => Promise<string>
 }) {
+    const baseURL = import.meta.env.VITE_BASE_URL?.trim() || '/api/v1'
     const instance: AxiosInstance = axios.create({ adapter: options?.adapter })
+    const proofs = new Map<string, { token: string; epoch: number; expiresAt: number }>()
+    const challenges = new Map<string, { epoch: number; promise: Promise<string> }>()
+    const presentedErrors = new WeakSet<object>()
+    function presentError(error: object, config: RequestOptions, message: string) {
+        if (config.errorPresentation !== 'local' && !presentedErrors.has(error)) {
+            presentedErrors.add(error)
+            emitToast({ type: 'error', message })
+        }
+    }
+    function proofKey(config: AxiosRequestConfig) {
+        return config.baseURL ?? baseURL
+    }
+    function rememberProof(config: InternalRequest, data: unknown) {
+        const token = (data as { csrf_token?: unknown } | null)?.csrf_token
+        if (typeof token === 'string' && token.trim())
+            proofs.set(proofKey(config), { token, epoch: config._epoch ?? sessionEpoch.value, expiresAt: Date.now() + csrfLifetime })
+    }
+    async function csrfProof(config: InternalRequest, epoch: number): Promise<string> {
+        const key = proofKey(config)
+        const saved = proofs.get(key)
+        if (saved?.epoch === epoch && saved.expiresAt > Date.now()) return saved.token
+        const pending = challenges.get(key)
+        if (pending?.epoch === epoch) return pending.promise
+        const promise = instance.request({
+            baseURL: key,
+            url: 'csrf',
+            method: 'GET',
+            timeout: 8000,
+            withCredentials: true,
+            errorPresentation: config.errorPresentation,
+            _epoch: epoch,
+            _skipAuthRefresh: true,
+        } as AxiosRequestConfig).then((data: unknown) => {
+            const token = (data as { csrf_token?: unknown } | null)?.csrf_token
+            if (typeof token !== 'string' || !token.trim()) throw new Error('认证服务未返回 CSRF 证明，请检查后端配置')
+            return token
+        }).finally(() => {
+            if (challenges.get(key)?.promise === promise) challenges.delete(key)
+        })
+        challenges.set(key, { epoch, promise })
+        return promise
+    }
+    instance.interceptors.request.use(async (raw) => {
+        const config = raw as InternalRequest
+        const epoch = config._epoch ?? sessionEpoch.value
+        config._epoch = epoch
+        if (epoch !== sessionEpoch.value || config.signal?.aborted)
+            throw new axios.CanceledError('会话已改变或请求已取消')
+        if (['post', 'put', 'patch', 'delete'].includes(String(config.method).toLowerCase())) {
+            const proof = await csrfProof(config, epoch)
+            if (epoch !== sessionEpoch.value || config.signal?.aborted)
+                throw new axios.CanceledError('会话已改变或请求已取消')
+            config.headers.set('X-CSRF-Token', proof)
+        }
+        return config
+    })
     let refreshing: Promise<string> | null = null,
         refreshingEpoch = -1
     instance.interceptors.response.use(
@@ -20,6 +102,20 @@ export function createHttpClient(options?: {
                     sessionEpoch.value
             )
                 throw new axios.CanceledError('会话已改变')
+            if (isHtmlResponse(response)) {
+                const error = new axios.AxiosError(
+                    htmlResponseMessage,
+                    'ERR_API_HTML_RESPONSE',
+                    response.config,
+                    response.request,
+                    response,
+                )
+                presentError(error, response.config, htmlResponseMessage)
+                throw error
+            }
+            const config = response.config as InternalRequest
+            rememberProof(config, response.data)
+            if (/(?:^|\/)logout(?:\?|$)/i.test(String(config.url))) proofs.delete(proofKey(config))
             return response.data
         },
         async (error) => {
@@ -27,12 +123,16 @@ export function createHttpClient(options?: {
             const original = (error.config ?? {}) as RequestOptions & {
                 _retry?: boolean
                 _epoch?: number
+                _skipAuthRefresh?: boolean
             }
             const epoch = original._epoch ?? sessionEpoch.value
             if (epoch !== sessionEpoch.value) throw new axios.CanceledError('会话已改变')
             const status = error.response?.status
             const url = String(original.url ?? '')
-            if (status === 401 && !/login$/i.test(url)) {
+            if (['post', 'put', 'patch', 'delete'].includes(String(original.method).toLowerCase())
+                && (status === 403 || !error.response))
+                proofs.delete(proofKey(original))
+            if (status === 401 && !original._skipAuthRefresh && !/(?:login|register|csrf)$/i.test(url)) {
                 if (original._retry || /refresh$/i.test(url)) {
                     expireSession()
                     throw error
@@ -46,10 +146,11 @@ export function createHttpClient(options?: {
                                   .request({
                                       url: 'refresh',
                                       method: 'POST',
-                                      baseURL: import.meta.env.VITE_BASE_URL,
+                                      baseURL,
                                       withCredentials: true,
                                       _retry: true,
                                       _epoch: epoch,
+                                      errorPresentation: original.errorPresentation,
                                   } as AxiosRequestConfig)
                                   .then((data: unknown) => {
                                       const token = (data as { access_token?: string }).access_token
@@ -82,17 +183,23 @@ export function createHttpClient(options?: {
                 } as AxiosRequestConfig)
             }
             const message =
-                typeof error.response?.data === 'string'
-                    ? error.response.data
-                    : (error.response?.data?.message ?? error.message ?? '请求失败，请重试')
+                isHtmlResponse(error.response)
+                    ? htmlResponseMessage
+                    : status === 403 && Object.prototype.hasOwnProperty.call(browserRejectionMessages, error.response?.data?.code)
+                      ? browserRejectionMessages[error.response.data.code]
+                    : status === 503 && error.response?.data === 'security dependency unavailable'
+                      ? '认证服务暂不可用，请检查后端时钟同步与依赖状态'
+                    : typeof error.response?.data === 'string'
+                      ? error.response.data
+                      : (error.response?.data?.message ?? error.message ?? '请求失败，请重试')
             error.message = message
-            if (original.errorPresentation !== 'local') emitToast({ type: 'error', message })
+            presentError(error, original, message)
             throw error
         },
     )
     return function request<T>(config: RequestOptions): Promise<T> {
         return instance.request({
-            baseURL: import.meta.env.VITE_BASE_URL,
+            baseURL,
             timeout: 8000,
             withCredentials: true,
             ...config,

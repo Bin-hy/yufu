@@ -16,6 +16,58 @@ const flow = {
     code_challenge_method: 'S256',
 }
 const query = new URLSearchParams(flow).toString()
+test('CSRF 启动失败保留输入，重试后登录和退出使用轮换证明', async ({ page, mock }) => {
+    await page.context().clearCookies()
+    mock.failures.set('GET /csrf', 1)
+    await page.goto('/login')
+    await login(page)
+    await expect(page.getByRole('alert')).toContainText(mock.message)
+    await expect(page.getByLabel('用户名', { exact: true })).toHaveValue('tester')
+    expect(mock.calls.filter((call) => call.path === '/login')).toHaveLength(0)
+    await page.getByRole('button', { name: '登录', exact: true }).click()
+    await expect(page).toHaveURL(/\/dashboard$/)
+    expect(mock.calls.filter((call) => call.path === '/csrf')).toHaveLength(2)
+    expect(mock.calls.find((call) => call.path === '/login')?.csrf).toBe('TEST_CSRF_PROOF')
+    await page.getByRole('button', { name: '用户菜单' }).click()
+    await page.getByRole('menuitem', { name: '退出登录' }).click()
+    await expect(page).toHaveURL(/\/login$/)
+    expect(mock.calls.find((call) => call.path === '/logout')?.csrf).toBe('TEST_LOGIN_CSRF')
+    expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('TEST_LOGIN_CSRF')
+})
+
+test('401 后刷新使用启动证明，退出使用刷新证明', async ({ page, mock }) => {
+    mock.statuses.set('GET /user', { status: 401, remaining: 1 })
+    await page.goto('/dashboard')
+    await expect(page.getByRole('button', { name: '用户菜单' })).toBeVisible()
+    expect(mock.calls.filter((call) => call.path === '/refresh')).toHaveLength(1)
+    expect(mock.calls.find((call) => call.path === '/refresh')?.csrf).toBe('TEST_CSRF_PROOF')
+    await page.getByRole('button', { name: '用户菜单' }).click()
+    await page.getByRole('menuitem', { name: '退出登录' }).click()
+    await expect(page).toHaveURL(/\/login$/)
+    expect(mock.calls.find((call) => call.path === '/logout')?.csrf).toBe('TEST_REFRESH_CSRF')
+})
+
+test('默认构建的登录请求命中 /api/v1，HTML 响应有明确提示且保留输入', async ({ page }) => {
+    await page.context().clearCookies()
+    await page.goto('/login')
+    await page.route('**/api/v1/login', (route) =>
+        route.fulfill({
+            status: 200,
+            contentType: 'text/html',
+            body: '<!doctype html><html><body>SPA fallback</body></html>',
+        }),
+    )
+    const sent = page.waitForRequest((request) => request.method() === 'POST')
+    await login(page)
+    expect(new URL((await sent).url()).pathname).toBe('/api/v1/login')
+    await expect(page.getByRole('alert')).toContainText(
+        '接口返回了 HTML 页面，请检查 API 地址或代理配置',
+    )
+    await expect(page).toHaveURL(/\/login$/)
+    await expect(page.getByLabel('用户名', { exact: true })).toHaveValue('tester')
+    await expect(page.getByRole('button', { name: '登录', exact: true })).toBeEnabled()
+})
+
 test('普通登录失败保留用户名，成功恢复站内返回目标', async ({ page, mock }) => {
     await page.context().clearCookies()
     mock.failures.set('POST /login', 1)

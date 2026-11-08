@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "description": "cobotrix monorepo (Rust workspace + cobotweb pnpm workspace)",
   "scripts": {
+    "dev:cobotusr": "pnpm --filter @cobotweb/cobotusr dev",
+    "build:cobotusr": "pnpm --filter @cobotweb/cobotusr build",
     "dev:cobotsrv": "pnpm --filter @cobotweb/cobotsrv dev",
     "dev:cobotlet": "pnpm --filter @cobotweb/cobotlet dev",
     "build:cobotsrv": "pnpm --filter @cobotweb/cobotsrv build",

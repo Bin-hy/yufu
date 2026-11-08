@@ -1,6 +1,9 @@
 import { afterEach } from 'vitest'
 import { cleanupConfirmations } from '@/utils/modal'
+import { removeToken } from '@/common/cache/cookies'
 afterEach(() => {
+    removeToken()
+    sessionStorage.clear()
     cleanupConfirmations()
     document.body.innerHTML = ''
     localStorage.clear()

@@ -21,6 +21,17 @@ struct LocalHttpFixture {
     api: String,
     client: Client,
     clock: Arc<dyn auth::security::budget::Clock>,
+    _monitor: Option<cobotusr::clock::ClockMonitor>,
+    _ntp: Option<tokio::task::JoinHandle<()>>,
+    server: tokio::task::JoinHandle<()>,
+}
+impl Drop for LocalHttpFixture {
+    fn drop(&mut self) {
+        self.server.abort();
+        if let Some(task) = &self._ntp {
+            task.abort();
+        }
+    }
 }
 async fn local_http_fixture(mode: &str) -> LocalHttpFixture {
     let (container, database_url) = get_postgres_container().await.unwrap();
@@ -31,20 +42,67 @@ async fn local_http_fixture(mode: &str) -> LocalHttpFixture {
     config.database.url = database_url.clone();
     let rsa = configure_local_server(&mut config, address);
     let api = format!("{root}{}", config.http.api_prefix);
-    let clock = test_clock(mode != "unhealthy");
+    config.http.listen = address;
+    let mut monitor = None;
+    let mut ntp = None;
+    if mode == "monitored-loopback" {
+        config.auth.allow_insecure_loopback_cookies = true;
+        config.auth.super_admin.username = "isolated-test-admin".into();
+        config.auth.super_admin.password = "isolated test password".into();
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        config.security_clock = cobotusr::config::SecurityClock {
+            servers: vec![socket.local_addr().unwrap().to_string()],
+            min_agreeing_sources: 1,
+            poll_interval_seconds: 1,
+            sample_ttl_seconds: 3,
+            timeout_millis: 100,
+        };
+        ntp = Some(tokio::spawn(async move {
+            let mut request = [0u8; 512];
+            while let Ok((size, sender)) = socket.recv_from(&mut request).await {
+                if size < 48 {
+                    continue;
+                }
+                let time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap();
+                let stamp = (((time.as_secs() + 2_208_988_800) << 32)
+                    | ((u64::from(time.subsec_nanos()) << 32) / 1_000_000_000))
+                    .to_be_bytes();
+                let mut response = [0u8; 48];
+                response[0] = 0x24;
+                response[1] = 1;
+                response[24..32].copy_from_slice(&request[40..48]);
+                response[32..40].copy_from_slice(&stamp);
+                response[40..48].copy_from_slice(&stamp);
+                if socket.send_to(&response, sender).await.is_err() {
+                    break;
+                }
+            }
+        }));
+        monitor = Some(
+            cobotusr::clock::ClockMonitor::start(&config.security_clock)
+                .await
+                .unwrap(),
+        );
+    }
+    let clock = monitor
+        .as_ref()
+        .map(|monitor| monitor.clock())
+        .unwrap_or_else(|| test_clock(mode != "unhealthy"));
     if mode == "hmac" {
         config.oidc.signing_algorithm = "HS256".into();
     }
-    if mode == "missing-clock" {
-        tokio::spawn(cobotusr::serve(config, listener, shutdown_signal()));
+    let server = if mode == "missing-clock" {
+        tokio::spawn(cobotusr::serve(config, listener, shutdown_signal()))
     } else {
         tokio::spawn(cobotusr::serve_with_security_clock(
             config,
             listener,
             shutdown_signal(),
             clock.clone(),
-        ));
-    }
+        ))
+    };
     let client = Client::new();
     client
         .get(format!("{root}/.well-known/openid-configuration"))
@@ -62,6 +120,9 @@ async fn local_http_fixture(mode: &str) -> LocalHttpFixture {
         api,
         client,
         clock,
+        _monitor: monitor,
+        _ntp: ntp,
+        server,
     }
 }
 fn response_refresh_cookie(response: &reqwest::Response) -> String {
@@ -493,4 +554,357 @@ async fn bootstrap_request(
         .header("origin", root)
         .header("cookie", cookie)
         .header("x-csrf-token", body["csrf_token"].as_str().unwrap()))
+}
+
+#[tokio::test]
+async fn security_browser_readiness_reports_missing_and_unhealthy_clock() {
+    for mode in ["healthy", "missing-clock", "unhealthy"] {
+        let fixture = local_http_fixture(mode).await;
+        let ready = mode == "healthy";
+        let response = fixture
+            .client
+            .get(format!("{}/health/ready", fixture.api))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), if ready { 200 } else { 503 });
+        assert_eq!(
+            response.json::<serde_json::Value>().await.unwrap(),
+            serde_json::json!({"ready": ready, "security_clock_synchronized": ready})
+        );
+        let response = fixture
+            .client
+            .get(format!("{}/csrf", fixture.api))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), if ready { 200 } else { 503 });
+        if ready {
+            let cookie = response
+                .headers()
+                .get("set-cookie")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert!(cookie.starts_with("__Host-cobotusr-csrf="));
+            assert!(
+                cookie.contains("Secure;")
+                    && cookie.contains("Path=/;")
+                    && cookie.contains("SameSite=Lax;")
+            );
+        } else {
+            assert!(!response.headers().contains_key("set-cookie"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn security_browser_loopback_cookie_flow_and_monitor_failure() {
+    let fixture = local_http_fixture("monitored-loopback").await;
+    let response = fixture
+        .client
+        .get(format!("{}/csrf", fixture.api))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let csrf_cookie = response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert!(csrf_cookie.starts_with("cobotusr-dev-csrf="));
+    let proof = response.json::<serde_json::Value>().await.unwrap()["csrf_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let forbidden = fixture.client.post(format!("{}/register", fixture.api))
+        .header("origin", "https://remote.example.test")
+        .header("cookie", &csrf_cookie).header("x-csrf-token", &proof)
+        .json(&serde_json::json!({"username":"loopback-test", "nickname":"test", "password":"test password"}))
+        .send().await.unwrap();
+    assert_eq!(forbidden.status(), 403);
+    assert!(!forbidden.headers().contains_key("set-cookie"));
+    let registered = fixture.client.post(format!("{}/register", fixture.api))
+        .header("origin", &fixture.root).header("cookie", &csrf_cookie).header("x-csrf-token", &proof)
+        .json(&serde_json::json!({"username":"loopback-test", "nickname":"test", "password":"test password"}))
+        .send().await.unwrap();
+    assert_eq!(registered.status(), 200);
+    let mut session_cookies = Vec::new();
+    for cookie in registered.headers().get_all("set-cookie") {
+        let cookie = cookie.to_str().unwrap();
+        assert!(!cookie.contains("Secure"));
+        assert!(cookie.contains("Path=/;") && cookie.contains("SameSite=Lax;"));
+        if cookie.starts_with("refresh_token=") {
+            assert!(cookie.contains("HttpOnly;"));
+        }
+        session_cookies.push(cookie.split(';').next().unwrap().to_owned());
+    }
+    let body = registered.json::<serde_json::Value>().await.unwrap();
+    let logout = fixture
+        .client
+        .post(format!("{}/logout", fixture.api))
+        .header("origin", &fixture.root)
+        .header("cookie", session_cookies.join("; "))
+        .header("x-csrf-token", body["csrf_token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(logout.status(), 200);
+    for cookie in logout.headers().get_all("set-cookie") {
+        let cookie = cookie.to_str().unwrap();
+        assert!(cookie.contains("Max-Age=0"));
+        assert!(!cookie.contains("Secure"));
+    }
+    fixture._ntp.as_ref().unwrap().abort();
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let response = fixture
+                .client
+                .get(format!("{}/health/ready", fixture.api))
+                .send()
+                .await
+                .unwrap();
+            if response.status() == 503 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let response = fixture
+        .client
+        .get(format!("{}/csrf", fixture.api))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 503);
+    assert!(!response.headers().contains_key("set-cookie"));
+}
+
+#[cfg(feature = "webui")]
+#[tokio::test]
+async fn security_browser_real_frontend_login_refresh_logout_all_engines() {
+    let fixture = local_http_fixture("monitored-loopback").await;
+    run_browser_auth_test(&fixture, "loopback").await;
+}
+
+#[cfg(feature = "webui")]
+#[tokio::test]
+async fn security_browser_secure_http_rejection_is_actionable_in_webkit() {
+    let fixture = local_http_fixture("healthy").await;
+    run_browser_auth_test(&fixture, "secure-cookie-diagnostic").await;
+}
+
+#[cfg(feature = "webui")]
+async fn run_browser_auth_test(fixture: &LocalHttpFixture, mode: &str) {
+    let output = tokio::process::Command::new("node")
+        .arg("tests/e2e/real-auth.mjs")
+        .current_dir(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/cobotweb/apps/cobotusr"
+        ))
+        .env("COBOTUSR_AUTH_TEST_URL", &fixture.root)
+        .env("COBOTUSR_AUTH_TEST_MODE", mode)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    println!("{}", String::from_utf8_lossy(&output.stdout));
+}
+
+#[tokio::test]
+async fn security_browser_loopback_aliases_and_rejection_diagnostics() {
+    let fixture = local_http_fixture("monitored-loopback").await;
+    let response = fixture
+        .client
+        .get(format!("{}/csrf", fixture.api))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let cookie = response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let proof = response.json::<serde_json::Value>().await.unwrap()["csrf_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let port = reqwest::Url::parse(&fixture.root).unwrap().port().unwrap();
+    for origin in [
+        fixture.root.clone(),
+        format!("http://localhost:{port}"),
+        format!("http://[::1]:{port}"),
+    ] {
+        let response = fixture
+            .client
+            .post(format!("{}/login", fixture.api))
+            .header("origin", origin)
+            .header("cookie", &cookie)
+            .header("x-csrf-token", &proof)
+            .json(&LoginData {
+                username: "isolated-nonexistent".into(),
+                password: "wrong password".into(),
+            })
+            .send()
+            .await
+            .unwrap();
+        // A valid browser proof must reach account authentication, which rejects this account.
+        assert_eq!(response.status(), 401);
+    }
+    let cases = [
+        (
+            Some(format!(
+                "http://localhost:{}",
+                if port == 4000 { 4001 } else { 4000 }
+            )),
+            Some(cookie.as_str()),
+            Some(proof.as_str()),
+            "csrf_origin_not_allowed",
+        ),
+        (
+            Some(format!("https://localhost:{port}")),
+            Some(cookie.as_str()),
+            Some(proof.as_str()),
+            "csrf_origin_not_allowed",
+        ),
+        (
+            Some("https://remote.example.test".into()),
+            Some(cookie.as_str()),
+            Some(proof.as_str()),
+            "csrf_origin_not_allowed",
+        ),
+        (
+            None,
+            Some(cookie.as_str()),
+            Some(proof.as_str()),
+            "csrf_origin_missing",
+        ),
+        (
+            Some("null".into()),
+            Some(cookie.as_str()),
+            Some(proof.as_str()),
+            "csrf_origin_invalid",
+        ),
+        (
+            Some(format!("http://localhost:{port}/")),
+            Some(cookie.as_str()),
+            Some(proof.as_str()),
+            "csrf_origin_invalid",
+        ),
+        (
+            Some(fixture.root.clone()),
+            Some("cobotusr-dev-csrf=first; cobotusr-dev-csrf=second"),
+            Some(proof.as_str()),
+            "csrf_cookie_invalid",
+        ),
+        (
+            Some(fixture.root.clone()),
+            None,
+            Some(proof.as_str()),
+            "csrf_cookie_missing",
+        ),
+        (
+            Some(fixture.root.clone()),
+            Some(cookie.as_str()),
+            None,
+            "csrf_proof_missing",
+        ),
+        (
+            Some(fixture.root.clone()),
+            Some(cookie.as_str()),
+            Some("wrong-proof"),
+            "csrf_proof_mismatch",
+        ),
+        (
+            Some(fixture.root.clone()),
+            Some("cobotusr-dev-csrf=tampered"),
+            Some("tampered"),
+            "csrf_proof_invalid",
+        ),
+    ];
+    for (origin, cookie, proof, expected) in cases {
+        let mut request = fixture
+            .client
+            .post(format!("{}/login", fixture.api))
+            .json(&LoginData {
+                username: "isolated-nonexistent".into(),
+                password: "wrong password".into(),
+            });
+        if let Some(origin) = origin {
+            request = request.header("origin", origin);
+        }
+        if let Some(cookie) = cookie {
+            request = request.header("cookie", cookie);
+        }
+        if let Some(proof) = proof {
+            request = request.header("x-csrf-token", proof);
+        }
+        let response = request.send().await.unwrap();
+        assert_eq!(response.status(), 403, "{expected}");
+        assert!(!response.headers().contains_key("set-cookie"));
+        assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
+        let body = response.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(body["code"], expected);
+        if let Some(proof) = proof {
+            assert!(!body.to_string().contains(proof));
+        }
+    }
+    // Without the development opt-in, Secure cookies remain required and aliases
+    // remain untrusted. A missing cookie must explain why GET /csrf alone isn't enough.
+    let secure = local_http_fixture("healthy").await;
+    let response = secure
+        .client
+        .get(format!("{}/csrf", secure.api))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        response
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("Secure")
+    );
+    let proof = response.json::<serde_json::Value>().await.unwrap()["csrf_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let response = secure
+        .client
+        .post(format!("{}/login", secure.api))
+        .header("origin", &secure.root)
+        .header("x-csrf-token", &proof)
+        .json(&LoginData {
+            username: "isolated-nonexistent".into(),
+            password: "wrong password".into(),
+        })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+    assert_eq!(
+        response.json::<serde_json::Value>().await.unwrap()["code"],
+        "csrf_cookie_requires_https"
+    );
 }

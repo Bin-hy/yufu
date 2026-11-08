@@ -4,7 +4,7 @@ use std::thread;
 use anyhow::{Context, Result};
 use clap::Parser;
 use tokio::net::TcpListener;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use net4mqtt::broker;
 
@@ -62,8 +62,13 @@ async fn main() -> Result<()> {
         level = cobotusr_cfg.log.level,
     ));
 
-    debug!("cobotusr config : {:?}", cobotusr_cfg);
-    debug!("cobotsrv config : {:?}", cobotsrv_cfg);
+    debug!(listen = %cobotusr_cfg.http.listen, api_prefix = %cobotusr_cfg.http.api_prefix, "cobotusr config loaded");
+    debug!(listen = %cobotsrv_cfg.http.listen, "cobotsrv config loaded");
+    cobotusr_cfg.validate_browser_cookie_policy()?;
+    if cobotusr_cfg.auth.allow_insecure_loopback_cookies {
+        warn!("explicit loopback HTTP development cookies enabled");
+    }
+    let clock_monitor = cobotusr::clock::ClockMonitor::start(&cobotusr_cfg.security_clock).await?;
 
     // Start embedded MQTT broker (net4mqtt)
     let broker_addr = MQTT_BROKER_ADDR.parse()?;
@@ -104,11 +109,16 @@ async fn main() -> Result<()> {
         .await
         .context("failed to bind cobotusr listener")?;
     info!("cobotusr listening on {}", cobotusr_listener.local_addr()?);
-    tokio::spawn(cobotusr::serve(
-        cobotusr_cfg,
-        cobotusr_listener,
-        utils::shutdown_signal(),
-    ));
+    tokio::spawn(async move {
+        cobotusr::serve_with_security_clock(
+            cobotusr_cfg,
+            cobotusr_listener,
+            utils::shutdown_signal(),
+            clock_monitor.clock(),
+        )
+        .await;
+        drop(clock_monitor);
+    });
 
     // Start cobotsrv (device management server) — inject discovered cobotlet URLs
     let mut cobotsrv_cfg = cobotsrv_cfg;

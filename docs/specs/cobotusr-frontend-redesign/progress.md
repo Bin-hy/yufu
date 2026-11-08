@@ -1,6 +1,6 @@
 # cobotusr 改版实施进度
 
-四份文档均已批准，2026-11-08。实现按 task.md 依赖推进；前端实现与工程自动化完成；T124为部分验证，T130–T132真实环境未验证。任务完成指实现及对应主要回归完成，细分场景限制以验收报告为准。
+四份文档均已批准，2026-11-08。实现按 task.md 依赖推进；前端实现与工程自动化完成；T124为部分验证，T130已完成隔离真实后端认证联调的部分验证，T131–T132生产/设备环境未验证。任务完成指实现及对应主要回归完成，细分场景限制以验收报告为准。
 
 | 任务 | 内容 | 状态 | 证据 |
 |---|---|---|---|
@@ -133,9 +133,13 @@
 | T127 | 完成 Chromium 浏览器回归 | 完成 | verification.log / unit-results.json / e2e-results.json |
 | T128 | 完成 Firefox 浏览器回归 | 完成 | verification.log / unit-results.json / e2e-results.json |
 | T129 | 完成 WebKit 浏览器回归 | 完成 | verification.log / unit-results.json / e2e-results.json |
-| T130 | 真实后端登录、刷新与权限联调 | 未验证 | 缺已授权真实测试环境或实际设备；参见C068–C070 |
+| T130 | 真实后端登录、刷新与权限联调 | 部分验证 | 隔离 PostgreSQL + 实际 WebUI，三浏览器注册/管理员登录/身份/刷新/退出通过；真实业务配置和完整权限联调未验收；见 [认证集成修复](login-security-integration.md) |
 | T131 | 真实 OIDC 同意与拒绝联调 | 未验证 | 缺已授权真实测试环境或实际设备；参见C068–C070 |
 | T132 | 检查真实桌面与移动设备 | 未验证 | 缺已授权真实测试环境或实际设备；参见C068–C070 |
 | T133 | 编写逐项验收报告 | 完成 | [逐项验收报告](acceptance-report.md) |
 
 证据与实际聚合用例见 [索引](evidence/after/test-index.md)、[执行说明](evidence/README.md)。源码接口名和测试文件的实施差异记录在plan/task补充说明中。
+
+2026-11-08 认证联调补充：已修复默认 API 地址/HTML 静态兜底、启动未注入健康时钟的 0ms 503、CSRF 缺失、HTTP WebKit Cookie 拒收、长 JWT 无法保存与退出请求被会话取消。前端构建和 Rust 三种启动入口已验证，完整记录见 [路由修复](login-routing-fix.md) 与 [认证集成修复](login-security-integration.md)。未向用户业务后端提交写请求或改动真实配置。
+
+2026-11-08 登录 403 续修：补齐显式本机开发模式下同协议/端口的 localhost 和 loopback IP 来源兼容；浏览器校验拒绝返回具体错误码、中文提示和无凭据日志。前端 66 项、Rust 库 43 项通过；隔离三浏览器的 IP/localhost 六组认证流程和 WebKit Secure Cookie 拒收提示通过，见 [403 续修](login-csrf-403-fix.md)。T130 继续为部分验证。

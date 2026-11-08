@@ -10,7 +10,7 @@ export async function keyboardTab(page: Page, browserName: string) {
 }
 export const stamp = '2026-11-08 09:30:00'
 export async function mockBusiness(page: Page, authenticated = true) {
-    const calls: { path: string; method: string; body: Record<string, unknown>; query: string }[] = [],
+    const calls: { path: string; method: string; body: Record<string, unknown>; query: string; csrf: string | undefined }[] = [],
         unhandled: string[] = []
     const pageErrors: string[] = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
@@ -123,7 +123,7 @@ export async function mockBusiness(page: Page, authenticated = true) {
             path = url.pathname.replace(/^\/api\/v1/, '')
         const method = request.method(),
             body = request.postDataJSON() ?? {}
-        calls.push({ path, method, body, query: url.search })
+        calls.push({ path, method, body, query: url.search, csrf: request.headers()['x-csrf-token'] })
         const failureKey = method + ' ' + path,
             delay = delays.get(failureKey) ?? delays.get(path + url.search) ?? 0
         const held = heldReads.get(failureKey)
@@ -166,7 +166,8 @@ export async function mockBusiness(page: Page, authenticated = true) {
             }
         }
         let data: unknown
-        if (path === '/user' && method === 'GET') data = { ...users[0], ...identity }
+        if (path === '/csrf' && method === 'GET') data = { csrf_token: 'TEST_CSRF_PROOF' }
+        else if (path === '/user' && method === 'GET') data = { ...users[0], ...identity }
         else if (path === '/user' && method === 'PATCH') data = {}
         else if (path === '/user' && method === 'POST') {
             const user = {
@@ -361,9 +362,10 @@ export async function mockBusiness(page: Page, authenticated = true) {
                 username: String(body.username),
                 nickname: '测试管理员',
                 access_token: 'TEST_LOGIN_TOKEN',
+                csrf_token: 'TEST_LOGIN_CSRF',
             }
         } else if (['/register', '/kickout', '/logout'].includes(path)) data = {}
-        else if (path === '/refresh') data = { access_token: 'TEST_REFRESH_TOKEN' }
+        else if (path === '/refresh') data = { access_token: 'TEST_REFRESH_TOKEN', csrf_token: 'TEST_REFRESH_CSRF' }
         else {
             unhandled.push(method + ' ' + url.href)
             await route.fulfill({ status: 501, body: 'Missing mock: ' + path })

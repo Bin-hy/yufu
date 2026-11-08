@@ -684,7 +684,7 @@ async fn confirm_end_session(
         "<!doctype html><html><body data-committed-at=\"{}\" data-effective-by=\"{}\"><script>localStorage.removeItem('userInfo');for(const part of document.cookie.split(';')){{const name=part.trim().split('=',1)[0];if(name==='access_token'||name.endsWith('-token-key'))document.cookie=name+'=; Path=/; Max-Age=0; SameSite=Lax';}}window.location.replace({redirect});</script></body></html>",
         receipt.committed_at, receipt.effective_by
     );
-    let mut headers = browser::clear_session_cookies();
+    let mut headers = browser::clear_session_cookies(&state)?;
     headers.insert("x-frame-options", http::HeaderValue::from_static("DENY"));
     Ok((headers, Html(body)))
 }

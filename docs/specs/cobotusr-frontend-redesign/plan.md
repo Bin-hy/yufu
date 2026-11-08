@@ -211,6 +211,8 @@ loader 每次收到新 signal。新查询、页面失活/关闭、会话切换�
 
 现有 token 刷新和 bearer/cookie 约定沿用；只补与改版必要的取消处理、错误归属、队列释放及会话清理调用。刷新失败时清空订阅且 resolve/reject 全部等待者；取消的原请求不在刷新成功后被重新发送。
 
+2026-11-08 登录集成修订：隔离真实后端返回的普通访问 JWT 为 7,341 字节、管理员 JWT 为 18,715 字节，浏览器无法写入既有单个 Cookie。用户已授权继续修复登录链路；访问 Token 改存当前标签页 sessionStorage，并支持内存回退与旧 Cookie 迁移。Bearer Authorization 及服务端 HttpOnly 刷新 Cookie 继续沿用。CSRF 证明保持请求客户端内存缓存，所有凭据仍禁止进入 localStorage 工作台快照或 URL。存储禁用时当前页面可用，刷新后恢复不保证；该存储并不具备 HttpOnly 保护。具体原因、时钟监控与本机 Cookie 策略见 [认证集成修复](login-security-integration.md)。
+
 ## 弹窗与基础组件契约
 
 `UiDialog` 保留现有 open/title/size/slots 等入口，新增 `description`、`busy`、`error`，由业务控制 open。`confirm` 仅发事件，不自动关闭；迁移所有调用方并移除目前“校验失败立即重开”补丁。默认非提交状态支持 Esc 和合理的外部点击；busy 阻止关闭与确认。不能用 UiButton 嵌套 UiButton/button。
