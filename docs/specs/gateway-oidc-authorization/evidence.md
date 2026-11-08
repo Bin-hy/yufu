@@ -77,3 +77,13 @@ checklist.md 全部条目保持未验证。只在取得对应实际证据后勾�
 - 最终回归：`cargo test -p auth --lib --locked` 退出码0，32 passed、0 failed、0 ignored；`cargo test --test mod --locked -- --test-threads=4` 退出码0，51 passed、0 failed、0 ignored。
 - `cargo clippy -p auth --lib --tests --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 均退出码0。
 - T09、T10组件任务已完成（累计10/80）；端到端checklist继续保持未验证。
+
+## T11–T12 纯 RBAC/ABAC 判定（2026-11-08）
+
+- 先新增重叠allow/deny、当前角色/上界、所有者和版本约束测试；首轮 `cargo test -p auth --lib security_t11 --locked` 退出码101，待实现Policy类型未定义。
+- 实现可信PolicySnapshot与纯evaluate_policy；要求已登记操作、应用一致、凭据上界和系统资源约束同时满足。扫描所有匹配拒绝后才返回主体允许或角色允许，最后默认拒绝；没有超级管理员跳过分支。
+- 新增10项T11/T12测试：规则排列及宽拒绝/窄允许、无关拒绝、用户允许优先级、角色新增/撤销、旧凭据范围不扩张、未知操作、应用/网关/设备/种类隔离、完整身份命名空间、所有者/能力/目标绑定版本，以及缺少条件拒绝所需事实时失败关闭。
+- PolicySnapshot和资源事实没有请求反序列化入口。当前凭据/根状态与一致快照加载仍需生产仓储及适配器；任务读取的强制所有者约束由资源适配器提供。未将共享判定器完成等同于现有路由已修复。
+- `cargo test -p auth --lib --locked`：退出码0，42 passed、0 failed、0 ignored；`cargo clippy -p auth --lib --tests --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 均退出码0。
+- 额外运行 `cargo test -p auth --doc --locked`：退出码101，0 passed、8 failed、1 ignored。失败来自现有示例中的私有根导入、my_crate占位、缺失泛型/字段/分号及未声明sea_orm依赖；这些示例未被本组修改。完整质量门禁仍未通过，后续T79需修正，不能记为通过。
+- T11、T12组件任务已完成（累计12/80）；实际IdP URI/application权限加载与路由接入仍在后续任务中。

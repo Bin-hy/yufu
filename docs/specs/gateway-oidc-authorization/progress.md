@@ -14,8 +14,8 @@
 | T08 | 完成 | 见 evidence.md |
 | T09 | 完成 | 见 evidence.md |
 | T10 | 完成 | 见 evidence.md |
-| T11 | 未开始 | 尚未执行 |
-| T12 | 未开始 | 尚未执行 |
+| T11 | 完成 | 见 evidence.md |
+| T12 | 完成 | 见 evidence.md |
 | T13 | 未开始 | 尚未执行 |
 | T14 | 未开始 | 尚未执行 |
 | T15 | 未开始 | 尚未执行 |

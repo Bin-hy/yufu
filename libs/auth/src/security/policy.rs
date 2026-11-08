@@ -122,6 +122,26 @@ impl ResourceTarget {
         }
     }
 
+    fn gateway_id(&self) -> Option<&str> {
+        match self {
+            Self::Gateway { gateway_id }
+            | Self::Device { gateway_id, .. }
+            | Self::Tool { gateway_id, .. }
+            | Self::Task { gateway_id, .. }
+            | Self::GatewayKey { gateway_id, .. } => Some(gateway_id),
+            _ => None,
+        }
+    }
+
+    fn device_id(&self) -> Option<&str> {
+        match self {
+            Self::Device { device_id, .. }
+            | Self::Tool { device_id, .. }
+            | Self::Task { device_id, .. } => Some(device_id),
+            _ => None,
+        }
+    }
+
     fn validate(&self) -> Result<(), SecurityError> {
         match self {
             Self::Application => Ok(()),
@@ -289,6 +309,31 @@ impl ResourceSelector {
     pub fn scope(&self) -> &ResourceScope {
         &self.scope
     }
+
+    /// Scope is explicit: gateway/device scopes match only their declared kind,
+    /// never every descendant kind or another application's identical identifiers.
+    pub fn matches(&self, resource: &ResourceRef) -> bool {
+        if self.application != resource.application {
+            return false;
+        }
+        let target = resource.target();
+        match &self.scope {
+            ResourceScope::Exact { target: expected } => expected == target,
+            ResourceScope::Application { kind } => *kind == target.kind(),
+            ResourceScope::Gateway { gateway_id, kind } => {
+                *kind == target.kind() && target.gateway_id() == Some(gateway_id.as_str())
+            }
+            ResourceScope::Device {
+                gateway_id,
+                device_id,
+                kind,
+            } => {
+                *kind == target.kind()
+                    && target.gateway_id() == Some(gateway_id.as_str())
+                    && target.device_id() == Some(device_id.as_str())
+            }
+        }
+    }
 }
 impl TryFrom<SelectorWire> for ResourceSelector {
     type Error = SecurityError;
@@ -349,6 +394,18 @@ impl CredentialBounds {
     pub fn grants(&self) -> &[ScopedOperation] {
         &self.grants
     }
+
+    pub fn allows(&self, operation: &OperationId, resource: &ResourceRef) -> bool {
+        self.grants
+            .iter()
+            .any(|grant| grant.matches(operation, resource))
+    }
+}
+
+impl ScopedOperation {
+    fn matches(&self, operation: &OperationId, resource: &ResourceRef) -> bool {
+        self.operation == *operation && self.resources.iter().any(|scope| scope.matches(resource))
+    }
 }
 
 /// Server-loaded facts, deliberately not deserializable from a client request.
@@ -364,6 +421,252 @@ pub struct OperationContext {
     pub operation: OperationId,
     pub resource: ResourceRef,
     pub facts: ResourceFacts,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PolicySubject {
+    Principal(PrincipalRef),
+    Role(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleEffect {
+    Allow,
+    Deny,
+}
+
+/// Only trusted resource facts satisfy these constraints. A missing fact is
+/// indeterminate, not evidence that a conditional deny does not apply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResourceConstraint {
+    OwnerIsActor,
+    CapabilityRevision(String),
+    TargetBindingRevision(String),
+}
+impl ResourceConstraint {
+    fn validate(&self) -> Result<(), SecurityError> {
+        match self {
+            Self::OwnerIsActor => Ok(()),
+            Self::CapabilityRevision(value) | Self::TargetBindingRevision(value) => {
+                validate_component(value)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PolicyRule {
+    subject: PolicySubject,
+    effect: RuleEffect,
+    grant: ScopedOperation,
+    constraints: Vec<ResourceConstraint>,
+}
+impl PolicyRule {
+    pub fn new(
+        subject: PolicySubject,
+        effect: RuleEffect,
+        grant: ScopedOperation,
+        constraints: Vec<ResourceConstraint>,
+    ) -> Result<Self, SecurityError> {
+        if let PolicySubject::Role(role) = &subject {
+            validate_component(role)?;
+        }
+        for constraint in &constraints {
+            constraint.validate()?;
+        }
+        Ok(Self {
+            subject,
+            effect,
+            grant,
+            constraints,
+        })
+    }
+}
+
+/// Loaded from one consistent trusted snapshot; never deserialized from requests.
+/// Credential/root liveness and snapshot freshness must be checked by the caller.
+/// Resource adapters supply mandatory constraints (e.g. OwnerIsActor for task:read).
+#[derive(Debug, Clone)]
+pub struct PolicySnapshot {
+    principal: PrincipalRef,
+    application: String,
+    current_roles: Vec<String>,
+    registered_operations: Vec<OperationId>,
+    credential_bounds: CredentialBounds,
+    rules: Vec<PolicyRule>,
+    constraints: Vec<ResourceConstraint>,
+}
+impl PolicySnapshot {
+    /// The initial snapshot has no registered operations or current grants.
+    pub fn new(
+        principal: PrincipalRef,
+        application: impl Into<String>,
+        credential_bounds: CredentialBounds,
+    ) -> Result<Self, SecurityError> {
+        let application = application.into();
+        validate_component(&application)?;
+        Ok(Self {
+            principal,
+            application,
+            credential_bounds,
+            current_roles: vec![],
+            registered_operations: vec![],
+            rules: vec![],
+            constraints: vec![],
+        })
+    }
+    pub fn with_roles(mut self, roles: Vec<String>) -> Result<Self, SecurityError> {
+        for role in &roles {
+            validate_component(role)?;
+        }
+        self.current_roles = roles;
+        Ok(self)
+    }
+    pub fn with_registered_operations(mut self, operations: Vec<OperationId>) -> Self {
+        self.registered_operations = operations;
+        self
+    }
+    pub fn with_rules(mut self, rules: Vec<PolicyRule>) -> Self {
+        self.rules = rules;
+        self
+    }
+    pub fn with_constraints(
+        mut self,
+        constraints: Vec<ResourceConstraint>,
+    ) -> Result<Self, SecurityError> {
+        for constraint in &constraints {
+            constraint.validate()?;
+        }
+        self.constraints = constraints;
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyAllowReason {
+    Principal,
+    Role,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyDenyReason {
+    ApplicationMismatch,
+    UnknownOperation,
+    CredentialBounds,
+    ResourceConstraint,
+    MissingResourceFacts,
+    ExplicitDeny,
+    NoGrant,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyEffect {
+    Allow(PolicyAllowReason),
+    Deny(PolicyDenyReason),
+}
+
+#[derive(Clone, Copy)]
+enum ConstraintMatch {
+    Match,
+    NoMatch,
+    MissingFacts,
+}
+fn match_constraints(
+    constraints: &[ResourceConstraint],
+    principal: &PrincipalRef,
+    facts: &ResourceFacts,
+) -> ConstraintMatch {
+    let mut missing = false;
+    for constraint in constraints {
+        let matches = match constraint {
+            ResourceConstraint::OwnerIsActor => {
+                facts.owner.as_ref().map(|owner| owner == principal)
+            }
+            ResourceConstraint::CapabilityRevision(expected) => facts
+                .capability_revision
+                .as_ref()
+                .map(|value| value == expected),
+            ResourceConstraint::TargetBindingRevision(expected) => facts
+                .target_binding_revision
+                .as_ref()
+                .map(|value| value == expected),
+        };
+        match matches {
+            Some(false) => return ConstraintMatch::NoMatch,
+            Some(true) => {}
+            None => missing = true,
+        }
+    }
+    if missing {
+        ConstraintMatch::MissingFacts
+    } else {
+        ConstraintMatch::Match
+    }
+}
+
+/// Pure RBAC/ABAC intersection. There is deliberately no super-admin bypass.
+/// Dependency errors are handled before constructing a snapshot, not converted
+/// into policy effects here. All matching denies are examined before any allow.
+pub fn evaluate_policy(snapshot: &PolicySnapshot, operation: &OperationContext) -> PolicyEffect {
+    use PolicyDenyReason as Deny;
+    if snapshot.application != operation.resource.application {
+        return PolicyEffect::Deny(Deny::ApplicationMismatch);
+    }
+    if !snapshot
+        .registered_operations
+        .contains(&operation.operation)
+    {
+        return PolicyEffect::Deny(Deny::UnknownOperation);
+    }
+    if !snapshot
+        .credential_bounds
+        .allows(&operation.operation, &operation.resource)
+    {
+        return PolicyEffect::Deny(Deny::CredentialBounds);
+    }
+    match match_constraints(&snapshot.constraints, &snapshot.principal, &operation.facts) {
+        ConstraintMatch::NoMatch => return PolicyEffect::Deny(Deny::ResourceConstraint),
+        ConstraintMatch::MissingFacts => return PolicyEffect::Deny(Deny::MissingResourceFacts),
+        ConstraintMatch::Match => {}
+    }
+    let mut principal_allow = false;
+    let mut role_allow = false;
+    let mut missing_deny_facts = false;
+    let mut missing_allow_facts = false;
+    for rule in &snapshot.rules {
+        let is_principal = match &rule.subject {
+            PolicySubject::Principal(principal) if principal == &snapshot.principal => true,
+            PolicySubject::Role(role) if snapshot.current_roles.contains(role) => false,
+            _ => continue,
+        };
+        if !rule
+            .grant
+            .matches(&operation.operation, &operation.resource)
+        {
+            continue;
+        }
+        match match_constraints(&rule.constraints, &snapshot.principal, &operation.facts) {
+            ConstraintMatch::NoMatch => {}
+            ConstraintMatch::MissingFacts => match rule.effect {
+                RuleEffect::Deny => missing_deny_facts = true,
+                RuleEffect::Allow => missing_allow_facts = true,
+            },
+            ConstraintMatch::Match => match rule.effect {
+                RuleEffect::Deny => return PolicyEffect::Deny(Deny::ExplicitDeny),
+                RuleEffect::Allow if is_principal => principal_allow = true,
+                RuleEffect::Allow => role_allow = true,
+            },
+        }
+    }
+    if missing_deny_facts {
+        PolicyEffect::Deny(Deny::MissingResourceFacts)
+    } else if principal_allow {
+        PolicyEffect::Allow(PolicyAllowReason::Principal)
+    } else if role_allow {
+        PolicyEffect::Allow(PolicyAllowReason::Role)
+    } else if missing_allow_facts {
+        PolicyEffect::Deny(Deny::MissingResourceFacts)
+    } else {
+        PolicyEffect::Deny(Deny::NoGrant)
+    }
 }
 
 #[cfg(test)]
@@ -434,5 +737,563 @@ mod tests {
             .is_err()
         );
         assert!(CredentialBounds::new(vec![]).grants().is_empty());
+    }
+
+    fn actor(subject: &str) -> PrincipalRef {
+        PrincipalRef::new(
+            "https://idp.test",
+            super::super::identity::PrincipalKind::User,
+            subject,
+        )
+        .unwrap()
+    }
+    fn device(application: &str, gateway: &str, id: &str) -> ResourceRef {
+        ResourceRef::new(
+            application,
+            ResourceTarget::Device {
+                gateway_id: gateway.into(),
+                device_id: id.into(),
+            },
+        )
+        .unwrap()
+    }
+    fn grant(operation: &str, resource: &ResourceRef) -> ScopedOperation {
+        ScopedOperation::new(
+            OperationId::new(operation).unwrap(),
+            vec![
+                ResourceSelector::new(
+                    resource.application(),
+                    ResourceScope::Exact {
+                        target: resource.target().clone(),
+                    },
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap()
+    }
+    fn rule(subject: PolicySubject, effect: RuleEffect, grant: ScopedOperation) -> PolicyRule {
+        PolicyRule::new(subject, effect, grant, vec![]).unwrap()
+    }
+    fn snapshot(resource: &ResourceRef, operation: &str) -> PolicySnapshot {
+        PolicySnapshot::new(
+            actor("alice"),
+            resource.application(),
+            CredentialBounds::new(vec![grant(operation, resource)]),
+        )
+        .unwrap()
+        .with_registered_operations(vec![OperationId::new(operation).unwrap()])
+        .with_roles(vec!["operator".into(), "super_admin".into()])
+        .unwrap()
+    }
+    fn context(resource: ResourceRef, operation: &str) -> OperationContext {
+        OperationContext {
+            operation: OperationId::new(operation).unwrap(),
+            resource,
+            facts: ResourceFacts::default(),
+        }
+    }
+
+    #[test]
+    fn security_t11_every_matching_deny_precedes_user_and_super_admin_allows() {
+        let resource = device("app", "g", "d");
+        let user = PolicySubject::Principal(actor("alice"));
+        let role = PolicySubject::Role("super_admin".into());
+        let g = grant("device:read", &resource);
+        for denied in [user.clone(), role.clone()] {
+            let rules = vec![
+                rule(user.clone(), RuleEffect::Allow, g.clone()),
+                rule(role.clone(), RuleEffect::Allow, g.clone()),
+                rule(denied, RuleEffect::Deny, g.clone()),
+            ];
+            for offset in 0..rules.len() {
+                let mut reordered = rules.clone();
+                reordered.rotate_left(offset);
+                let s = snapshot(&resource, "device:read").with_rules(reordered);
+                assert_eq!(
+                    evaluate_policy(&s, &context(resource.clone(), "device:read")),
+                    PolicyEffect::Deny(PolicyDenyReason::ExplicitDeny)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn security_t11_user_allow_role_allow_and_default_deny_have_distinct_precedence() {
+        let resource = device("app", "g", "d");
+        let g = grant("device:read", &resource);
+        let mut s = snapshot(&resource, "device:read").with_rules(vec![rule(
+            PolicySubject::Role("operator".into()),
+            RuleEffect::Allow,
+            g.clone(),
+        )]);
+        let ctx = context(resource.clone(), "device:read");
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Allow(PolicyAllowReason::Role)
+        );
+        s.rules.push(rule(
+            PolicySubject::Principal(actor("alice")),
+            RuleEffect::Allow,
+            g,
+        ));
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Allow(PolicyAllowReason::Principal)
+        );
+        s.rules.clear();
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::NoGrant)
+        );
+    }
+
+    #[test]
+    fn security_t11_unrelated_denies_do_not_override_a_valid_grant() {
+        let resource = device("app", "g", "d");
+        let g = grant("device:read", &resource);
+        let rules = vec![
+            rule(
+                PolicySubject::Principal(actor("alice")),
+                RuleEffect::Allow,
+                g.clone(),
+            ),
+            rule(
+                PolicySubject::Principal(actor("bob")),
+                RuleEffect::Deny,
+                g.clone(),
+            ),
+            rule(
+                PolicySubject::Role("not_assigned".into()),
+                RuleEffect::Deny,
+                g,
+            ),
+            rule(
+                PolicySubject::Role("operator".into()),
+                RuleEffect::Deny,
+                grant("device:write", &resource),
+            ),
+            rule(
+                PolicySubject::Role("operator".into()),
+                RuleEffect::Deny,
+                grant("device:read", &device("app", "g", "other")),
+            ),
+            rule(
+                PolicySubject::Role("operator".into()),
+                RuleEffect::Deny,
+                grant("device:read", &device("other-app", "g", "d")),
+            ),
+        ];
+        assert_eq!(
+            evaluate_policy(
+                &snapshot(&resource, "device:read").with_rules(rules),
+                &context(resource.clone(), "device:read")
+            ),
+            PolicyEffect::Allow(PolicyAllowReason::Principal)
+        );
+    }
+
+    #[test]
+    fn security_t11_broad_deny_beats_narrow_user_allow_in_any_rule_order() {
+        let resource = device("app", "g", "d");
+        let broad = ScopedOperation::new(
+            OperationId::new("device:read").unwrap(),
+            vec![
+                ResourceSelector::new(
+                    "app",
+                    ResourceScope::Gateway {
+                        gateway_id: "g".into(),
+                        kind: ResourceKind::Device,
+                    },
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap();
+        let rules = vec![
+            rule(
+                PolicySubject::Principal(actor("alice")),
+                RuleEffect::Allow,
+                grant("device:read", &resource),
+            ),
+            rule(
+                PolicySubject::Role("operator".into()),
+                RuleEffect::Deny,
+                broad,
+            ),
+        ];
+        for offset in 0..rules.len() {
+            let mut reordered = rules.clone();
+            reordered.rotate_left(offset);
+            assert_eq!(
+                evaluate_policy(
+                    &snapshot(&resource, "device:read").with_rules(reordered),
+                    &context(resource.clone(), "device:read")
+                ),
+                PolicyEffect::Deny(PolicyDenyReason::ExplicitDeny)
+            );
+        }
+    }
+
+    #[test]
+    fn security_t12_current_roles_and_signed_bounds_are_both_required() {
+        let resource = device("app", "g", "d");
+        let ctx = context(resource.clone(), "device:write");
+        let rules = vec![rule(
+            PolicySubject::Role("operator".into()),
+            RuleEffect::Allow,
+            grant("device:write", &resource),
+        )];
+        let old = snapshot(&resource, "device:read")
+            .with_registered_operations(vec![ctx.operation.clone()])
+            .with_rules(rules.clone());
+        assert_eq!(
+            evaluate_policy(&old, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::CredentialBounds)
+        );
+        let fresh = snapshot(&resource, "device:write").with_rules(rules);
+        assert_eq!(
+            evaluate_policy(&fresh, &ctx),
+            PolicyEffect::Allow(PolicyAllowReason::Role)
+        );
+        let revoked = fresh.with_roles(vec![]).unwrap();
+        assert_eq!(
+            evaluate_policy(&revoked, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::NoGrant)
+        );
+        let direct = revoked.with_rules(vec![rule(
+            PolicySubject::Principal(actor("alice")),
+            RuleEffect::Allow,
+            ScopedOperation::new(
+                ctx.operation.clone(),
+                vec![
+                    ResourceSelector::new(
+                        "app",
+                        ResourceScope::Application {
+                            kind: ResourceKind::Device,
+                        },
+                    )
+                    .unwrap(),
+                ],
+            )
+            .unwrap(),
+        )]);
+        assert_eq!(
+            evaluate_policy(&direct, &ctx),
+            PolicyEffect::Allow(PolicyAllowReason::Principal)
+        );
+        for out_of_bounds in [
+            device("app", "other-gateway", "d"),
+            device("app", "g", "other-device"),
+        ] {
+            assert_eq!(
+                evaluate_policy(&direct, &context(out_of_bounds, "device:write")),
+                PolicyEffect::Deny(PolicyDenyReason::CredentialBounds)
+            );
+        }
+        let empty = PolicySnapshot::new(actor("alice"), "app", CredentialBounds::new(vec![]))
+            .unwrap()
+            .with_registered_operations(vec![ctx.operation.clone()])
+            .with_rules(vec![rule(
+                PolicySubject::Principal(actor("alice")),
+                RuleEffect::Allow,
+                grant("device:write", &resource),
+            )]);
+        assert_eq!(
+            evaluate_policy(&empty, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::CredentialBounds)
+        );
+    }
+
+    #[test]
+    fn security_t12_scope_matching_never_crosses_application_gateway_device_or_kind() {
+        let target = device("app", "g", "d");
+        for scope in [
+            ResourceScope::Exact {
+                target: target.target().clone(),
+            },
+            ResourceScope::Application {
+                kind: ResourceKind::Device,
+            },
+            ResourceScope::Gateway {
+                gateway_id: "g".into(),
+                kind: ResourceKind::Device,
+            },
+            ResourceScope::Device {
+                gateway_id: "g".into(),
+                device_id: "d".into(),
+                kind: ResourceKind::Device,
+            },
+        ] {
+            let selector = ResourceSelector::new("app", scope.clone()).unwrap();
+            assert!(selector.matches(&target));
+            assert!(!selector.matches(&device("other", "g", "d")));
+            assert!(
+                !selector.matches(
+                    &ResourceRef::new(
+                        "app",
+                        ResourceTarget::Tool {
+                            gateway_id: "g".into(),
+                            device_id: "d".into(),
+                            tool_name: "t".into(),
+                        }
+                    )
+                    .unwrap()
+                )
+            );
+            if !matches!(scope, ResourceScope::Application { .. }) {
+                assert!(!selector.matches(&device("app", "other", "d")));
+            }
+            if matches!(
+                scope,
+                ResourceScope::Exact { .. } | ResourceScope::Device { .. }
+            ) {
+                assert!(!selector.matches(&device("app", "g", "other")));
+            }
+        }
+        let s = snapshot(&target, "device:read").with_rules(vec![rule(
+            PolicySubject::Role("super_admin".into()),
+            RuleEffect::Allow,
+            grant("device:read", &target),
+        )]);
+        assert_eq!(
+            evaluate_policy(&s, &context(device("other", "g", "d"), "device:read")),
+            PolicyEffect::Deny(PolicyDenyReason::ApplicationMismatch)
+        );
+        let unknown = snapshot(&target, "device:read")
+            .with_registered_operations(vec![])
+            .with_rules(s.rules);
+        assert_eq!(
+            evaluate_policy(&unknown, &context(target, "device:read")),
+            PolicyEffect::Deny(PolicyDenyReason::UnknownOperation)
+        );
+    }
+
+    #[test]
+    fn security_t12_owner_and_version_constraints_cannot_be_bypassed_by_role_allow() {
+        let resource = ResourceRef::new(
+            "app",
+            ResourceTarget::Task {
+                gateway_id: "g".into(),
+                device_id: "d".into(),
+                task_id: "task".into(),
+            },
+        )
+        .unwrap();
+        let s = snapshot(&resource, "task:read")
+            .with_rules(vec![rule(
+                PolicySubject::Role("super_admin".into()),
+                RuleEffect::Allow,
+                grant("task:read", &resource),
+            )])
+            .with_constraints(vec![
+                ResourceConstraint::OwnerIsActor,
+                ResourceConstraint::CapabilityRevision("cap1".into()),
+                ResourceConstraint::TargetBindingRevision("target1".into()),
+            ])
+            .unwrap();
+        let mut ctx = context(resource, "task:read");
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::MissingResourceFacts)
+        );
+        ctx.facts = ResourceFacts {
+            owner: Some(actor("alice")),
+            capability_revision: Some("cap1".into()),
+            target_binding_revision: Some("target1".into()),
+        };
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Allow(PolicyAllowReason::Role)
+        );
+        ctx.facts.owner = Some(actor("bob"));
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::ResourceConstraint)
+        );
+        ctx.facts.owner = Some(actor("alice"));
+        ctx.facts.target_binding_revision = Some("target2".into());
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::ResourceConstraint)
+        );
+    }
+
+    #[test]
+    fn security_t12_missing_deny_facts_fail_closed_and_missing_allow_facts_do_not_grant() {
+        let resource = device("app", "g", "d");
+        let conditional = PolicyRule::new(
+            PolicySubject::Role("operator".into()),
+            RuleEffect::Deny,
+            grant("device:read", &resource),
+            vec![ResourceConstraint::OwnerIsActor],
+        )
+        .unwrap();
+        let allow = rule(
+            PolicySubject::Principal(actor("alice")),
+            RuleEffect::Allow,
+            grant("device:read", &resource),
+        );
+        let s = snapshot(&resource, "device:read").with_rules(vec![allow, conditional]);
+        let mut ctx = context(resource.clone(), "device:read");
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::MissingResourceFacts)
+        );
+        ctx.facts.owner = Some(actor("bob"));
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Allow(PolicyAllowReason::Principal)
+        );
+        ctx.facts.owner = Some(actor("alice"));
+        assert_eq!(
+            evaluate_policy(&s, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::ExplicitDeny)
+        );
+        let missing_allow = snapshot(&resource, "device:read").with_rules(vec![
+            PolicyRule::new(
+                PolicySubject::Principal(actor("alice")),
+                RuleEffect::Allow,
+                grant("device:read", &resource),
+                vec![ResourceConstraint::OwnerIsActor],
+            )
+            .unwrap(),
+        ]);
+        ctx.facts.owner = None;
+        assert_eq!(
+            evaluate_policy(&missing_allow, &ctx),
+            PolicyEffect::Deny(PolicyDenyReason::MissingResourceFacts)
+        );
+        assert!(
+            PolicyRule::new(
+                PolicySubject::Role("".into()),
+                RuleEffect::Allow,
+                grant("device:read", &resource),
+                vec![]
+            )
+            .is_err()
+        );
+        assert!(
+            snapshot(&resource, "device:read")
+                .with_constraints(vec![ResourceConstraint::CapabilityRevision("".into())])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn security_t12_principal_and_owner_matching_uses_full_identity_namespace() {
+        use super::super::identity::PrincipalKind;
+        let resource = device("app", "g", "d");
+        for impostor in [
+            PrincipalRef::new("https://other.test", PrincipalKind::User, "alice").unwrap(),
+            PrincipalRef::new("https://idp.test", PrincipalKind::Machine, "alice").unwrap(),
+        ] {
+            let s = snapshot(&resource, "device:read").with_rules(vec![rule(
+                PolicySubject::Principal(impostor.clone()),
+                RuleEffect::Allow,
+                grant("device:read", &resource),
+            )]);
+            let mut ctx = context(resource.clone(), "device:read");
+            assert_eq!(
+                evaluate_policy(&s, &ctx),
+                PolicyEffect::Deny(PolicyDenyReason::NoGrant)
+            );
+            let constrained = s
+                .with_rules(vec![rule(
+                    PolicySubject::Role("operator".into()),
+                    RuleEffect::Allow,
+                    grant("device:read", &resource),
+                )])
+                .with_constraints(vec![ResourceConstraint::OwnerIsActor])
+                .unwrap();
+            ctx.facts.owner = Some(impostor);
+            assert_eq!(
+                evaluate_policy(&constrained, &ctx),
+                PolicyEffect::Deny(PolicyDenyReason::ResourceConstraint)
+            );
+        }
+    }
+
+    #[test]
+    fn security_t12_gateway_and_device_descendant_scopes_remain_typed_and_exact() {
+        for target in [
+            ResourceTarget::Gateway {
+                gateway_id: "g".into(),
+            },
+            ResourceTarget::Tool {
+                gateway_id: "g".into(),
+                device_id: "d".into(),
+                tool_name: "t".into(),
+            },
+            ResourceTarget::Task {
+                gateway_id: "g".into(),
+                device_id: "d".into(),
+                task_id: "id".into(),
+            },
+            ResourceTarget::GatewayKey {
+                gateway_id: "g".into(),
+                kid: "key".into(),
+            },
+        ] {
+            let resource = ResourceRef::new("app", target.clone()).unwrap();
+            let gateway_scope = ResourceSelector::new(
+                "app",
+                ResourceScope::Gateway {
+                    gateway_id: "g".into(),
+                    kind: target.kind(),
+                },
+            )
+            .unwrap();
+            assert!(gateway_scope.matches(&resource));
+            let other_gateway = ResourceSelector::new(
+                "app",
+                ResourceScope::Gateway {
+                    gateway_id: "g2".into(),
+                    kind: target.kind(),
+                },
+            )
+            .unwrap();
+            assert!(!other_gateway.matches(&resource));
+            if matches!(target.kind(), ResourceKind::Tool | ResourceKind::Task) {
+                for (id, expected) in [("d", true), ("d2", false)] {
+                    let scope = ResourceSelector::new(
+                        "app",
+                        ResourceScope::Device {
+                            gateway_id: "g".into(),
+                            device_id: id.into(),
+                            kind: target.kind(),
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(scope.matches(&resource), expected);
+                }
+            }
+        }
+        for target in [
+            ResourceTarget::Application,
+            ResourceTarget::IdpRoute {
+                route_id: "r".into(),
+            },
+            ResourceTarget::Role {
+                role_id: "r".into(),
+            },
+            ResourceTarget::Permission {
+                permission_id: "p".into(),
+            },
+            ResourceTarget::ServiceBinding {
+                client_id: "c".into(),
+            },
+        ] {
+            let selector = ResourceSelector::new(
+                "app",
+                ResourceScope::Exact {
+                    target: target.clone(),
+                },
+            )
+            .unwrap();
+            let resource = ResourceRef::new("app", target).unwrap();
+            assert!(selector.matches(&resource));
+            assert!(!selector.matches(&device("app", "g", "d")));
+        }
     }
 }
