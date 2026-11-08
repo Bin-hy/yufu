@@ -1,171 +1,215 @@
-import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios"
-import { getToken, setToken } from "@/common/cache/cookies"
-import { get, merge } from "lodash-es"
-import { useUserStore } from "@/pinia/stores/user"
-import { emitToast } from "@/utils/toast"
-import { router } from "@/router"
-import { refreshTokenRequest } from "@/pages/login/api"
-
-/** 退出登录并强制刷新页面（会重定向到登录页） */
-function logout() {
-  const userStore = useUserStore()
-  userStore.logout()
-  const currentRoute = router.currentRoute.value
-  // OIDC 登录页退出时保留 query 参数（避免 client_id 等 OIDC 参数丢失）
-  if (currentRoute.name === 'oidc-login') {
-    router.push({ name: 'oidc-login', query: currentRoute.query })
-  } else {
-    router.push('/login')
-  }
+import axios, { type AxiosRequestConfig, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
+import { getToken, setToken } from '@/common/cache/cookies'
+import { emitToast } from '@/utils/toast'
+import { expireSession, sessionEpoch } from '@/workspace/session'
+export interface RequestOptions extends AxiosRequestConfig {
+    errorPresentation?: 'local' | 'global'
 }
-
-/** 创建请求实例 */
-function createInstance() {
-  // 创建一个 axios 实例命名为 instance
-  const instance = axios.create()
-  // 刷新令牌并发控制
-  let isRefreshing = false
-  let refreshPromise: Promise<string> | null = null
-  const subscribers: Array<(token: string) => void> = []
-  const subscribeTokenRefresh = (cb: (token: string) => void) => { subscribers.push(cb) }
-  const onRefreshed = (token: string) => { subscribers.forEach(cb => cb(token)); subscribers.length = 0 }
-  // 请求拦截器
-  instance.interceptors.request.use(
-    // 发送之前
-    config => config,
-    // 发送失败
-    error => Promise.reject(error)
-  )
-  // 响应拦截器（可根据具体业务作出相应的调整）
-  instance.interceptors.response.use(
-    (response) => {
-      return response.data
-    },
-    (error) => {
-      const status = get(error, "response.status") as number | undefined
-      const message = get(error, "response.data") || get(error, "message") || "请求错误"
-      const originalConfig = (error?.config || {}) as AxiosRequestConfig & { _retry?: boolean }
-
-      if (status === 401) {
-        const reqUrl = String(get(error, "config.url") || "")
-        // 登录接口失败直接 reject，不走 refresh 逻辑
-        if (/login$/i.test(reqUrl)) {
-          return Promise.reject(error)
+type InternalRequest = InternalAxiosRequestConfig & {
+    _retry?: boolean
+    _epoch?: number
+    _skipAuthRefresh?: boolean
+    errorPresentation?: 'local' | 'global'
+}
+const csrfLifetime = 5 * 60 * 1000
+const htmlResponseMessage = '接口返回了 HTML 页面，请检查 API 地址或代理配置'
+const browserRejectionMessages: Record<string, string> = {
+    csrf_origin_missing: '请求缺少来源信息，请通过浏览器页面登录',
+    csrf_origin_invalid: '请求来源信息无效，请使用完整的服务地址访问',
+    csrf_origin_not_allowed: '当前访问地址未获授权，请使用服务地址或在 auth.origins 中配置完整来源（含端口）',
+    csrf_cookie_invalid: '浏览器认证 Cookie 无效，请清除此站点的 Cookie 后重试',
+    csrf_cookie_missing: '浏览器未发送认证 Cookie，请检查 Cookie 设置并使用同一地址访问',
+    csrf_cookie_requires_https: '浏览器未发送安全认证 Cookie；本机 HTTP 开发启动需加 --allow-insecure-loopback-cookies，其他环境请使用 HTTPS',
+    csrf_proof_missing: '请求缺少认证校验信息，请强制刷新页面后重试',
+    csrf_proof_mismatch: '认证校验信息已变化，请重新点击登录或刷新页面后重试',
+    csrf_proof_invalid: '认证校验信息已失效，请刷新页面后重试',
+}
+function isHtmlResponse(response?: { data?: unknown; headers?: Record<string, unknown> }) {
+    return (
+        String(response?.headers?.['content-type'] ?? '').toLowerCase().includes('text/html') ||
+        (typeof response?.data === 'string' && /^\s*(?:<!doctype\s+html|<html\b)/i.test(response.data))
+    )
+}
+export function createHttpClient(options?: {
+    adapter?: AxiosRequestConfig['adapter']
+    refresh?: () => Promise<string>
+}) {
+    const baseURL = import.meta.env.VITE_BASE_URL?.trim() || '/api/v1'
+    const instance: AxiosInstance = axios.create({ adapter: options?.adapter })
+    const proofs = new Map<string, { token: string; epoch: number; expiresAt: number }>()
+    const challenges = new Map<string, { epoch: number; promise: Promise<string> }>()
+    const presentedErrors = new WeakSet<object>()
+    function presentError(error: object, config: RequestOptions, message: string) {
+        if (config.errorPresentation !== 'local' && !presentedErrors.has(error)) {
+            presentedErrors.add(error)
+            emitToast({ type: 'error', message })
         }
-        // 避免刷新接口自身循环
-        if (/refresh$/i.test(reqUrl)) {
-          emitToast({ type: 'error', message: "登录已过期，请重新登录" })
-          setTimeout(() => { logout() }, 300)
-          return Promise.reject(error)
-        }
-        // 已重试仍失败则退出
-        if (originalConfig._retry) {
-          setTimeout(() => { logout() }, 0)
-          return Promise.reject(error)
-        }
-
-        if (!isRefreshing) {
-          isRefreshing = true
-          refreshPromise = refreshTokenRequest()
-            .then((data) => {
-              const newToken = data?.access_token
-              if (!newToken) throw new Error("刷新失败：未返回 access_token")
-              setToken(newToken)
-              isRefreshing = false
-              onRefreshed(newToken)
-              return newToken
-            })
-            .catch((e) => {
-              isRefreshing = false
-              emitToast({ type: 'error', message: "登录已过期，请重新登录" })
-              setTimeout(() => { logout() }, 0)
-              throw e
-            })
-        }
-
-        return new Promise((resolve, reject) => {
-          subscribeTokenRefresh((newToken) => {
-            if (!originalConfig.headers) originalConfig.headers = {}
-            originalConfig.headers["Authorization"] = `Bearer ${newToken}`
-            originalConfig._retry = true
-            resolve(instance(originalConfig))
-          })
-          refreshPromise?.catch(reject)
+    }
+    function proofKey(config: AxiosRequestConfig) {
+        return config.baseURL ?? baseURL
+    }
+    function rememberProof(config: InternalRequest, data: unknown) {
+        const token = (data as { csrf_token?: unknown } | null)?.csrf_token
+        if (typeof token === 'string' && token.trim())
+            proofs.set(proofKey(config), { token, epoch: config._epoch ?? sessionEpoch.value, expiresAt: Date.now() + csrfLifetime })
+    }
+    async function csrfProof(config: InternalRequest, epoch: number): Promise<string> {
+        const key = proofKey(config)
+        const saved = proofs.get(key)
+        if (saved?.epoch === epoch && saved.expiresAt > Date.now()) return saved.token
+        const pending = challenges.get(key)
+        if (pending?.epoch === epoch) return pending.promise
+        const promise = instance.request({
+            baseURL: key,
+            url: 'csrf',
+            method: 'GET',
+            timeout: 8000,
+            withCredentials: true,
+            errorPresentation: config.errorPresentation,
+            _epoch: epoch,
+            _skipAuthRefresh: true,
+        } as AxiosRequestConfig).then((data: unknown) => {
+            const token = (data as { csrf_token?: unknown } | null)?.csrf_token
+            if (typeof token !== 'string' || !token.trim()) throw new Error('认证服务未返回 CSRF 证明，请检查后端配置')
+            return token
+        }).finally(() => {
+            if (challenges.get(key)?.promise === promise) challenges.delete(key)
         })
-      }
-
-      // 其他状态码处理
-      switch (status) {
-        case 400:
-          error.message = "请求错误"
-          break
-        case 403:
-          error.message = message || "拒绝访问"
-          break
-        case 404:
-          error.message = "请求地址出错"
-          break
-        case 408:
-          error.message = "请求超时"
-          break
-        case 409:
-          error.message = message || "已存在"
-          break
-        case 500:
-          error.message = "服务器内部错误"
-          break
-        case 501:
-          error.message = "服务未实现"
-          break
-        case 502:
-          error.message = "网关错误"
-          break
-        case 503:
-          error.message = "服务不可用"
-          break
-        case 504:
-          error.message = "网关超时"
-          break
-        case 505:
-          error.message = "HTTP 版本不受支持"
-          break
-      }
-      emitToast({ type: 'error', message: error.message || String(message) })
-      return Promise.reject(error)
+        challenges.set(key, { epoch, promise })
+        return promise
     }
-  )
-  return instance
-}
-
-/** 创建 json 请求方法 */
-function createRequest(instance: AxiosInstance) {
-  return <T>(config: AxiosRequestConfig): Promise<T> => {
-    const token = getToken()
-    // 默认配置
-    const defaultConfig: AxiosRequestConfig = {
-      // 接口地址
-      baseURL: import.meta.env.VITE_BASE_URL,
-      // 请求头
-      headers: {
-        // 携带 Token
-        "Authorization": token ? `Bearer ${token}` : undefined,
-        "Content-Type": "application/json"
-      },
-      // 请求体
-      data: {},
-      // 请求超时
-      timeout: 8000,
-      // 跨域请求时是否携带 Cookies
-      withCredentials: true
+    instance.interceptors.request.use(async (raw) => {
+        const config = raw as InternalRequest
+        const epoch = config._epoch ?? sessionEpoch.value
+        config._epoch = epoch
+        if (epoch !== sessionEpoch.value || config.signal?.aborted)
+            throw new axios.CanceledError('会话已改变或请求已取消')
+        if (['post', 'put', 'patch', 'delete'].includes(String(config.method).toLowerCase())) {
+            const proof = await csrfProof(config, epoch)
+            if (epoch !== sessionEpoch.value || config.signal?.aborted)
+                throw new axios.CanceledError('会话已改变或请求已取消')
+            config.headers.set('X-CSRF-Token', proof)
+        }
+        return config
+    })
+    let refreshing: Promise<string> | null = null,
+        refreshingEpoch = -1
+    instance.interceptors.response.use(
+        (response) => {
+            if (
+                (response.config as RequestOptions & { _epoch?: number })._epoch !== undefined &&
+                (response.config as RequestOptions & { _epoch?: number })._epoch !==
+                    sessionEpoch.value
+            )
+                throw new axios.CanceledError('会话已改变')
+            if (isHtmlResponse(response)) {
+                const error = new axios.AxiosError(
+                    htmlResponseMessage,
+                    'ERR_API_HTML_RESPONSE',
+                    response.config,
+                    response.request,
+                    response,
+                )
+                presentError(error, response.config, htmlResponseMessage)
+                throw error
+            }
+            const config = response.config as InternalRequest
+            rememberProof(config, response.data)
+            if (/(?:^|\/)logout(?:\?|$)/i.test(String(config.url))) proofs.delete(proofKey(config))
+            return response.data
+        },
+        async (error) => {
+            if (axios.isCancel(error) || error?.code === 'ERR_CANCELED') throw error
+            const original = (error.config ?? {}) as RequestOptions & {
+                _retry?: boolean
+                _epoch?: number
+                _skipAuthRefresh?: boolean
+            }
+            const epoch = original._epoch ?? sessionEpoch.value
+            if (epoch !== sessionEpoch.value) throw new axios.CanceledError('会话已改变')
+            const status = error.response?.status
+            const url = String(original.url ?? '')
+            if (['post', 'put', 'patch', 'delete'].includes(String(original.method).toLowerCase())
+                && (status === 403 || !error.response))
+                proofs.delete(proofKey(original))
+            if (status === 401 && !original._skipAuthRefresh && !/(?:login|register|csrf)$/i.test(url)) {
+                if (original._retry || /refresh$/i.test(url)) {
+                    expireSession()
+                    throw error
+                }
+                if (!refreshing || refreshingEpoch !== epoch) {
+                    refreshingEpoch = epoch
+                    const current = (
+                        options?.refresh
+                            ? options.refresh()
+                            : instance
+                                  .request({
+                                      url: 'refresh',
+                                      method: 'POST',
+                                      baseURL,
+                                      withCredentials: true,
+                                      _retry: true,
+                                      _epoch: epoch,
+                                      errorPresentation: original.errorPresentation,
+                                  } as AxiosRequestConfig)
+                                  .then((data: unknown) => {
+                                      const token = (data as { access_token?: string }).access_token
+                                      if (!token) throw new Error('刷新未返回凭据')
+                                      return token
+                                  })
+                    )
+                        .then((token) => {
+                            if (epoch !== sessionEpoch.value)
+                                throw new axios.CanceledError('会话已改变')
+                            setToken(token)
+                            return token
+                        })
+                        .catch((e) => {
+                            if (epoch === sessionEpoch.value) expireSession()
+                            throw e
+                        })
+                        .finally(() => {
+                            if (refreshing === current) refreshing = null
+                        })
+                    refreshing = current
+                }
+                const token = await refreshing
+                if (original.signal?.aborted || epoch !== sessionEpoch.value)
+                    throw new axios.CanceledError('请求已取消')
+                return instance.request({
+                    ...original,
+                    _retry: true,
+                    headers: { ...original.headers, Authorization: 'Bearer ' + token },
+                } as AxiosRequestConfig)
+            }
+            const message =
+                isHtmlResponse(error.response)
+                    ? htmlResponseMessage
+                    : status === 403 && Object.prototype.hasOwnProperty.call(browserRejectionMessages, error.response?.data?.code)
+                      ? browserRejectionMessages[error.response.data.code]
+                    : status === 503 && error.response?.data === 'security dependency unavailable'
+                      ? '认证服务暂不可用，请检查后端时钟同步与依赖状态'
+                    : typeof error.response?.data === 'string'
+                      ? error.response.data
+                      : (error.response?.data?.message ?? error.message ?? '请求失败，请重试')
+            error.message = message
+            presentError(error, original, message)
+            throw error
+        },
+    )
+    return function request<T>(config: RequestOptions): Promise<T> {
+        return instance.request({
+            baseURL,
+            timeout: 8000,
+            withCredentials: true,
+            ...config,
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: getToken() ? 'Bearer ' + getToken() : undefined,
+                ...config.headers,
+            },
+            _epoch: sessionEpoch.value,
+        } as AxiosRequestConfig) as Promise<T>
     }
-    // 将默认配置 defaultConfig 和传入的自定义配置 config 进行合并成为 mergeConfig
-    const mergeConfig = merge(defaultConfig, config)
-    return instance(mergeConfig)
-  }
 }
-
-/** 用于请求的实例 */
-const instance = createInstance()
-
-/** 用于请求的方法 */
-export const request = createRequest(instance)
+export const request = createHttpClient()

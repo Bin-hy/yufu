@@ -1,14 +1,20 @@
-﻿set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
-
 default:
     @just --list
 
-cobotmap-build:
-    cargo build --bin cobotmap --bin cobotmap-verify
+dev config="conf/cobotusr.local.toml":
+    cargo run --bin cobotusr --features webui -- --config "{{config}}" --allow-insecure-loopback-cookies
 
-cobotmap-run config="cobotmap.toml":
-    cargo run --bin cobotmap -- --config "{{config}}"
+frontend:
+    pnpm dev:cobotusr
 
-cobotmap-verify listen="127.0.0.1:8080":
-    cargo run --quiet --bin cobotmap-verify -- "http://{{listen}}/maps/api/js"
+build:
+    pnpm build:cobotusr
+    cargo build --bin cobotusr --features webui --release
 
+check:
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+test:
+    cargo test --workspace --all-features -- --test-threads=1
+    pnpm --filter @cobotweb/cobotusr test

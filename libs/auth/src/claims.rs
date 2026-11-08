@@ -4,18 +4,17 @@ use std::fmt::{Debug, Display};
 /// Represents the payload (claims) contained within a JWT token.
 ///
 /// The `Claims` struct stores essential information about the token,
-/// such as the user ID, the issued-at timestamp, and the expiration time.
+/// such as the user ID and expiration time.
 ///
 /// # Fields
 ///
 /// * `id` - The unique identifier of the user or subject associated with the token.
-/// * `iat` - The UNIX timestamp (in seconds) when the token was issued.
 /// * `exp` - The UNIX timestamp (in seconds) when the token will expire.
 ///
 /// # Example
 ///
 /// ```
-/// use auth::Claims;
+/// use auth::claims::Claims;
 ///
 /// let claims = Claims {
 ///     id: "user123".to_string(),
@@ -89,12 +88,9 @@ impl Display for AccessTokenClaims {
 
 /// OIDC ID Token claims (RFC 7519 + OpenID Connect Core 1.0)
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct IdTokenClaims<IDTYPE>
-where
-    IDTYPE: Clone + Send + Sync + 'static + Serialize,
-{
+pub struct IdTokenClaims {
     pub iss: String,             // issuer
-    pub sub: IDTYPE,             // subject (user_id)
+    pub sub: String,             // OIDC subject; convert local user IDs at the boundary
     pub aud: Option<String>,     // audience (client_id)
     pub iat: u64,                // issued at
     pub exp: u64,                // expiration

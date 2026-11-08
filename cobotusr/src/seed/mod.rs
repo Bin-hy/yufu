@@ -4,6 +4,7 @@ mod m20251022_123046_set_init_all_authority;
 mod m20260331_000005_seed_oidc_scopes;
 mod m20260508_000006_seed_permission_authorities;
 mod m20260731_000001_seed_mcp_access;
+pub(crate) mod m20261107_000003_security_operations;
 
 pub struct Migrator;
 

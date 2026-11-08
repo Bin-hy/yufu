@@ -1,8 +1,10 @@
 mod auth;
+mod auth_center;
 mod authority;
 mod mcp;
 mod oidc;
 mod recording;
 mod role;
+mod security;
 mod sync_permissions;
 mod user;

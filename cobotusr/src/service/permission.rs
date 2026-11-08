@@ -8,8 +8,11 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 /// Resolve user roles (names) and permission names for a given target application.
 ///
 /// Looks up `aud` as the application's `app_key`. If no application with that
-/// key exists (e.g. for cobotsrv's own internal tokens), returns empty sets.
+/// key exists (e.g. for resource-app's own internal tokens), returns empty sets.
 ///
+/// Legacy metadata only: a string-name list cannot express resource scopes or
+/// overlapping denies. Strict authorization uses the structured primary snapshot,
+/// never this list as evidence. Legacy issuance is migrated by its lifecycle task.
 /// Resolution order (permission):
 ///   1. `user_permission` explicit allow/deny overrides everything (including superadmin)
 ///   2. superadmin role implicitly holds every permission of the application
@@ -88,19 +91,20 @@ pub async fn resolve_user_permissions(
     Ok((roles, permission_names))
 }
 
-/// PDP enforcement request.
+/// Legacy subject-only PDP shape; retained to return an explicit unauthorized
+/// response during migration. None of these fields is authentication evidence.
 #[derive(serde::Deserialize)]
 pub struct EnforceRequest {
     /// Application key (e.g. "cobotrix").
     pub application: String,
-    /// Subject user id.
+    /// Untrusted legacy subject id; never a substitute for verified evidence.
     pub subject: IdType,
     /// Action verb (e.g. "read", "submit").
     pub action: String,
     /// Resource type (e.g. "device", "task"). Optional if action-only permission.
     #[serde(default)]
     pub resource_type: Option<String>,
-    /// Resource identifier (e.g. "cobotlet-0:lift"). Optional if no object match needed.
+    /// Resource identifier (e.g. "example-resource:lift"). Optional if no object match needed.
     #[serde(default)]
     pub resource_id: Option<String>,
 }
@@ -112,147 +116,60 @@ pub struct EnforceResponse {
     pub reason: String,
 }
 
-/// PDP enforcement: check whether `subject` may perform `action` on
-/// `resource_type:resource_id` within the given application.
-///
-/// Pattern matching on `resource_pattern` uses simple glob-style matching
-/// (`*` matches any sequence, `?` matches any single character).
-pub async fn enforce(db: &DatabaseConnection, req: &EnforceRequest) -> Result<EnforceResponse> {
-    let Some(app) = application::Entity::get_by_app_key(db, &req.application).await? else {
-        return Ok(EnforceResponse {
-            allow: false,
-            reason: format!("unknown application: {}", req.application),
-        });
-    };
-
-    let user = match user::Entity::find_by_id(req.subject).one(db).await? {
-        Some(u) => u,
-        None => {
-            return Ok(EnforceResponse {
-                allow: false,
-                reason: format!("unknown subject: {}", req.subject),
-            });
-        }
-    };
-
-    let all_perms = permission::Entity::list_by_application(db, app.id).await?;
-
-    // user_permission overrides — evaluated BEFORE the superadmin short-circuit:
-    // an explicit deny wins even over superadmin, matching the legacy authority
-    // system (rbac.rs).
-    let user_overrides: Vec<user_permission::Model> =
-        user_permission::Entity::list_by_user(db, req.subject).await?;
-
-    let denied_ids: std::collections::HashSet<IdType> = user_overrides
-        .iter()
-        .filter(|o| !o.allow)
-        .map(|o| o.permission_id)
-        .collect();
-    let allowed_ids: std::collections::HashSet<IdType> = user_overrides
-        .iter()
-        .filter(|o| o.allow)
-        .map(|o| o.permission_id)
-        .collect();
-
-    // Superadmin is allowed everything EXCEPT what an explicit `user_permission`
-    // deny covers (mirrors the legacy authority system's `ensure_sadmin_authorities`
-    // plus its ABAC override precedence).
-    let is_superadmin = role::Entity::find_by_id(user.role_id)
-        .one(db)
-        .await?
-        .map(|r| r.name == role::RoleEnum::Superadmin.get_name())
-        .unwrap_or(false);
-    if is_superadmin {
-        if let Some(perm) = all_perms
-            .iter()
-            .find(|p| denied_ids.contains(&p.id) && perm_matches(p, req))
-        {
-            return Ok(EnforceResponse {
-                allow: false,
-                reason: format!(
-                    "explicit user deny on permission #{} ({})",
-                    perm.id, perm.name
-                ),
-            });
-        }
-        return Ok(EnforceResponse {
-            allow: true,
-            reason: "superadmin".to_string(),
-        });
-    }
-
-    let role_perm_ids: Vec<IdType> =
-        role_permission::Entity::list_permission_ids_by_role(db, user.role_id).await?;
-    let role_perm_set: std::collections::HashSet<IdType> = role_perm_ids.into_iter().collect();
-
-    for perm in &all_perms {
-        // explicit deny
-        if denied_ids.contains(&perm.id) {
-            continue;
-        }
-        // must be granted
-        if !allowed_ids.contains(&perm.id) && !role_perm_set.contains(&perm.id) {
-            continue;
-        }
-        if !perm_matches(perm, req) {
-            continue;
-        }
-        return Ok(EnforceResponse {
-            allow: true,
-            reason: format!("matched permission #{} ({})", perm.id, perm.name),
-        });
-    }
-
-    Ok(EnforceResponse {
-        allow: false,
-        reason: "no matching permission".to_string(),
-    })
+/// Legacy subject-only requests carry no verified subject evidence or signed
+/// bounds. Keep the input contract long enough to return an explicit 401, but
+/// never turn a caller-provided user id or a missing resource into authorization.
+/// New decisions use security::authorization with an AuthenticatedContext.
+pub async fn enforce(_db: &DatabaseConnection, _req: &EnforceRequest) -> Result<EnforceResponse> {
+    Err(AppError::Unauthorized(
+        "verified subject evidence required".into(),
+    ))
 }
 
-/// Whether a permission row matches the request's action / resource_type /
-/// resource_pattern. Action matches either the verb ("read") or the full
-/// permission name ("device:read").
-fn perm_matches(perm: &permission::Model, req: &EnforceRequest) -> bool {
-    if perm.action != req.action && perm.name != req.action {
-        return false;
-    }
-    // resource_type must match if specified
-    if let (Some(req_rt), Some(perm_rt)) = (&req.resource_type, &perm.resource_type)
-        && req_rt != perm_rt
-    {
-        return false;
-    }
-    // resource_pattern match
-    if let (Some(rid), Some(pattern)) = (&req.resource_id, &perm.resource_pattern)
-        && !glob_match(pattern, rid)
-    {
-        return false;
-    }
-    true
+/// Canonical operation, independent of a rule's display name. A full action can
+/// bind task:execute to a tool resource; verb-only legacy actions remain literal.
+pub(super) fn registered_operation(
+    row: &permission::Model,
+) -> Option<auth::security::policy::OperationId> {
+    let name = if row.action.contains(':') {
+        row.action.clone()
+    } else {
+        format!("{}:{}", row.resource_type.as_ref()?, row.action)
+    };
+    auth::security::policy::OperationId::new(name).ok()
 }
 
-/// Simple glob match: `*` matches any sequence (including empty), `?` matches exactly one char.
-fn glob_match(pattern: &str, input: &str) -> bool {
-    let pat: Vec<char> = pattern.chars().collect();
-    let inp: Vec<char> = input.chars().collect();
-    let (pi, ii) = (pat.len(), inp.len());
-    let mut dp = vec![vec![false; ii + 1]; pi + 1];
-    dp[0][0] = true;
-    for (i, &pc) in pat.iter().enumerate() {
-        if pc == '*' {
-            dp[i + 1][0] = dp[i][0];
-        } else {
-            break;
-        }
+/// Finite typed selectors replace delimiter-globs. Missing/ambiguous legacy
+/// boundaries need an administrator correction; they never become wildcards.
+pub(super) fn resource_selector(
+    row: &permission::Model,
+    application: &str,
+) -> std::result::Result<
+    auth::security::policy::ResourceSelector,
+    auth::security::error::SecurityError,
+> {
+    use auth::security::{
+        error::SecurityError,
+        policy::{ResourceKind, ResourceScope, ResourceSelector},
+    };
+    let invalid = || SecurityError::DependencyUnavailable;
+    let raw = row
+        .resource_pattern
+        .as_deref()
+        .filter(|s| s.len() <= 16_384)
+        .ok_or_else(invalid)?;
+    let selector: ResourceSelector = serde_json::from_str(raw).map_err(|_| invalid())?;
+    let kind: ResourceKind =
+        serde_json::from_value(row.resource_type.clone().ok_or_else(invalid)?.into())
+            .map_err(|_| invalid())?;
+    let selector_kind = match selector.scope() {
+        ResourceScope::Exact { target } => target.kind(),
+        ResourceScope::Application { kind }
+        | ResourceScope::Gateway { kind, .. }
+        | ResourceScope::Device { kind, .. } => *kind,
+    };
+    if selector.application() != application || kind != selector_kind {
+        return Err(invalid());
     }
-    for i in 0..pi {
-        for j in 0..ii {
-            if pat[i] == '*' {
-                dp[i + 1][j + 1] = dp[i][j + 1] || dp[i + 1][j];
-            } else if pat[i] == '?' || pat[i] == inp[j] {
-                dp[i + 1][j + 1] = dp[i][j];
-            }
-        }
-    }
-    dp[pi][ii]
+    Ok(selector)
 }

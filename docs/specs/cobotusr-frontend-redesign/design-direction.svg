@@ -1,0 +1,203 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1000" viewBox="0 0 1440 1000" role="img" aria-labelledby="title desc">
+<title id="title">cobotusr 工作台改版视觉方向草案</title>
+<desc id="desc">桌面采用分组侧栏、单行标签、清晰查询区和数据表格；小屏采用抽屉导航和局部滚动。内容为设计示例，尚未实现。</desc>
+<style>text{font-family:"PingFang SC","Microsoft YaHei",sans-serif} .mono{font-family:ui-monospace,monospace}</style>
+<rect x="0" y="0" width="1440" height="1000" rx="0" fill="#eef3f3"/>
+<text x="44" y="52" font-size="28" fill="#17363a" font-weight="650">cobotusr · 授权与身份管理工作台</text>
+<text x="44" y="80" font-size="13" fill="#667c83" font-weight="400">视觉方向草案 / 设计示例 / 尚未实现</text>
+<text x="44" y="121" font-size="16" fill="#34545d" font-weight="600">桌面工作台</text>
+<text x="1106" y="121" font-size="16" fill="#34545d" font-weight="600">小屏列表</text>
+<rect x="44" y="143" width="1030" height="654" rx="10" fill="#ffffff" stroke="#d7e1e2"/>
+<rect x="44" y="143" width="190" height="654" rx="10" fill="#f8fafb"/>
+<rect x="224" y="143" width="10" height="654" rx="0" fill="#f8fafb"/>
+<path d="M234 143 L234 797" stroke="#dce5e7"/>
+<rect x="62" y="164" width="25" height="25" rx="6" fill="#0f766e"/>
+<text x="69" y="182" font-size="17" fill="#fff" font-weight="650">C</text>
+<text x="98" y="182" font-size="18" fill="#17363a" font-weight="650">cobotusr</text>
+<text x="64" y="227" font-size="11" fill="#83969b" font-weight="500">工作台</text>
+<rect x="57" y="240" width="162" height="36" rx="5" fill="#f8fafb"/>
+<rect x="69" y="250" width="5" height="5" rx="1" fill="#0f766e"/>
+<rect x="77" y="250" width="5" height="5" rx="1" fill="#0f766e"/>
+<rect x="69" y="258" width="5" height="5" rx="1" fill="#0f766e"/>
+<rect x="77" y="258" width="5" height="5" rx="1" fill="#0f766e"/>
+<text x="92" y="263" font-size="13" fill="#0f766e" font-weight="550">概览</text>
+<text x="64" y="307" font-size="11" fill="#83969b" font-weight="500">身份管理</text>
+<rect x="57" y="320" width="162" height="36" rx="5" fill="#d9eee8"/>
+<rect x="57" y="329" width="3" height="18" rx="1" fill="#0f766e"/>
+<circle cx="75" cy="333" r="3" fill="none" stroke="#0f766e"/><path d="M69 344v-3q6-6 12 0v3" fill="none" stroke="#0f766e" stroke-width="1.5"/>
+<text x="92" y="343" font-size="13" fill="#0f766e" font-weight="600">用户</text>
+<path d="M75 373l6 3v5q-1 5-6 8q-5-3-6-8v-5z" fill="none" stroke="#75878e" stroke-width="1.3"/>
+<text x="92" y="386" font-size="13" fill="#526a72" font-weight="400">角色</text>
+<text x="64" y="430" font-size="11" fill="#83969b" font-weight="500">访问控制</text>
+<path d="M75 452l6 3v5q-1 5-6 8q-5-3-6-8v-5z" fill="none" stroke="#75878e" stroke-width="1.3"/>
+<text x="92" y="465" font-size="13" fill="#526a72" font-weight="400">API 权限</text>
+<path d="M75 491l6 3v5q-1 5-6 8q-5-3-6-8v-5z" fill="none" stroke="#75878e" stroke-width="1.3"/>
+<text x="92" y="504" font-size="13" fill="#526a72" font-weight="400">资源权限</text>
+<text x="64" y="548" font-size="11" fill="#83969b" font-weight="500">应用与授权</text>
+<rect x="69" y="570" width="5" height="5" rx="1" fill="#75878e"/>
+<rect x="77" y="570" width="5" height="5" rx="1" fill="#75878e"/>
+<rect x="69" y="578" width="5" height="5" rx="1" fill="#75878e"/>
+<rect x="77" y="578" width="5" height="5" rx="1" fill="#75878e"/>
+<text x="92" y="583" font-size="13" fill="#526a72" font-weight="400">应用注册</text>
+<path d="M75 609l6 3v5q-1 5-6 8q-5-3-6-8v-5z" fill="none" stroke="#75878e" stroke-width="1.3"/>
+<text x="92" y="622" font-size="13" fill="#526a72" font-weight="400">已授权应用</text>
+<text x="64" y="666" font-size="11" fill="#83969b" font-weight="500">审计</text>
+<path d="M69 690h12v12H69z M72 694h6 M72 698h6" fill="none" stroke="#75878e" stroke-width="1.3"/>
+<text x="92" y="701" font-size="13" fill="#526a72" font-weight="400">操作记录</text>
+<path d="M60 744 H217" stroke="#e3e9eb"/>
+<text x="65" y="775" font-size="12" fill="#748b91" font-weight="400">帮助与使用说明</text>
+<text x="259" y="178" font-size="12" fill="#768d92" font-weight="400">身份管理</text>
+<text x="324" y="178" font-size="12" fill="#34545d" font-weight="500">/ 用户</text>
+<text x="903" y="178" font-size="11" fill="#768d92" font-weight="400">系统主题</text>
+<rect x="991" y="157" width="24" height="24" rx="12" fill="#e0f0eb"/>
+<text x="998" y="174" font-size="12" fill="#0f766e" font-weight="600">林</text>
+<text x="1023" y="175" font-size="14" fill="#748b91" font-weight="400">⌄</text>
+<path d="M234 198 H1074" stroke="#e3e9eb"/>
+<rect x="234" y="199" width="840" height="38" rx="0" fill="#f9fbfc"/>
+<text x="261" y="223" font-size="12" fill="#6f858d" font-weight="400">概览</text>
+<rect x="310" y="202" width="126" height="35" rx="5" fill="#ffffff"/>
+<text x="326" y="223" font-size="12" fill="#0f766e" font-weight="600">用户列表</text>
+<text x="413" y="223" font-size="14" fill="#779198" font-weight="400">×</text>
+<path d="M317 236 H427" stroke="#0f766e"/>
+<text x="456" y="223" font-size="12" fill="#6f858d" font-weight="400">角色列表</text>
+<text x="533" y="223" font-size="14" fill="#779198" font-weight="400">×</text>
+<path d="M234 237 H1074" stroke="#e3e9eb"/>
+<text x="262" y="280" font-size="25" fill="#17363a" font-weight="650">用户</text>
+<text x="262" y="305" font-size="12" fill="#70878e" font-weight="400">管理账户、角色和访问范围</text>
+<rect x="948" y="262" width="98" height="34" rx="6" fill="#0f766e"/>
+<text x="961" y="284" font-size="12" fill="#ffffff" font-weight="500">＋ 添加用户</text>
+<rect x="262" y="330" width="784" height="55" rx="6" fill="#f7fafb"/>
+<rect x="275" y="341" width="310" height="33" rx="5" fill="#ffffff" stroke="#dde6e8"/>
+<text x="288" y="362" font-size="12" fill="#85989e" font-weight="400">搜索本页用户名或昵称</text>
+<rect x="597" y="341" width="128" height="33" rx="5" fill="#ffffff" stroke="#dde6e8"/>
+<text x="610" y="362" font-size="12" fill="#526a72" font-weight="400">全部角色</text>
+<text x="704" y="362" font-size="13" fill="#85989e" font-weight="400">⌄</text>
+<rect x="931" y="341" width="101" height="34" rx="6" fill="#ffffff" stroke="#dce5e7"/>
+<text x="944" y="363" font-size="12" fill="#34545d" font-weight="500">刷新列表</text>
+<rect x="262" y="400" width="784" height="290" rx="6" fill="#ffffff" stroke="#dce5e7"/>
+<rect x="263" y="401" width="782" height="37" rx="5" fill="#f4f8f9"/>
+<text x="279" y="425" font-size="11" fill="#748b91" font-weight="550">账户</text>
+<text x="609" y="425" font-size="11" fill="#748b91" font-weight="550">角色</text>
+<text x="789" y="425" font-size="11" fill="#748b91" font-weight="550">状态</text>
+<text x="954" y="425" font-size="11" fill="#748b91" font-weight="550">操作</text>
+<path d="M263 438 H1045" stroke="#e3e9eb"/>
+<rect x="279" y="450" width="27" height="27" rx="13" fill="#eef4f4"/>
+<text x="287" y="468" font-size="12" fill="#547078" font-weight="550">林</text>
+<text x="320" y="459" font-size="12" fill="#25464e" font-weight="550">林晓</text>
+<text x="320" y="476" font-size="10" fill="#80969c" font-weight="400">lin.xiao</text>
+<text x="609" y="467" font-size="12" fill="#526a72" font-weight="400">管理员</text>
+<rect x="789" y="452" width="55" height="23" rx="4" fill="#e9f4ed"/>
+<text x="800" y="468" font-size="11" fill="#357152" font-weight="400">正常</text>
+<text x="950" y="466" font-size="12" fill="#0f766e" font-weight="550">编辑</text>
+<text x="1018" y="467" font-size="18" fill="#70878e" font-weight="400">⋯</text>
+<path d="M263 488 H1045" stroke="#e3e9eb"/>
+<rect x="279" y="500" width="27" height="27" rx="13" fill="#eef4f4"/>
+<text x="287" y="518" font-size="12" fill="#547078" font-weight="550">陈</text>
+<text x="320" y="509" font-size="12" fill="#25464e" font-weight="550">陈静</text>
+<text x="320" y="526" font-size="10" fill="#80969c" font-weight="400">chen.jing</text>
+<text x="609" y="517" font-size="12" fill="#526a72" font-weight="400">开发者</text>
+<rect x="789" y="502" width="55" height="23" rx="4" fill="#e9f4ed"/>
+<text x="800" y="518" font-size="11" fill="#357152" font-weight="400">正常</text>
+<text x="950" y="516" font-size="12" fill="#0f766e" font-weight="550">编辑</text>
+<text x="1018" y="517" font-size="18" fill="#70878e" font-weight="400">⋯</text>
+<path d="M263 538 H1045" stroke="#e3e9eb"/>
+<rect x="279" y="550" width="27" height="27" rx="13" fill="#eef4f4"/>
+<text x="287" y="568" font-size="12" fill="#547078" font-weight="550">王</text>
+<text x="320" y="559" font-size="12" fill="#25464e" font-weight="550">王睿</text>
+<text x="320" y="576" font-size="10" fill="#80969c" font-weight="400">wang.rui</text>
+<text x="609" y="567" font-size="12" fill="#526a72" font-weight="400">审计员</text>
+<rect x="789" y="552" width="55" height="23" rx="4" fill="#e9f4ed"/>
+<text x="800" y="568" font-size="11" fill="#357152" font-weight="400">正常</text>
+<text x="950" y="566" font-size="12" fill="#0f766e" font-weight="550">编辑</text>
+<text x="1018" y="567" font-size="18" fill="#70878e" font-weight="400">⋯</text>
+<path d="M263 588 H1045" stroke="#e3e9eb"/>
+<rect x="279" y="600" width="27" height="27" rx="13" fill="#eef4f4"/>
+<text x="287" y="618" font-size="12" fill="#547078" font-weight="550">周</text>
+<text x="320" y="609" font-size="12" fill="#25464e" font-weight="550">周悦</text>
+<text x="320" y="626" font-size="10" fill="#80969c" font-weight="400">zhou.yue</text>
+<text x="609" y="617" font-size="12" fill="#526a72" font-weight="400">开发者</text>
+<rect x="789" y="602" width="55" height="23" rx="4" fill="#e9f4ed"/>
+<text x="800" y="618" font-size="11" fill="#357152" font-weight="400">正常</text>
+<text x="950" y="616" font-size="12" fill="#0f766e" font-weight="550">编辑</text>
+<text x="1018" y="617" font-size="18" fill="#70878e" font-weight="400">⋯</text>
+<path d="M263 638 H1045" stroke="#e3e9eb"/>
+<rect x="279" y="650" width="27" height="27" rx="13" fill="#eef4f4"/>
+<text x="287" y="668" font-size="12" fill="#547078" font-weight="550">许</text>
+<text x="320" y="659" font-size="12" fill="#25464e" font-weight="550">许珊</text>
+<text x="320" y="676" font-size="10" fill="#80969c" font-weight="400">xu.shan</text>
+<text x="609" y="667" font-size="12" fill="#526a72" font-weight="400">普通用户</text>
+<rect x="789" y="652" width="65" height="23" rx="4" fill="#eef1f3"/>
+<text x="800" y="668" font-size="11" fill="#75878e" font-weight="400">已停用</text>
+<text x="950" y="666" font-size="12" fill="#0f766e" font-weight="550">编辑</text>
+<text x="1018" y="667" font-size="18" fill="#70878e" font-weight="400">⋯</text>
+<text x="265" y="724" font-size="11" fill="#70878e" font-weight="400">每页 20 条</text>
+<text x="445" y="724" font-size="11" fill="#70878e" font-weight="400">第 3 页</text>
+<rect x="879" y="703" width="27" height="30" rx="5" fill="#ffffff" stroke="#dde6e8"/>
+<text x="888" y="723" font-size="12" fill="#6f858d" font-weight="400">‹</text>
+<rect x="914" y="703" width="27" height="30" rx="5" fill="#ffffff" stroke="#dde6e8"/>
+<text x="923" y="723" font-size="12" fill="#6f858d" font-weight="400">2</text>
+<rect x="949" y="703" width="27" height="30" rx="5" fill="#0f766e"/>
+<text x="958" y="723" font-size="12" fill="#fff" font-weight="400">3</text>
+<rect x="984" y="703" width="27" height="30" rx="5" fill="#ffffff" stroke="#dde6e8"/>
+<text x="993" y="723" font-size="12" fill="#6f858d" font-weight="400">4</text>
+<rect x="1019" y="703" width="27" height="30" rx="5" fill="#ffffff" stroke="#dde6e8"/>
+<text x="1028" y="723" font-size="12" fill="#6f858d" font-weight="400">›</text>
+<rect x="1106" y="143" width="290" height="654" rx="16" fill="#ffffff" stroke="#d7e1e2"/>
+<text x="1126" y="177" font-size="18" fill="#526a72" font-weight="400">☰</text>
+<text x="1161" y="176" font-size="17" fill="#17363a" font-weight="650">cobotusr</text>
+<rect x="1348" y="156" width="25" height="25" rx="13" fill="#e0f0eb"/>
+<text x="1355" y="174" font-size="12" fill="#0f766e" font-weight="600">林</text>
+<path d="M1106 195 H1396" stroke="#e3e9eb"/>
+<rect x="1107" y="196" width="288" height="37" rx="0" fill="#f8fafb"/>
+<text x="1126" y="219" font-size="11" fill="#80969c" font-weight="400">概览</text>
+<text x="1180" y="219" font-size="11" fill="#0f766e" font-weight="600">用户列表</text>
+<path d="M1176 232 H1238" stroke="#0f766e"/>
+<text x="1263" y="219" font-size="11" fill="#80969c" font-weight="400">角色列表</text>
+<text x="1366" y="219" font-size="15" fill="#80969c" font-weight="400">›</text>
+<text x="1125" y="269" font-size="23" fill="#17363a" font-weight="650">用户</text>
+<rect x="1288" y="247" width="87" height="34" rx="6" fill="#0f766e"/>
+<text x="1301" y="269" font-size="12" fill="#ffffff" font-weight="500">＋ 添加</text>
+<text x="1125" y="295" font-size="12" fill="#70878e" font-weight="400">管理账户与访问范围</text>
+<rect x="1125" y="315" width="252" height="35" rx="5" fill="#ffffff" stroke="#dde6e8"/>
+<text x="1137" y="338" font-size="11" fill="#85989e" font-weight="400">搜索本页用户名或昵称</text>
+<rect x="1125" y="362" width="123" height="34" rx="6" fill="#ffffff" stroke="#dce5e7"/>
+<text x="1138" y="384" font-size="12" fill="#34545d" font-weight="500">全部角色</text>
+<rect x="1260" y="362" width="117" height="34" rx="6" fill="#ffffff" stroke="#dce5e7"/>
+<text x="1273" y="384" font-size="12" fill="#34545d" font-weight="500">刷新列表</text>
+<rect x="1125" y="414" width="252" height="265" rx="5" fill="#ffffff" stroke="#dde6e8"/>
+<rect x="1126" y="415" width="250" height="35" rx="5" fill="#f4f8f9"/>
+<text x="1139" y="437" font-size="11" fill="#748b91" font-weight="400">账户</text>
+<text x="1291" y="437" font-size="11" fill="#748b91" font-weight="400">角色</text>
+<path d="M1126 450 H1376" stroke="#e3e9eb"/>
+<text x="1139" y="473" font-size="12" fill="#25464e" font-weight="550">林晓</text>
+<text x="1139" y="491" font-size="10" fill="#80969c" font-weight="400">lin.xiao</text>
+<text x="1291" y="479" font-size="11" fill="#526a72" font-weight="400">管理员</text>
+<path d="M1126 506 H1376" stroke="#e3e9eb"/>
+<text x="1139" y="529" font-size="12" fill="#25464e" font-weight="550">陈静</text>
+<text x="1139" y="547" font-size="10" fill="#80969c" font-weight="400">chen.jing</text>
+<text x="1291" y="535" font-size="11" fill="#526a72" font-weight="400">开发者</text>
+<path d="M1126 562 H1376" stroke="#e3e9eb"/>
+<text x="1139" y="585" font-size="12" fill="#25464e" font-weight="550">王睿</text>
+<text x="1139" y="603" font-size="10" fill="#80969c" font-weight="400">wang.rui</text>
+<text x="1291" y="591" font-size="11" fill="#526a72" font-weight="400">审计员</text>
+<path d="M1126 618 H1376" stroke="#e3e9eb"/>
+<text x="1139" y="641" font-size="12" fill="#25464e" font-weight="550">周悦</text>
+<text x="1139" y="659" font-size="10" fill="#80969c" font-weight="400">zhou.yue</text>
+<text x="1291" y="647" font-size="11" fill="#526a72" font-weight="400">开发者</text>
+<text x="1130" y="700" font-size="10" fill="#82979e" font-weight="400">宽表格在自身区域横向滚动</text>
+<text x="1126" y="737" font-size="12" fill="#70878e" font-weight="400">第 3 页</text>
+<rect x="1234" y="714" width="63" height="34" rx="6" fill="#ffffff" stroke="#dce5e7"/>
+<text x="1247" y="736" font-size="12" fill="#34545d" font-weight="500">上一页</text>
+<rect x="1305" y="714" width="72" height="34" rx="6" fill="#ffffff" stroke="#dce5e7"/>
+<text x="1318" y="736" font-size="12" fill="#34545d" font-weight="500">下一页</text>
+<text x="44" y="846" font-size="18" fill="#34545d" font-weight="600">改版重点</text>
+<text x="44" y="881" font-size="15" fill="#0f766e" font-weight="600">连续工作</text>
+<text x="44" y="908" font-size="12" fill="#6f858d" font-weight="400">标签保持地址与分页；离开草稿前确认</text>
+<text x="510" y="881" font-size="15" fill="#0f766e" font-weight="600">可信操作</text>
+<text x="510" y="908" font-size="12" fill="#6f858d" font-weight="400">请求中保留上下文；失败可重试</text>
+<text x="982" y="881" font-size="15" fill="#0f766e" font-weight="600">统一界面</text>
+<text x="982" y="908" font-size="12" fill="#6f858d" font-weight="400">同一套表格、表单、焦点与主题规则</text>
+<path d="M44 938 H1396" stroke="#e3e9eb"/>
+<text x="44" y="966" font-size="12" fill="#6f858d" font-weight="400">建议默认方向：中性底色 / 青绿品牌色 / 分组导航 / 紧凑数据表格 / 小屏抽屉侧栏</text>
+<text x="1213" y="966" font-size="11" fill="#82979e" font-weight="400">2026-11-08 · 草案</text>
+</svg>

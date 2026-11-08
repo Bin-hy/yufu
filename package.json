@@ -2,16 +2,10 @@
   "name": "cobotrix",
   "private": true,
   "version": "1.0.0",
-  "description": "cobotrix monorepo (Rust workspace + cobotweb pnpm workspace)",
+  "description": "Authentication center (Rust + Vue)",
   "scripts": {
-    "dev:cobotsrv": "pnpm --filter @cobotweb/cobotsrv dev",
-    "dev:cobotlet": "pnpm --filter @cobotweb/cobotlet dev",
-    "build:cobotsrv": "pnpm --filter @cobotweb/cobotsrv build",
-    "build:cobotlet": "pnpm --filter @cobotweb/cobotlet build",
-    "dev:cobotrix": "pnpm --filter @cobotweb/cobotrix dev",
-    "build:cobotrix": "pnpm --filter @cobotweb/cobotrix build",
-    "dev:cobotimx": "pnpm --filter cobotimx dev",
-    "build:cobotimx": "pnpm --filter cobotimx build",
-    "build": "pnpm -r --filter './cobotweb/apps/*' build"
+    "dev:cobotusr": "pnpm --filter @cobotweb/cobotusr dev",
+    "build:cobotusr": "pnpm --filter @cobotweb/cobotusr build",
+    "build": "pnpm build:cobotusr"
   }
 }

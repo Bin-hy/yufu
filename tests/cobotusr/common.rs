@@ -7,7 +7,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, ImageExt};
 
 pub async fn shutdown_signal() {
-    let _str = signal::wait_for_stop_signal().await;
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 #[allow(dead_code)]
@@ -52,4 +52,58 @@ pub fn get_test_token(cfg: &mut Config) -> String {
             vec![],
         )
         .unwrap()
+}
+
+/// Independently controllable wall and monotonic clocks for deadline/fault scenarios.
+pub struct SecurityTestClock {
+    reading: std::sync::Mutex<auth::security::budget::ClockReading>,
+}
+
+impl SecurityTestClock {
+    pub fn new(unix_millis: u64) -> Self {
+        Self {
+            reading: std::sync::Mutex::new(auth::security::budget::ClockReading {
+                monotonic: std::time::Duration::ZERO,
+                unix_millis,
+                synchronized: true,
+            }),
+        }
+    }
+
+    pub fn advance(&self, millis: u64) {
+        let mut reading = self.reading.lock().unwrap();
+        reading.monotonic += std::time::Duration::from_millis(millis);
+        reading.unix_millis = reading.unix_millis.checked_add(millis).unwrap();
+    }
+
+    pub fn set_wall_time(&self, unix_millis: u64) {
+        self.reading.lock().unwrap().unix_millis = unix_millis;
+    }
+
+    pub fn set_synchronized(&self, synchronized: bool) {
+        self.reading.lock().unwrap().synchronized = synchronized;
+    }
+}
+
+impl auth::security::budget::Clock for SecurityTestClock {
+    fn now(
+        &self,
+    ) -> Result<auth::security::budget::ClockReading, auth::security::error::SecurityError> {
+        Ok(*self.reading.lock().unwrap())
+    }
+}
+
+/// Explicit test application; production migrations never grant business access.
+pub async fn seed_resource_application(db: &sea_orm::DatabaseConnection) {
+    use sea_orm::ConnectionTrait;
+    db.execute_unprepared(r#"
+        INSERT INTO application (app_key,name,create_time,update_time)
+        VALUES ('resource-app','Test resource application',NOW(),NOW()) ON CONFLICT (app_key) DO NOTHING;
+        INSERT INTO permission (application_id,name,action,resource_type,resource_pattern,create_time,update_time)
+        SELECT id,'mcp:access','mcp:access','application','{"application":"resource-app","scope":{"scope":"application","kind":"application"}}',NOW(),NOW()
+        FROM application WHERE app_key='resource-app' AND NOT EXISTS (SELECT 1 FROM permission WHERE name='mcp:access' AND application_id=application.id);
+        INSERT INTO role_permission (role_id,permission_id,create_time)
+        SELECT 3,p.id,NOW() FROM permission p JOIN application a ON a.id=p.application_id
+        WHERE a.app_key='resource-app' AND p.name='mcp:access' ON CONFLICT DO NOTHING;
+    "#).await.unwrap();
 }

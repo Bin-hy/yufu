@@ -1,28 +1,34 @@
 <script setup lang="ts">
 import { cn } from '@/lib/utils'
-
-const props = withDefaults(defineProps<{
-  modelValue?: string
-  type?: string
-  placeholder?: string
-  class?: string
-  disabled?: boolean
-}>(), {
-  type: 'text',
-  placeholder: '',
-  disabled: false,
-})
-
-const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
-
-function onInput(e: Event) {
-  const t = e.target as HTMLInputElement
-  emit('update:modelValue', t.value)
+const props = withDefaults(
+    defineProps<{
+        modelValue?: string | number | null
+        type?: string
+        placeholder?: string
+        class?: string
+        disabled?: boolean
+        modelModifiers?: { number?: boolean; trim?: boolean }
+    }>(),
+    { type: 'text', placeholder: '' },
+)
+const emit = defineEmits<{ 'update:modelValue': [value: string | number] }>()
+function update(event: Event) {
+    const target = event.target as HTMLInputElement
+    const value = props.modelModifiers?.trim ? target.value.trim() : target.value
+    const number = Number.parseFloat(value)
+    emit(
+        'update:modelValue',
+        props.modelModifiers?.number && !Number.isNaN(number) ? number : value,
+    )
 }
-
-const base = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
 </script>
-
 <template>
-  <input :type="props.type" :value="props.modelValue" :placeholder="props.placeholder" :disabled="props.disabled" :class="cn(base, props.class)" @input="onInput" />
+    <input
+        :type="type"
+        :value="modelValue ?? ''"
+        :placeholder="placeholder"
+        :disabled="disabled"
+        :class="cn('ui-input', $props.class)"
+        @input="update"
+    />
 </template>

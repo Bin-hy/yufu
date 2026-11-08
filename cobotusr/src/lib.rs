@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::{Router, extract::Request, middleware, response::IntoResponse};
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, SET_COOKIE};
-use http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::future::Future;
@@ -19,7 +19,6 @@ use tracing::{error, info, info_span, warn};
 use crate::config::Config;
 use crate::entity::role::RoleEnum;
 use crate::entity::user;
-use crate::modules::im::service::{ConnectionManager, event_channel, spawn_event_service};
 use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
@@ -28,16 +27,11 @@ use auth::access_middleware_local_rs256;
 use auth::claims::AccessTokenClaims;
 use auth::token_manager::{IdTokenSigner, TokenManager};
 
-#[cfg(feature = "webui")]
-#[derive(rust_embed::RustEmbed)]
-#[folder = "../assets/cobotusr/"]
-struct Assets;
-
+pub mod clock;
 pub mod config;
 pub mod entity;
 pub mod error;
-mod migration;
-pub mod modules;
+pub mod migration;
 pub mod rbac;
 mod recording_middleware;
 mod result;
@@ -45,6 +39,7 @@ pub mod route;
 mod seed;
 pub mod service;
 mod swagger_docs;
+mod webui;
 
 fn is_successful_http_exchange(status: StatusCode) -> bool {
     status.is_informational() || status.is_success()
@@ -77,6 +72,7 @@ fn redact_sensitive_headers(mut headers: HeaderMap) -> HeaderMap {
     headers.remove(AUTHORIZATION);
     headers.remove(COOKIE);
     headers.remove(SET_COOKIE);
+    headers.remove("x-csrf-token");
     headers
 }
 
@@ -86,15 +82,18 @@ fn redact_sensitive_headers(mut headers: HeaderMap) -> HeaderMap {
 /// `http.api_prefix` instead of being hard-coded.
 fn should_skip_body_logging(uri: &http::Uri, headers: &HeaderMap, api_prefix: &str) -> bool {
     let path = uri.path();
-    matches!(path, "/oidc/token" | "/oidc/revoke" | "/oidc/introspect")
-        || [
-            format!("{api_prefix}/login"),
-            format!("{api_prefix}/register"),
-            format!("{api_prefix}/refresh"),
-            format!("{api_prefix}/im/files"),
-        ]
-        .iter()
-        .any(|skip| skip == path)
+    matches!(
+        path,
+        "/oidc/token" | "/oidc/revoke" | "/oidc/introspect" | "/oidc/logout"
+    ) || [
+        format!("{api_prefix}/login"),
+        format!("{api_prefix}/register"),
+        format!("{api_prefix}/refresh"),
+        format!("{api_prefix}/csrf"),
+        format!("{api_prefix}/logout"),
+    ]
+    .iter()
+    .any(|skip| skip == path)
         || headers
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
@@ -196,6 +195,42 @@ pub async fn serve<F>(cfg: Config, listener: TcpListener, signal: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
+    serve_internal(cfg, listener, signal, None).await;
+}
+
+/// The clock-health monitor is supplied by the host. No assumed-synchronized
+/// fallback is allowed for transactional credential issuance.
+pub async fn serve_with_security_clock<F>(
+    cfg: Config,
+    listener: TcpListener,
+    signal: F,
+    clock: Arc<dyn auth::security::budget::Clock>,
+) where
+    F: Future<Output = ()> + Send + 'static,
+{
+    serve_internal(cfg, listener, signal, Some(clock)).await;
+}
+
+async fn serve_internal<F>(
+    cfg: Config,
+    listener: TcpListener,
+    signal: F,
+    security_clock: Option<Arc<dyn auth::security::budget::Clock>>,
+) where
+    F: Future<Output = ()> + Send + 'static,
+{
+    if let Err(error) = cfg.validate_browser_cookie_policy() {
+        error!(reason = %error, "invalid browser cookie policy; server not started");
+        return;
+    }
+    if cfg.auth.allow_insecure_loopback_cookies
+        && !listener
+            .local_addr()
+            .is_ok_and(|address| address.ip().is_loopback())
+    {
+        error!("insecure development cookies require an actual loopback listener");
+        return;
+    }
     info!("Server listening on {}", listener.local_addr().unwrap());
 
     // Initialize database connection
@@ -206,7 +241,7 @@ where
         .await
         .unwrap();
 
-    // Refresh tokens stay HS256 / opaque-internal (cobotsrv issues + verifies them itself,
+    // Legacy refresh compatibility remains local to the authentication center (
     // they never cross service boundaries). Access tokens move to RS256 via id_token_signer.
     let refresh_token_manager = TokenManager::new(&cfg.auth.secret, cfg.auth.refresh_exp_seconds);
 
@@ -256,12 +291,6 @@ where
         }
     };
 
-    // IM: websocket connection manager and event channel (before database_service move)
-    let im_db_conn = database_service.connection.clone();
-    let ws_handle = std::sync::Arc::new(ConnectionManager::new());
-    let (im_events, im_event_receiver) = event_channel();
-    let _im_event_service = spawn_event_service(im_db_conn, ws_handle.clone(), im_event_receiver);
-
     let database = Arc::new(database_service);
     let id_token_signer = Arc::new(id_token_signer);
 
@@ -270,8 +299,7 @@ where
         database: database.clone(),
         refresh_token_manager: refresh_token_manager.clone(),
         id_token_signer: id_token_signer.clone(),
-        im_events,
-        ws_handle,
+        security_clock,
     };
     let _ = app_state.init().await;
 
@@ -302,7 +330,7 @@ where
     let sub_public_router = route::get_public_routes();
 
     // Service-to-service routes: Bearer JWT verified, but no user load / URI-RBAC,
-    // so machine callers (cobotsrv revocation introspection) always get JSON or 401.
+    // so external machine callers always get JSON or 401.
     let sub_service_router = route::get_service_routes().layer(middleware::from_fn_with_state(
         id_token_signer.clone(),
         access_middleware_local_rs256,
@@ -314,12 +342,18 @@ where
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
         .nest(api_prefix, sub_service_router)
+        .nest(api_prefix, route::get_revocation_routes())
         .merge(get_no_prefix_routes())
         .layer({
             let origins: Vec<String> = app_state.clone().config.auth.origins;
             let has_wildcard = origins.iter().any(|o| o == "*");
             let cors_layer = CorsLayer::new()
-                .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
+                .allow_headers([
+                    AUTHORIZATION,
+                    CONTENT_TYPE,
+                    ACCEPT,
+                    http::HeaderName::from_static("x-csrf-token"),
+                ])
                 .allow_methods([
                     Method::GET,
                     Method::PATCH,
@@ -369,7 +403,7 @@ where
                 span
             }),
         )
-        .fallback(static_handler);
+        .fallback_service(webui::fallback(cfg.http.api_prefix.clone()));
     #[cfg(feature = "openapi")]
     {
         use crate::swagger_docs::doc::ApiDoc;
@@ -382,35 +416,6 @@ where
         .with_graceful_shutdown(signal)
         .await
         .unwrap_or_else(|e| error!("Application error: {e}"));
-}
-
-#[cfg(feature = "webui")]
-async fn static_handler(uri: Uri) -> impl IntoResponse {
-    let path = uri.path().trim_start_matches('/');
-
-    let file_path = if path.is_empty() { "index.html" } else { path };
-
-    match Assets::get(file_path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
-            ([(http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
-        }
-        None => {
-            // fallback to index.html
-            match Assets::get("index.html") {
-                Some(index) => {
-                    let mime = mime_guess::from_path("index.html").first_or_octet_stream();
-                    ([(http::header::CONTENT_TYPE, mime.as_ref())], index.data).into_response()
-                }
-                None => (StatusCode::NOT_FOUND, "not found").into_response(),
-            }
-        }
-    }
-}
-
-#[cfg(not(feature = "webui"))]
-async fn static_handler(_: Uri) -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, "feature webui not enable")
 }
 
 /// Middleware that loads the current user from DB based on a previously-verified
@@ -466,12 +471,21 @@ pub struct AppState {
     refresh_token_manager: TokenManager,
     /// RS256 signer for cross-service access tokens (also exposed via JWKS).
     id_token_signer: Arc<IdTokenSigner>,
-    pub im_events: crate::modules::im::service::ImEvents,
-    pub ws_handle: crate::modules::im::service::WsHandle,
+    security_clock: Option<Arc<dyn auth::security::budget::Clock>>,
 }
 pub type IdType = i32;
 
 impl AppState {
+    pub fn security_clock(
+        &self,
+    ) -> std::result::Result<
+        Arc<dyn auth::security::budget::Clock>,
+        auth::security::error::SecurityError,
+    > {
+        self.security_clock
+            .clone()
+            .ok_or(auth::security::error::SecurityError::DependencyUnavailable)
+    }
     pub async fn init(&self) -> result::Result<()> {
         self.ensure_sadmin_authorities().await?;
         self.init_sadmin_from_config().await?;
@@ -507,70 +521,9 @@ impl AppState {
         }
     }
 
-    /// Sign an access token addressed to a given audience (`aud`).
-    /// Used by both the legacy `/api/v1/login` flow (`aud="cobotsrv"`) and the
-    /// OIDC token endpoint (`aud=client_id`).
-    pub async fn sign_access_token(
-        &self,
-        sub: IdType,
-        aud: &str,
-        scope: &str,
-    ) -> result::Result<String> {
-        let iss = self.issuer();
-        // Resolve the user's roles + permissions for the target application
-        // (`aud` is the app_key) so they travel in the JWT. This lets resource
-        // servers enforce locally via `require_perm!`'s JWT-fallback mode without
-        // a PDP round-trip. Superadmin gets all of the app's permissions.
-        let (roles, permissions) = crate::service::permission::resolve_user_permissions(
-            &self.database.connection,
-            sub,
-            aud,
-        )
-        .await?;
-        self.id_token_signer
-            .sign_access_token(
-                &sub.to_string(),
-                &iss,
-                aud,
-                scope,
-                self.oidc_access_token_exp(),
-                roles,
-                permissions,
-            )
-            .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
-    }
-
     /// Configured upper bound (days) for long-lived MCP access tokens.
     pub fn mcp_token_max_ttl_days(&self) -> u32 {
         self.config.oidc.mcp_token_max_ttl_days
-    }
-
-    /// Mint an access token with an explicit TTL, `jti`, and pre-resolved
-    /// roles/permissions. Used for long-lived MCP access tokens
-    /// (`POST /api/v1/oidc/mcp-tokens`); the caller persists a revocable record keyed
-    /// by the same `jti` so the token can later be revoked.
-    pub fn mint_access_token(
-        &self,
-        sub: IdType,
-        aud: &str,
-        ttl_seconds: i64,
-        roles: Vec<String>,
-        permissions: Vec<String>,
-        jti: &str,
-    ) -> result::Result<String> {
-        let iss = self.issuer();
-        self.id_token_signer
-            .sign_access_token_with_jti(
-                &sub.to_string(),
-                &iss,
-                aud,
-                "",
-                ttl_seconds,
-                roles,
-                permissions,
-                jti,
-            )
-            .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
     }
 
     /// Sign an access token for client_credentials grant (sub = client_id, no user).
@@ -827,7 +780,7 @@ mod tests {
     #[test]
     fn test_redact_access_token_masks_each_token_and_preserves_other_parameters() {
         let uri: http::Uri =
-            "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4&access_token=first&access_token=second"
+            "/api/v1/oidc/userinfo?format=json&access_token=first&access_token=second"
                 .parse()
                 .unwrap();
 
@@ -835,7 +788,7 @@ mod tests {
 
         assert_eq!(
             redacted,
-            "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4&access_token=REDACTED&access_token=REDACTED"
+            "/api/v1/oidc/userinfo?format=json&access_token=REDACTED&access_token=REDACTED"
         );
         assert!(!redacted.contains("first"));
         assert!(!redacted.contains("second"));
@@ -843,10 +796,8 @@ mod tests {
 
     #[test]
     fn test_redact_access_token_leaves_uris_without_token_unchanged() {
-        let without_query: http::Uri = "/api/v1/im/users".parse().unwrap();
-        let without_token: http::Uri = "/api/v1/im/files?path=storage%2Fvideo%2Fclip.mp4"
-            .parse()
-            .unwrap();
+        let without_query: http::Uri = "/api/v1/users".parse().unwrap();
+        let without_token: http::Uri = "/api/v1/oidc/userinfo?format=json".parse().unwrap();
 
         assert_eq!(
             redact_access_token(&without_query),
@@ -897,22 +848,22 @@ mod tests {
             "/api/v1"
         ));
         assert!(should_skip_body_logging(
-            &"/api/v1/im/files".parse().unwrap(),
+            &"/api/v1/csrf".parse().unwrap(),
             &headers,
             "/api/v1"
         ));
         assert!(!should_skip_body_logging(
-            &"/something-im/files".parse().unwrap(),
+            &"/other/csrf".parse().unwrap(),
             &headers,
             "/api/v1"
         ));
         assert!(!should_skip_body_logging(
-            &"/api/v1/im/users".parse().unwrap(),
+            &"/api/v1/users".parse().unwrap(),
             &headers,
             "/api/v1"
         ));
         assert!(should_skip_body_logging(
-            &"/api/v1/im/messages".parse().unwrap(),
+            &"/api/v1/test-upload".parse().unwrap(),
             &multipart_headers,
             "/api/v1"
         ));
@@ -953,7 +904,7 @@ mod tests {
             "/custom"
         ));
         assert!(should_skip_body_logging(
-            &"/custom/im/files".parse().unwrap(),
+            &"/custom/csrf".parse().unwrap(),
             &headers,
             "/custom"
         ));
@@ -982,5 +933,47 @@ mod tests {
         assert!(!body_exceeds_log_limit(&invalid));
 
         assert!(!body_exceeds_log_limit(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn security_t25_csrf_and_logout_evidence_is_excluded_from_generic_logs() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-csrf-token",
+            HeaderValue::from_static("signed-test-proof"),
+        );
+        assert!(!redact_sensitive_headers(headers.clone()).contains_key("x-csrf-token"));
+        for path in ["/custom/csrf", "/custom/logout", "/oidc/logout"] {
+            assert!(
+                should_skip_body_logging(&path.parse().unwrap(), &headers, "/custom"),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_http_development_cookie_policy_stops_before_database_init() {
+        for wildcard_listener in [false, true] {
+            let mut config = Config::default();
+            config.auth.allow_insecure_loopback_cookies = true;
+            config.database.url = "must-not-open-database".into();
+            config.http.listen = "127.0.0.1:4000".parse().unwrap();
+            if !wildcard_listener {
+                config.oidc.issuer = "https://remote.example.test".into();
+            }
+            let listener = TcpListener::bind(if wildcard_listener {
+                "0.0.0.0:0"
+            } else {
+                "127.0.0.1:0"
+            })
+            .await
+            .unwrap();
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                serve(config, listener, std::future::pending()),
+            )
+            .await
+            .unwrap();
+        }
     }
 }

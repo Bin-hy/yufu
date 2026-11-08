@@ -10,65 +10,63 @@
 //! validates it using the [`TokenManager`], and injects the decoded [`Claims`]
 //! into the request's extensions for later extraction by handlers or extractors.
 //!
-//! # Example
+//! # Middleware integration
 //!
-//! The following demonstrates how to integrate the authentication middleware
-//! within an Axum application—just like in the `serve()` function of your project:
+//! New integrations use [`strict_access_middleware`] with a configured
+//! [`security::credential::StrictAccessState`] to verify current credential status.
+//! The legacy JWT middleware remains available for compatibility:
 //!
 //! ```no_run
 //! use axum::{Router, middleware, routing::get};
-//! use auth::auth::{access_middleware, AuthState};
-//! use auth::token_manager::TokenManager;
+//! use auth::{AuthState, access_middleware};
 //! use auth::claims::Claims;
+//! use auth::token_manager::TokenManager;
 //!
-//! // Example protected route that requires authentication
-//! async fn profile(claims: Claims) -> String {
+//! async fn profile(claims: Claims<i32>) -> String {
 //!     format!("Hello, user {}!", claims.id)
 //! }
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     // 1. Initialize the TokenManager (JWT secret + expiration time)
-//!     let token_manager = TokenManager::new("my_secret_key", 3600);
-//!
-//!     // 2.1 Create the shared authentication state,in your middleware to verify user
-//!     let auth_state = AuthState { token_manager };
-//!     // 2.2 Create global state, in your auth service to generate user
-//!     let app_state = AppState {auth_state:auth_state.clone()}
-//!     // 3. Define protected routes that require valid JWT tokens
-//!     let auth_routes = Router::new()
-//!         .route("/profile", get(profile))
-//!         // Apply the authentication middleware to this router
-//!         .layer(middleware::from_fn_with_state(auth_state.clone(), access_middleware));
-//!
-//!     // 4. Optionally, define public routes that do not require authentication
-//!     let public_routes = Router::new()
-//!         .route("/health", get(|| async { "OK" }));
-//!
-//!     // 5. Combine routers into a single application
-//!     let app = Router::new()
-//!         .nest("/api/v1", auth_routes)
-//!         .nest("/api/v1", public_routes)
-//!         .with_state();
-//!
-//!     // 6. Start the Axum server
-//!     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
-//!         .serve(app.into_make_service())
-//!         .await
-//!         .unwrap();
-//! }
-//!
-//!
-//! #[derive(Clone)]
-//! struct AppState {
-//!     auth_state: Arc<AuthState>,
-//! }
-//!
+//! let state = AuthState {
+//!     token_manager: TokenManager::new("example-access-key", 3600),
+//!     refresh_token_manager: TokenManager::new("example-refresh-key", 86400),
+//! };
+//! let app: Router = Router::new().route("/profile", get(profile))
+//!     .layer(middleware::from_fn_with_state(state, access_middleware::<i32>));
 //! ```
 pub mod claims;
 mod claims_extractor;
 pub mod jwks;
+pub mod security;
 pub mod token_manager;
+
+/// Strict access profile, including current registered credential status.
+pub async fn strict_access_middleware(
+    State(auth): State<Arc<security::credential::StrictAccessState>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    use security::{credential::AuthenticatedContext, error::SecurityError};
+    request.extensions_mut().remove::<AuthenticatedContext>();
+    match auth.authenticate(request.headers()).await {
+        Ok(context) => {
+            request.extensions_mut().insert(context);
+            next.run(request).await
+        }
+        Err(error) => {
+            let status = match error {
+                SecurityError::InvalidCredential | SecurityError::CredentialRevoked => {
+                    StatusCode::UNAUTHORIZED
+                }
+                SecurityError::Forbidden => StatusCode::FORBIDDEN,
+                SecurityError::InvalidResource => StatusCode::BAD_REQUEST,
+                SecurityError::Conflict => StatusCode::CONFLICT,
+                SecurityError::DependencyUnavailable
+                | SecurityError::DeadlineExceeded
+                | SecurityError::CapacityExceeded => StatusCode::SERVICE_UNAVAILABLE,
+            };
+            (status, error.to_string()).into_response()
+        }
+    }
+}
 
 use crate::jwks::JwksClient;
 use crate::token_manager::{TokenError, TokenManager};
@@ -128,20 +126,17 @@ pub struct AuthState {
 /// # Example
 ///
 /// ```no_run
-/// use axum::{middleware, Router, routing::get};
-/// use auth::{access_middleware, AuthState};
+/// use axum::{Router, middleware, routing::get};
+/// use auth::{AuthState, access_middleware};
+/// use auth::claims::Claims;
 /// use auth::token_manager::TokenManager;
-///
-/// async fn profile(claims: my_crate::claims::Claims) -> String {
-///     format!("User ID: {}", claims.id)
-/// }
-///
-/// let token_manager = TokenManager::new("secret", 3600);
-/// let auth_state = AuthState { token_manager };
-///
-/// let app = Router::new()
-///     .route("/profile", get(profile))
-///     .layer(middleware::from_fn_with_state(auth_state, access_middleware));
+/// async fn profile(claims: Claims<i32>) -> String { claims.id.to_string() }
+/// let state = AuthState {
+///     token_manager: TokenManager::new("example-key", 3600),
+///     refresh_token_manager: TokenManager::new("example-refresh-key", 86400),
+/// };
+/// let app: Router = Router::new().route("/profile", get(profile))
+///     .layer(middleware::from_fn_with_state(state, access_middleware::<i32>));
 /// ```
 pub async fn access_middleware<IDTYPE>(
     State(auth_state): State<AuthState>,
@@ -219,8 +214,8 @@ where
 ///
 /// # Type Parameters
 ///
-/// - `F`: An asynchronous function or closure that takes `&Claims` and `&mut Request`
-///   and performs custom logic.
+/// - `F`: An asynchronous function or closure that takes owned `Claims` and `Request`
+///   and returns the updated request.
 /// - `Fut`: The future returned by the callback function.
 ///
 /// # Arguments
@@ -238,119 +233,22 @@ where
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// use axum::{
-///     Router,
-///     routing::get,
-///     middleware,
-///     http::{Request, StatusCode},
-///     extract::State,
-///     response::IntoResponse,
+/// ```no_run
+/// use axum::{Router, body::Body, extract::{Request, State}, middleware::{self, Next}, response::Response, routing::get};
+/// use auth::{AuthState, access_middleware_with_callback};
+/// use auth::token_manager::TokenManager;
+/// async fn load_identity(state: State<AuthState>, request: Request<Body>, next: Next) -> Response {
+///     access_middleware_with_callback::<i32, _, _>(state, request, next, |claims, mut request| async move {
+///         request.extensions_mut().insert(claims.id);
+///         Ok(request)
+///     }).await
+/// }
+/// let state = AuthState {
+///     token_manager: TokenManager::new("example-key", 3600),
+///     refresh_token_manager: TokenManager::new("example-refresh-key", 86400),
 /// };
-/// use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter, ColumnTrait};
-/// use uuid::Uuid;
-/// use std::sync::Arc;
-///
-/// #[derive(Clone)]
-/// struct AuthState {
-///     token_manager: Arc<TokenManager>,
-/// }
-///
-/// #[derive(Clone, Debug)]
-/// struct Claims {
-///     user_id: Uuid,
-///     username: String,
-/// }
-///
-/// struct TokenManager;
-/// impl TokenManager {
-///     fn verify_token(&self, token: &str) -> Result<Claims, TokenError> {
-///         // Example: Simulate token verification
-///         Ok(Claims {
-///             user_id: Uuid::new_v4(),
-///             username: "demo_user".to_string(),
-///         })
-///     }
-/// }
-///
-/// #[derive(Debug)]
-/// enum TokenError { Expired, InvalidSignature, InvalidToken }
-///
-/// async fn access_middleware_with_callback<F, Fut>(
-///     State(auth_state): State<AuthState>,
-///     mut request: Request,
-///     next: axum::middleware::Next,
-///     callback: F,
-/// ) -> axum::response::Response
-/// where
-///     F: FnOnce(&Claims, &mut Request) -> Fut + Send + 'static,
-///     Fut: std::future::Future<Output = Result<(), (StatusCode, String)>> + Send,
-/// {
-///     // Extract token from Authorization header
-///     let token = match request
-///         .headers()
-///         .get("Authorization")
-///         .and_then(|v| v.to_str().ok())
-///         .and_then(|h| h.strip_prefix("Bearer "))
-///     {
-///         Some(t) => t.trim(),
-///         None => return (StatusCode::UNAUTHORIZED, "Missing Authorization header").into_response(),
-///     };
-///
-///     // Validate token
-///     let token_manager = &auth_state.token_manager;
-///     match token_manager.verify_token(token) {
-///         Ok(claims) => {
-///             // Inject claims into request extensions
-///             request.extensions_mut().insert(claims.clone());
-///
-///             // Run custom callback
-///             if let Err((code, msg)) = callback(&claims, &mut request).await {
-///                 return (code, msg).into_response();
-///             }
-///
-///             // Continue with the next handler
-///             next.run(request).await
-///         }
-///         Err(TokenError::Expired) => (StatusCode::UNAUTHORIZED, "Token expired").into_response(),
-///         Err(TokenError::InvalidSignature) => (StatusCode::UNAUTHORIZED, "Invalid signature").into_response(),
-///         Err(TokenError::InvalidToken) => (StatusCode::UNAUTHORIZED, "Malformed token").into_response(),
-///     }
-/// }
-///
-/// // Example callback: load user info from database based on the token’s user_id
-/// async fn load_user_info(
-///     claims: &Claims,
-///     req: &mut Request,
-/// ) -> Result<(), (StatusCode, String)> {
-///     // Simulate database lookup
-///     let user_info = format!("User<{}>", claims.username);
-///
-///     // Inject user info into request extensions
-///     req.extensions_mut().insert(user_info);
-///     Ok(())
-/// }
-///
-/// async fn handler(req: Request) -> impl IntoResponse {
-///     let user_info = req.extensions().get::<String>().unwrap();
-///     format!("Hello, {user_info}")
-/// }
-///
-/// #[tokio::main]
-/// async fn main() {
-///     let auth_state = AuthState {
-///         token_manager: Arc::new(TokenManager),
-///     };
-///
-///     let app = Router::new()
-///         .route("/secure", get(handler))
-///         .route_layer(middleware::from_fn_with_state(
-///             auth_state.clone(),
-///             |state, req, next| access_middleware_with_callback(state, req, next, load_user_info),
-///         ));
-///
-///     println!("✅ Middleware with callback ready!");
-/// }
+/// let app: Router = Router::new().route("/profile", get(|| async { "OK" }))
+///     .layer(middleware::from_fn_with_state(state, load_identity));
 /// ```
 pub async fn access_middleware_with_callback<IDTYPE, F, Fut>(
     State(auth_state): State<AuthState>,
@@ -426,29 +324,16 @@ where
 /// JWT verification middleware using a [`JwksClient`] (RS256, public-key only).
 ///
 /// Use this in services that consume tokens issued by another service (e.g.
-/// cobotrix consuming cobotsrv-issued tokens). Validated [`crate::claims::AccessTokenClaims`]
+/// cobotrix consuming resource-app-issued tokens). Validated [`crate::claims::AccessTokenClaims`]
 /// is inserted into request extensions so handlers can extract it.
 pub async fn access_middleware_rs256(
     State(jwks): State<Arc<JwksClient>>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    let token = match request
-        .headers()
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .map(|t| t.trim().to_string())
-        .or_else(|| {
-            request.uri().query().and_then(|q| {
-                q.split('&')
-                    .filter_map(|p| p.split_once('='))
-                    .find(|(k, _)| *k == "access_token")
-                    .map(|(_, v)| v.trim().to_string())
-            })
-        }) {
-        Some(t) => t,
-        None => {
+    let token = match security::credential::extract_bearer(request.headers()) {
+        Ok(token) => token,
+        Err(_) => {
             return (
                 StatusCode::UNAUTHORIZED,
                 "Missing or invalid Authorization header",
@@ -456,7 +341,7 @@ pub async fn access_middleware_rs256(
                 .into_response();
         }
     };
-    let token = token.as_str();
+    let token = token.expose_secret();
 
     match jwks.verify(token) {
         Ok(claims) => {
@@ -483,7 +368,7 @@ pub async fn access_middleware_rs256(
 /// JWT verification middleware using the **local** [`crate::token_manager::IdTokenSigner`]
 /// (RS256, signer holds the private key, no JWKS roundtrip).
 ///
-/// Use this in the IdP itself (e.g. cobotsrv) to verify tokens it just issued.
+/// Use this in the IdP itself (e.g. resource-app) to verify tokens it just issued.
 /// External services should use [`access_middleware_rs256`] with a [`JwksClient`].
 ///
 /// Validated [`crate::claims::AccessTokenClaims`] is inserted into request extensions.
@@ -493,22 +378,9 @@ pub async fn access_middleware_local_rs256(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let token = match request
-        .headers()
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
-        .map(|t| t.trim().to_string())
-        .or_else(|| {
-            request.uri().query().and_then(|q| {
-                q.split('&')
-                    .filter_map(|p| p.split_once('='))
-                    .find(|(k, _)| *k == "access_token")
-                    .map(|(_, v)| v.trim().to_string())
-            })
-        }) {
-        Some(t) => t,
-        None => {
+    let token = match security::credential::extract_bearer(request.headers()) {
+        Ok(token) => token,
+        Err(_) => {
             return (
                 StatusCode::UNAUTHORIZED,
                 "Missing or invalid Authorization header",
@@ -516,7 +388,7 @@ pub async fn access_middleware_local_rs256(
                 .into_response();
         }
     };
-    let token = token.as_str();
+    let token = token.expose_secret();
 
     match signer.verify_access_token(token, None) {
         Ok(claims) => {
@@ -541,12 +413,12 @@ pub async fn access_middleware_local_rs256(
 }
 
 /// Trait for async permission checking, used by the `require_perm!` macro
-/// to support PDP-based enforcement (calling cobotsrv's `/enforce` endpoint)
+/// to support PDP-based enforcement (calling resource-app's `/enforce` endpoint)
 /// instead of relying on permissions embedded in the JWT claims.
 ///
 /// If a `PermissionChecker` is present in request extensions, `require_perm!`
 /// will use it for an async PDP check. Otherwise it falls back to
-/// `AccessTokenClaims.permissions` (backward compatible with cobotsrv).
+/// `AccessTokenClaims.permissions` (backward compatible with resource-app).
 pub trait PermissionChecker: Send + Sync {
     fn check_permission<'a>(
         &'a self,
@@ -563,9 +435,9 @@ pub trait PermissionChecker: Send + Sync {
 ///
 /// **Two modes** (checked in order):
 /// 1. If `Arc<dyn PermissionChecker>` is in request extensions, calls it for an
-///    async PDP check (e.g. cobotrix calling cobotsrv's `/api/v1/enforce`).
+///    async PDP check (e.g. cobotrix calling resource-app's `/api/v1/enforce`).
 /// 2. Otherwise falls back to checking `AccessTokenClaims.permissions` embedded
-///    in the JWT (backward compatible with cobotsrv).
+///    in the JWT (backward compatible with resource-app).
 ///
 /// # Usage
 ///

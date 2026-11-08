@@ -1,28 +1,35 @@
 <script setup lang="ts">
 import { cn } from '@/lib/utils'
-
-const props = withDefaults(defineProps<{
-  modelValue?: string | number
-  disabled?: boolean
-  class?: string
-}>(), {
-  disabled: false,
-})
-
-const emit = defineEmits<{ (e: 'update:modelValue', v: string | number): void }>()
-
-function onChange(e: Event) {
-  const t = e.target as HTMLSelectElement
-  const value = t.value
-  emit('update:modelValue', value)
+const props = defineProps<{
+    modelValue?: string | number | null
+    disabled?: boolean
+    class?: string
+    modelModifiers?: { number?: boolean }
+}>()
+const emit = defineEmits<{ 'update:modelValue': [value: string | number | null] }>()
+function update(event: Event) {
+    const select = event.target as HTMLSelectElement
+    const option = select.selectedOptions[0] as HTMLOptionElement & { _value?: unknown }
+    const raw = option?._value
+    if (raw === null || select.value === '' || select.value === 'null') {
+        emit('update:modelValue', null)
+        return
+    }
+    const numeric =
+        props.modelModifiers?.number ||
+        typeof raw === 'number' ||
+        typeof props.modelValue === 'number'
+    const number = Number(select.value)
+    emit('update:modelValue', numeric && Number.isFinite(number) ? number : select.value)
 }
-
-// 基础样式参照 shadcn 输入控件
-const base = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
 </script>
-
 <template>
-  <select :value="props.modelValue as any" :disabled="props.disabled" :class="cn(base, props.class)" @change="onChange">
-    <slot />
-  </select>
+    <select
+        :value="modelValue ?? 'null'"
+        :disabled="disabled"
+        :class="cn('ui-select', $props.class)"
+        @change="update"
+    >
+        <slot />
+    </select>
 </template>

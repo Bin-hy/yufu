@@ -1,19 +1,4 @@
 services:
-    emqx:
-        image: emqx/emqx:latest
-        container_name: emqx
-        restart: always
-        ports:
-            - "${MQTT_PORT:-1883}:1883"
-            - "${MQTT_DASHBOARD_PORT:-18083}:18083"
-        environment:
-            EMQX_DASHBOARD__DEFAULT_USERNAME: ${MQTT_DASHBOARD_USERNAME:-admin}
-            EMQX_DASHBOARD__DEFAULT_PASSWORD: ${MQTT_DASHBOARD_PASSWORD:-changeme123456}
-            EMQX_ALLOW_ANONYMOUS: "false"
-        volumes:
-            - cobotrix_emqx_data:/opt/emqx/data
-            - cobotrix_emqx_log:/opt/emqx/log
-
     postgres_cobotusr:
         image: postgres:18-alpine
         container_name: postgres_cobotusr
@@ -27,21 +12,5 @@ services:
         volumes:
             - cobotrix_pg_usr:/var/lib/postgresql
 
-    postgres_cobotsrv:
-        image: postgres:18-alpine
-        container_name: postgres_cobotsrv
-        restart: always
-        ports:
-            - "${POSTGRES_SRV_PORT:-5431}:5432"
-        environment:
-            POSTGRES_USER: ${POSTGRES_SRV_USER:-postgres}
-            POSTGRES_PASSWORD: ${POSTGRES_SRV_PASSWORD:-postgres}
-            POSTGRES_DB: ${POSTGRES_SRV_DB:-cobotsrv}
-        volumes:
-            - cobotrix_pg_srv:/var/lib/postgresql
-
 volumes:
     cobotrix_pg_usr:
-    cobotrix_pg_srv:
-    cobotrix_emqx_data:
-    cobotrix_emqx_log:

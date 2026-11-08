@@ -4,7 +4,11 @@ listen = "127.0.0.1:4000"
 # api_prefix = "/api/v1"
 
 # Headers["Authorization"] = "Bearer {token}"
- [auth]
+[auth]
+# 默认 Cookie 带 Secure，生产浏览器入口应使用 HTTPS。
+# 本机 HTTP 开发（含 Safari）可以显式打开；监听地址和 issuer 必须是 loopback。
+# 独立启动也可用 CLI --allow-insecure-loopback-cookies，无须修改配置文件。
+# allow_insecure_loopback_cookies = false
 # JSON WEB TOKEN secret
 # secret = "<jwt_secret>"
 # static JWT token, superadmin, debuggger can use this token
@@ -53,49 +57,16 @@ refresh_token_expire_seconds = 604800
 # POST /api/v1/oidc/mcp-tokens. Requested ttl_days is clamped to this. Default 90.
 # mcp_token_max_ttl_days = 90
 
-[[oidc.bootstrap_clients]]
-client_id = "cobotsrv"
-name = "CoBotrix Device Management Server"
-redirect_uris = ["http://localhost:5174/oauth/callback"]
-allowed_scopes = ["openid", "profile", "email"]
-grant_types = ["authorization_code", "refresh_token"]
-# cobotsrv SPA 是 public client,授权码交换用 PKCE (S256),
-# 不把 secret 打进前端 bundle。权限同步由下方 cobotsrv-sync
-# machine client 完成(app_key = "cobotsrv")。
-public_client = true
-
-# cobotsrv 后端专用 machine client(confidential):仅用于 client_credentials
-# 授权(启动时同步权限)。secret 与 conf/cobotrix/cobotsrv.toml
-# [auth].sync_client_secret 保持一致。
-[[oidc.bootstrap_clients]]
-client_id = "cobotsrv-sync"
-name = "CoBotrix Device Management Server (machine)"
-redirect_uris = []
-allowed_scopes = ["openid", "profile", "email"]
-grant_types = ["client_credentials"]
-client_secret = "dev-cobotsrv-sync-secret-change-me"
-
-# Cobotrix IM is a public SPA client. PKCE (S256) proves possession during
-# authorization-code exchange, so no client secret is exposed in the browser.
-[[oidc.bootstrap_clients]]
-client_id = "cobotimx"
-name = "CoBotrix IM"
-redirect_uris = ["http://localhost:5174/oauth/callback", "http://localhost:5174/login"]
-allowed_scopes = ["openid", "profile", "email"]
-grant_types = ["authorization_code", "refresh_token"]
-public_client = true
-
-# Additional OIDC clients can be auto-registered at startup. Existing entries (matched by client_id)
-# are left untouched — secrets are NEVER overwritten by config.
-# If client_secret is omitted, a random one is generated on first run and printed
-# ONCE in the startup log. Set explicitly here for stable dev/test secrets.
+# Register external applications through the admin UI or explicit bootstrap entries.
+# No business client or permission is granted by default.
 # [[oidc.bootstrap_clients]]
-# client_id = "cobotrix"
-# name = "CoBotrix Management Center"
-# redirect_uris = ["http://localhost:5173/oauth/callback"]
+# client_id = "example-spa"
+# name = "Example application"
+# redirect_uris = ["http://localhost:5174/oauth/callback"]
 # allowed_scopes = ["openid", "profile", "email"]
 # grant_types = ["authorization_code", "refresh_token"]
-# client_secret = "<dev-only-stable-secret>"
+# public_client = true
+
 # Admin Dashboard Accounts
 # [[auth.accounts]]
 # username = "live777"
@@ -108,37 +79,22 @@ public_client = true
 # level = "warn"
 
 [database]
-url = "postgres://postgres:postgres@localhost:5432/cobotrix"
+url = "postgres://postgres:postgres@localhost:5433/cobotusr"
 # max connections (Default: 10, unit: second)
 max_connections = 10
 # timeout  (Default: 30 ,unit: second)
 connect_timeout = 30
 
-# [net4mqtt]
-# Global unique alias
-# alias = "liveman-0"
-# `client_id={alias}` use alias as MQTT `client_id`
-# mqtt_url = "mqtt://localhost:1883/net4mqtt?client_id={alias}"
-# listen = "127.0.0.1:1077"
-# domain = "net4mqtt.local"
-
-# [[nodes]]
-# Globally unique id
-# alias = "static-0"
-# Auth token
-# token = "live777"
-# Live777 Address
-# url = "http://127.0.0.1:7777"
-
-# [[nodes]]
-# alias = "static-1"
-# token = "live777"
-# url = "http://127.0.0.1:7778"
-
-# [[nodes]]
-# Globally unique id
-# alias = "static-0"
-# Auth token
-# token = "live777"
-# Live777 Address
-# url = "http://liveion-0.net4mqtt.local:7777"
+# 认证时钟健康检查：只测量宿主时间，不设置或校正 OS 时间。
+# 默认至少两个不同 IP 的来源一致且总误差 <= 1 秒，10 秒检查一次。
+# UDP/DNS 不可达、样本过期或时钟跳变时，认证入口返回 503；启动首次检查失败则退出。
+# 独立诊断：cobotusr --config <path> --check-security-clock（不打开数据库或 HTTP 服务）。
+# 运行后 GET /api/v1/health/ready 仅报告认证时钟就绪状态。
+# 普通 NTP 没有传输认证；生产应使用受信网络中的 NTP 来源，或由宿主通过
+# serve_with_security_clock 注入具备可信健康证据的 Clock。不要填公共来源来替代部署信任策略。
+[security_clock]
+servers = ["time.apple.com:123", "time.cloudflare.com:123", "ntp.aliyun.com:123"]
+min_agreeing_sources = 2
+poll_interval_seconds = 10
+sample_ttl_seconds = 30
+timeout_millis = 1500

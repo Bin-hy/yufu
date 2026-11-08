@@ -20,6 +20,10 @@ mod m20260508_000003_create_role_permission;
 mod m20260508_000004_create_user_permission;
 mod m20260617_000001_create_mcp_token;
 mod m20260725_000001_add_oauth_client_public_client;
+mod m20261107_000001_security_identity;
+mod m20261107_000002_security_permit_audit;
+mod m20261108_000001_security_refresh_pair;
+mod m20261108_000002_auth_center;
 
 use crate::seed;
 pub struct Migrator;
@@ -48,10 +52,17 @@ impl MigratorTrait for Migrator {
             Box::new(m20260617_000001_create_mcp_token::Migration),
             Box::new(m20260725_000001_add_oauth_client_public_client::Migration),
         ];
-        // SeaORM re-sorts all migrations by name, so the seeds appended here
-        // are NOT guaranteed to run after every schema migration — each
-        // seed's timestamp must be later than the tables it depends on
+        // This SeaORM version executes the supplied order. Preserve the legacy
+        // schema/seed sequence, then append security migrations so rolling back
+        // the new schema never attempts an irreversible legacy seed first.
         migrations.extend(seed::Migrator::migrations());
+        migrations.push(Box::new(m20261107_000001_security_identity::Migration));
+        migrations.push(Box::new(m20261107_000002_security_permit_audit::Migration));
+        migrations.push(Box::new(
+            seed::m20261107_000003_security_operations::Migration,
+        ));
+        migrations.push(Box::new(m20261108_000001_security_refresh_pair::Migration));
+        migrations.push(Box::new(m20261108_000002_auth_center::Migration));
         migrations
     }
 }

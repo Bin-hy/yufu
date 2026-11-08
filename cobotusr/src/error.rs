@@ -3,8 +3,8 @@ use http::StatusCode;
 use sea_orm::{DbErr, SqlErr};
 #[derive(Debug)]
 pub enum AppError {
-    NoAvailableDevice,
-    RequestProxyError,
+    Security(auth::security::error::SecurityError),
+    BrowserRejected(BrowserRejection),
     NotFound(String),
     AlreadyExists(String),
     Throw(String),
@@ -12,6 +12,36 @@ pub enum AppError {
     Unauthorized(String),
     BadRequest(String),
     Forbidden(String),
+}
+
+/// Public transport failures only; never include proofs, cookies, or signing details.
+#[derive(Debug, Clone, Copy)]
+pub enum BrowserRejection {
+    OriginMissing,
+    OriginInvalid,
+    OriginNotAllowed,
+    CookieInvalid,
+    CookieMissing,
+    CookieRequiresHttps,
+    ProofMissing,
+    ProofMismatch,
+    ProofInvalid,
+}
+
+impl BrowserRejection {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::OriginMissing => "csrf_origin_missing",
+            Self::OriginInvalid => "csrf_origin_invalid",
+            Self::OriginNotAllowed => "csrf_origin_not_allowed",
+            Self::CookieInvalid => "csrf_cookie_invalid",
+            Self::CookieMissing => "csrf_cookie_missing",
+            Self::CookieRequiresHttps => "csrf_cookie_requires_https",
+            Self::ProofMissing => "csrf_proof_missing",
+            Self::ProofMismatch => "csrf_proof_mismatch",
+            Self::ProofInvalid => "csrf_proof_invalid",
+        }
+    }
 }
 
 impl AppError {
@@ -40,13 +70,26 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
-            AppError::NoAvailableDevice => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "no available device".to_string(),
+            AppError::BrowserRejected(reason) => (
+                StatusCode::FORBIDDEN,
+                [(http::header::CACHE_CONTROL, "no-store")],
+                axum::Json(serde_json::json!({"code": reason.code(), "message": "browser authentication rejected"})),
             )
                 .into_response(),
-            AppError::RequestProxyError => {
-                (StatusCode::BAD_REQUEST, "request error".to_string()).into_response()
+            AppError::Security(err) => {
+                use auth::security::error::SecurityError;
+                let status = match err {
+                    SecurityError::InvalidCredential | SecurityError::CredentialRevoked => {
+                        StatusCode::UNAUTHORIZED
+                    }
+                    SecurityError::Forbidden => StatusCode::FORBIDDEN,
+                    SecurityError::InvalidResource => StatusCode::BAD_REQUEST,
+                    SecurityError::Conflict => StatusCode::CONFLICT,
+                    SecurityError::DependencyUnavailable
+                    | SecurityError::DeadlineExceeded
+                    | SecurityError::CapacityExceeded => StatusCode::SERVICE_UNAVAILABLE,
+                };
+                (status, err.to_string()).into_response()
             }
             AppError::NotFound(err) => (StatusCode::NOT_FOUND, err).into_response(),
             AppError::AlreadyExists(err) => (StatusCode::CONFLICT, err).into_response(),
@@ -66,7 +109,12 @@ where
     E: Into<anyhow::Error>,
 {
     fn from(err: E) -> Self {
-        AppError::InternalServerError(err.into())
+        let err = err.into();
+        if let Some(security) = err.downcast_ref::<auth::security::error::SecurityError>() {
+            AppError::Security(*security)
+        } else {
+            AppError::InternalServerError(err)
+        }
     }
 }
 
@@ -109,6 +157,37 @@ impl<T> SeaResultExt<T> for Result<T, DbErr> {
                     _ => Err(AppError::InternalServerError(e.into())),
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use auth::security::error::SecurityError;
+
+    #[test]
+    fn security_errors_keep_their_sanitized_http_classification() {
+        for (error, expected) in [
+            (SecurityError::InvalidCredential, StatusCode::UNAUTHORIZED),
+            (SecurityError::CredentialRevoked, StatusCode::UNAUTHORIZED),
+            (SecurityError::Forbidden, StatusCode::FORBIDDEN),
+            (SecurityError::InvalidResource, StatusCode::BAD_REQUEST),
+            (SecurityError::Conflict, StatusCode::CONFLICT),
+            (
+                SecurityError::DependencyUnavailable,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                SecurityError::DeadlineExceeded,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                SecurityError::CapacityExceeded,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+        ] {
+            assert_eq!(AppError::from(error).into_response().status(), expected);
         }
     }
 }

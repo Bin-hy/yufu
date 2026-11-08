@@ -35,7 +35,7 @@ impl TokenManager {
     /// # Example
     ///
     /// ```
-    /// use auth::TokenManager;
+    /// use auth::token_manager::TokenManager;
     ///
     /// let manager = TokenManager::new("mysecret", 3600);
     /// ```
@@ -61,12 +61,12 @@ impl TokenManager {
     /// # Example
     ///
     /// ```
-    /// use auth::TokenManager;
+    /// use auth::token_manager::TokenManager;
     ///
     /// let manager = TokenManager::new("mysecret", 3600);
     /// let token = manager.generate_token("user123").unwrap(); // String ID
     /// let token2 = manager.generate_token(42).unwrap();       // i32 ID
-    /// println!("Generated token: {}", token);
+    /// assert!(!token.is_empty());
     /// ```
     pub fn generate_token<IDTYPE>(&self, user_id: IDTYPE) -> JwtResult<String>
     where
@@ -126,7 +126,7 @@ impl TokenManager {
     /// # Example
     ///
     /// ```
-    /// use auth::{TokenManager, TokenError, Claims};
+    /// use auth::token_manager::{TokenManager, TokenError};
     ///
     /// let manager = TokenManager::new("mysecret", 3600);
     /// let token = manager.generate_token::<String>("user1".to_string()).unwrap();
@@ -183,23 +183,20 @@ impl TokenManager {
     }
 
     /// Generates an OIDC ID Token (HMAC fallback, prefer IdTokenSigner for RSA).
-    pub fn generate_id_token<IDTYPE>(
+    pub fn generate_id_token(
         &self,
-        subject: IDTYPE,
+        subject: &str,
         issuer: &str,
         audience: Option<&str>,
         nonce: Option<&str>,
         access_token: Option<&str>,
-    ) -> JwtResult<String>
-    where
-        IDTYPE: Clone + Send + Sync + 'static + Serialize,
-    {
+    ) -> JwtResult<String> {
         let now = Utc::now();
         let exp = now + Duration::seconds(self.expire_seconds);
         let at_hash = compute_at_hash(access_token);
         let claims = IdTokenClaims {
             iss: issuer.to_string(),
-            sub: subject,
+            sub: subject.to_owned(),
             aud: audience.map(|s| s.to_string()),
             iat: now.timestamp() as u64,
             exp: exp.timestamp() as u64,
@@ -236,6 +233,78 @@ pub struct IdTokenSigner {
 }
 
 impl IdTokenSigner {
+    /// Strict local verification uses only the configured RSA key and profile.
+    pub fn verify_security_credential(
+        &self,
+        token: &crate::security::identity::SecretToken,
+        expected: &crate::security::credential::CredentialExpectation,
+        clock: &dyn crate::security::budget::Clock,
+    ) -> Result<
+        crate::security::credential::VerifiedCredential,
+        crate::security::error::SecurityError,
+    > {
+        use crate::security::{
+            credential::{access_key_id, verify_access_with_key},
+            error::SecurityError,
+        };
+        let key = self
+            .rsa_decoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        if access_key_id(token)? != self.kid {
+            return Err(SecurityError::InvalidCredential);
+        }
+        verify_access_with_key(token, expected, key, clock)
+    }
+    /// A signed reference may target retired credentials for revocation. It is
+    /// deliberately not a VerifiedCredential or a usable authentication context.
+    pub fn revocation_reference(
+        &self,
+        token: &crate::security::identity::SecretToken,
+        issuer: &str,
+    ) -> Result<crate::security::credential::CredentialRef, crate::security::error::SecurityError>
+    {
+        use crate::security::{
+            credential::{CredentialRef, SecurityAccessClaims, access_key_id},
+            error::SecurityError,
+        };
+        let key = self
+            .rsa_decoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        if access_key_id(token)? != self.kid {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&[issuer]);
+        validation.validate_aud = false;
+        validation.validate_exp = false;
+        validation.validate_nbf = false;
+        let claims = decode::<SecurityAccessClaims>(token.expose_secret(), key, &validation)
+            .map_err(|_| SecurityError::InvalidCredential)?
+            .claims;
+        if claims.iss != issuer {
+            return Err(SecurityError::InvalidCredential);
+        }
+        CredentialRef::new(claims.iss, claims.jti)
+    }
+    pub fn sign_security_access(
+        &self,
+        claims: &crate::security::credential::SecurityAccessClaims,
+    ) -> Result<crate::security::identity::SecretToken, crate::security::error::SecurityError> {
+        use crate::security::{error::SecurityError, identity::SecretToken};
+        let key = self
+            .rsa_encoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        let mut header = Header::new(Algorithm::RS256);
+        header.typ = Some("at+jwt".into());
+        header.kid = Some(self.kid.clone());
+        SecretToken::new(
+            encode(&header, claims, key).map_err(|_| SecurityError::DependencyUnavailable)?,
+        )
+    }
+
     /// Create from RSA PEM private key.
     pub fn from_rsa_pem(pem: &[u8], expire_seconds: i64) -> Result<Self, String> {
         let encoding_key = EncodingKey::from_rsa_pem(pem)
@@ -293,23 +362,20 @@ impl IdTokenSigner {
     }
 
     /// Generate a signed ID Token.
-    pub fn sign_id_token<IDTYPE>(
+    pub fn sign_id_token(
         &self,
-        subject: IDTYPE,
+        subject: &str,
         issuer: &str,
         audience: Option<&str>,
         nonce: Option<&str>,
         access_token: Option<&str>,
-    ) -> JwtResult<String>
-    where
-        IDTYPE: Clone + Send + Sync + 'static + Serialize,
-    {
+    ) -> JwtResult<String> {
         let now = Utc::now();
         let exp = now + Duration::seconds(self.expire_seconds);
         let at_hash = compute_at_hash(access_token);
         let claims = IdTokenClaims {
             iss: issuer.to_string(),
-            sub: subject,
+            sub: subject.to_owned(),
             aud: audience.map(|s| s.to_string()),
             iat: now.timestamp() as u64,
             exp: exp.timestamp() as u64,
@@ -403,7 +469,7 @@ impl IdTokenSigner {
 
     /// Verify a JWT access token using this signer's own key.
     ///
-    /// Used by cobotsrv to verify its own tokens locally (no JWKS round-trip).
+    /// Used by resource-app to verify its own tokens locally (no JWKS round-trip).
     /// Other services should use [`crate::jwks::JwksClient`] instead.
     /// `expected_aud` — if Some, requires the token's `aud` claim to match exactly.
     pub fn verify_access_token(
@@ -470,6 +536,77 @@ impl IdTokenSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_id_token_subject(token: &str, key: &DecodingKey, algorithm: Algorithm) {
+        let mut validation = Validation::new(algorithm);
+        validation.set_issuer(&["https://issuer.test"]);
+        validation.set_audience(&["test-client"]);
+        let claims = decode::<serde_json::Value>(token, key, &validation)
+            .expect("ID Token signature and claims should be valid")
+            .claims;
+        assert_eq!(claims["sub"], serde_json::json!("123"));
+    }
+
+    #[test]
+    fn test_generate_id_token_hmac_string_subject() {
+        let manager = TokenManager::new("test-secret", 300);
+        let token = manager
+            .generate_id_token(
+                &123.to_string(),
+                "https://issuer.test",
+                Some("test-client"),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_id_token_subject(
+            &token,
+            &DecodingKey::from_secret(b"test-secret"),
+            Algorithm::HS256,
+        );
+    }
+
+    #[test]
+    fn test_sign_id_token_hmac_string_subject() {
+        let signer = IdTokenSigner::from_hmac("test-secret", 300);
+        let token = signer
+            .sign_id_token(
+                &123.to_string(),
+                "https://issuer.test",
+                Some("test-client"),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_id_token_subject(
+            &token,
+            &DecodingKey::from_secret(b"test-secret"),
+            Algorithm::HS256,
+        );
+    }
+
+    #[test]
+    fn test_sign_id_token_rsa_string_subject() {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+
+        let private_key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+        let pem = private_key.to_pkcs8_pem(LineEnding::LF).unwrap();
+        let signer = IdTokenSigner::from_rsa_pem(pem.as_bytes(), 300).unwrap();
+        let token = signer
+            .sign_id_token(
+                &123.to_string(),
+                "https://issuer.test",
+                Some("test-client"),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_id_token_subject(
+            &token,
+            signer.rsa_decoding_key.as_ref().unwrap(),
+            Algorithm::RS256,
+        );
+    }
 
     #[test]
     fn test_expired_token() {

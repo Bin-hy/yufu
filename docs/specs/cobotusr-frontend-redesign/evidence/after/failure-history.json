@@ -1,0 +1,140 @@
+[
+  {
+    "source": "e2e-initial-run.json",
+    "stats": {
+      "startTime": "2026-11-08T13:35:30.742Z",
+      "duration": 113877.77500000001,
+      "expected": 135,
+      "skipped": 62,
+      "unexpected": 7,
+      "flaky": 0
+    },
+    "failures": [
+      {
+        "file": "auth.spec.ts",
+        "title": "普通登录失败保留用户名，成功恢复站内返回目标",
+        "project": "webkit",
+        "status": "timedOut",
+        "message": "\u001b[31mTest timeout of 30000ms exceeded while setting up \"page\".\u001b[39m"
+      },
+      {
+        "file": "auth.spec.ts",
+        "title": "登录忽略不适合返回的目标 https://outside.test/path",
+        "project": "webkit",
+        "status": "timedOut",
+        "message": "\u001b[31mTest timeout of 30000ms exceeded while setting up \"page\".\u001b[39m"
+      },
+      {
+        "file": "auth.spec.ts",
+        "title": "登录忽略不适合返回的目标 //outside.test",
+        "project": "webkit",
+        "status": "interrupted",
+        "message": "Error: browserContext.newPage: Protocol error (Page.overrideSetting): Unknown setting: PushAPIEnabled"
+      },
+      {
+        "file": "auth.spec.ts",
+        "title": "旧地址和安全 redirect 兼容，403/404直达有可用返回入口",
+        "project": "firefox",
+        "status": "failed",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 3\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"error loading dynamically imported module: http://127.0.0.1:5188/assets/page-header.vue_vue_type_script_setup_true_lang-qxmSRyWv.js\",\u001b[39m\n\u001b[31m+ ]\u001b[39m"
+      },
+      {
+        "file": "business.spec.ts",
+        "title": "撤销授权异步失败保持打开，防重复提交并恢复焦点",
+        "project": "webkit",
+        "status": "timedOut",
+        "message": "\u001b[31mTest timeout of 30000ms exceeded while setting up \"page\".\u001b[39m"
+      },
+      {
+        "file": "business.spec.ts",
+        "title": "角色编辑校验及失败不关闭，Esc 恢复触发按钮焦点",
+        "project": "webkit",
+        "status": "timedOut",
+        "message": "\u001b[31mTest timeout of 30000ms exceeded while setting up \"page\".\u001b[39m"
+      },
+      {
+        "file": "business.spec.ts",
+        "title": "创建用户失败保留表单，成功单次提交并返回列表",
+        "project": "webkit",
+        "status": "interrupted",
+        "message": "Error: browserContext.newPage: Protocol error (Page.overrideSetting): Unknown setting: PushAPIEnabled"
+      },
+      {
+        "file": "edge-cases.spec.ts",
+        "title": "资源授权完整多页基线与增量候选，部分失败不删除未显示项目",
+        "project": "webkit",
+        "status": "timedOut",
+        "message": "\u001b[31mTest timeout of 30000ms exceeded while setting up \"page\".\u001b[39m"
+      },
+      {
+        "file": "edge-cases.spec.ts",
+        "title": "API 授权 8105 项完整读取；中间页失败禁用保存，重试恢复",
+        "project": "webkit",
+        "status": "timedOut",
+        "message": "\u001b[31mTest timeout of 30000ms exceeded while setting up \"page\".\u001b[39m"
+      },
+      {
+        "file": "edge-cases.spec.ts",
+        "title": "部分保存后实际状态再次读取失败，禁止盲目重试，核对后继续",
+        "project": "webkit",
+        "status": "interrupted",
+        "message": "Error: browserContext.newPage: Protocol error (Page.overrideSetting): Unknown setting: PushAPIEnabled"
+      }
+    ]
+  },
+  {
+    "source": "e2e-results.json",
+    "stats": {
+      "startTime": "2026-11-08T13:40:36.245Z",
+      "duration": 76405.952,
+      "expected": 201,
+      "skipped": 0,
+      "unexpected": 6,
+      "flaky": 0
+    },
+    "failures": [
+      {
+        "file": "business.spec.ts",
+        "title": "角色编辑校验及失败不关闭，Esc 恢复触发按钮焦点",
+        "project": "webkit",
+        "status": "failed",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeFocused\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  getByRole('button', { name: '重命名', exact: true }).first()\nExpected: focused\nReceived: inactive\nTimeout:  7000ms\n\nCall log:\n\u001b[2m  - Expect \"to.be.focused\" with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('button', { name: '重命名', exact: true }).first()\u001b[22m\n\u001b[2m    18 × locator resolved to <button type=\"button\" class=\"ui-button ui-button-outline ui-button-sm\">重命名</button>\u001b[22m\n\u001b[2m       - unexpected value \"inactive\"\u001b[22m\n"
+      },
+      {
+        "file": "edge-cases.spec.ts",
+        "title": "删除触发对象后焦点回正文；仅键盘可完成编辑与菜单",
+        "project": "webkit",
+        "status": "failed",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveCount\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator:  getByRole('alertdialog')\nExpected: \u001b[32m0\u001b[39m\nReceived: \u001b[31m1\u001b[39m\nTimeout:  7000ms\n\nCall log:\n\u001b[2m  - Expect \"to.have.count\" with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('alertdialog')\u001b[22m\n\u001b[2m    18 × locator resolved to 1 element\u001b[22m\n\u001b[2m       - unexpected value \"1\"\u001b[22m\n"
+      },
+      {
+        "file": "robustness.spec.ts",
+        "title": "用户、权限和应用写成功后刷新失败，已更新或删除的对象不倒退",
+        "project": "chromium",
+        "status": "failed",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('button', { name: '删除', exact: true })\nExpected: visible\nError: strict mode violation: getByRole('button', { name: '删除', exact: true }) resolved to 3 elements:\n    1) <button type=\"button\" class=\"ui-button ui-button-ghost ui-button-sm text-destructive\">删除</button> aka getByRole('button', { name: '删除' }).first()\n    2) <button type=\"button\" class=\"ui-button ui-button-ghost ui-button-sm text-destructive\">删除</button> aka getByRole('button', { name: '删除' }).nth(1)\n    3) <button type=\"button\" class=\"ui-button ui-button-ghost ui-button-sm text-destructive\">删除</button> aka getByRole('button', { name: '删除' }).nth(2)\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" getByRole('button', { name: '删除', exact: true }) with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('button', { name: '删除', exact: true })\u001b[22m\n"
+      },
+      {
+        "file": "robustness.spec.ts",
+        "title": "用户、权限和应用写成功后刷新失败，已更新或删除的对象不倒退",
+        "project": "firefox",
+        "status": "failed",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('button', { name: '删除', exact: true })\nExpected: visible\nError: strict mode violation: getByRole('button', { name: '删除', exact: true }) resolved to 3 elements:\n    1) <button type=\"button\" class=\"ui-button ui-button-ghost ui-button-sm text-destructive\">删除</button> aka getByRole('button', { name: '删除' }).first()\n    2) <button type=\"button\" class=\"ui-button ui-button-ghost ui-button-sm text-destructive\">删除</button> aka getByRole('button', { name: '删除' }).nth(1)\n    ...\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" getByRole('button', { name: '删除', exact: true }) with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('button', { name: '删除', exact: true })\u001b[22m\n"
+      },
+      {
+        "file": "robustness.spec.ts",
+        "title": "用户、权限和应用写成功后刷新失败，已更新或删除的对象不倒退",
+        "project": "webkit",
+        "status": "failed",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('button', { name: '删除', exact: true })\nExpected: visible\nError: strict mode violation: getByRole('button', { name: '删除', exact: true }) resolved to 3 elements:\n    1) <button type=\"button\" class=\"ui-button ui-button-ghost ui-button-sm text-destructive\">删除</button> aka getByRole('button', { name: '删除' }).first()\n    2) <button type=\"button\" class=\"ui-button ui-button-ghost ui-button-sm text-destructive\">删除</button> aka getByRole('button', { name: '删除' }).nth(1)\n    3) <button type=\"button\" class=\"ui-button ui-button-ghost ui-button-sm text-destructive\">删除</button> aka getByRole('button', { name: '删除' }).nth(2)\n\nCall log:\n\u001b[2m  - Expect \"to.be.visible\" with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('button', { name: '删除', exact: true })\u001b[22m\n"
+      },
+      {
+        "file": "visual.spec.ts",
+        "title": "键盘跳转、焦点可见、减少动画及异步语义",
+        "project": "webkit",
+        "status": "failed",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeFocused\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  getByRole('link', { name: '跳到主内容' })\nExpected: focused\nReceived: inactive\nTimeout:  7000ms\n\nCall log:\n\u001b[2m  - Expect \"to.be.focused\" with timeout 7000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('link', { name: '跳到主内容' })\u001b[22m\n\u001b[2m    18 × locator resolved to <a class=\"skip-link\" href=\"#workspace-content\">跳到主内容</a>\u001b[22m\n\u001b[2m       - unexpected value \"inactive\"\u001b[22m\n"
+      }
+    ]
+  }
+]

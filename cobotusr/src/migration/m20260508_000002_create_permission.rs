@@ -1,9 +1,9 @@
 use sea_orm_migration::prelude::*;
 
 /// Per-application permission rule. Independent from the existing `authority`
-/// table (which encodes URI+METHOD-based RBAC for cobotsrv's own routes) —
+/// table (which encodes URI+METHOD-based RBAC for resource-app's own routes) —
 /// permissions describe **resource-level** access ("user X may `submit` on
-/// `task:cobotlet-0:lift`") and are evaluated by the `/api/v1/enforce` PDP.
+/// `task:example-resource:lift`") and are evaluated by the `/api/v1/enforce` PDP.
 ///
 /// `application_id` is required: every permission belongs to an application,
 /// so admins of app A can't accidentally grant rights inside app B.
@@ -37,7 +37,7 @@ impl MigrationTrait for Migration {
                     // Object class, e.g. "device", "task". NULL = action-only (no object).
                     .col(ColumnDef::new(Permission::ResourceType).string().null())
                     // Glob pattern matched against the object id, e.g.
-                    // "cobotlet-0:*". NULL = matches any id.
+                    // "example-resource:*". NULL = matches any id.
                     .col(ColumnDef::new(Permission::ResourcePattern).string().null())
                     .col(
                         ColumnDef::new(Permission::CreateTime)

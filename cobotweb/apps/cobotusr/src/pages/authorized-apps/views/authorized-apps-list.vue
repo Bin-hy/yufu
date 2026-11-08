@@ -1,130 +1,93 @@
-<script lang="ts" setup>
-import { ref, onMounted } from 'vue'
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { Blocks, RefreshCw } from '@lucide/vue'
 import { listAuthorizedApps, revokeAuthorizedApp } from '../api'
 import type { AuthorizedAppVO } from '../api/type'
-import UiButton from '@/components/ui/button/button.vue'
-import UiDialog from '@/components/ui/dialog/dialog.vue'
+import { useAsyncQuery } from '@/composables/use-async-query'
+import { usePageContext } from '@/workspace/page-context'
+import { showModal } from '@/utils/modal'
 import { emitToast } from '@/utils/toast'
-
-const loading = ref(false)
-const apps = ref<AuthorizedAppVO[]>([])
-
-const confirmingRevoke = ref(false)
-const appToRevoke = ref<AuthorizedAppVO | null>(null)
-
-async function loadApps() {
-  loading.value = true
-  try {
-    apps.value = await listAuthorizedApps()
-  } catch (e) {
-    console.error('加载已授权应用失败', e)
-  } finally {
-    loading.value = false
-  }
+import PageHeader from '@/components/workspace/page-header.vue'
+import DataState from '@/components/workspace/data-state.vue'
+import UiButton from '@/components/ui/button/button.vue'
+const context = usePageContext(),
+    state = useAsyncQuery({
+        key: 'authorized-apps',
+        active: context.active,
+        loader: (signal) => listAuthorizedApps({ signal, errorPresentation: 'local' }),
+    }),
+    { data, status, error, refreshing } = state
+const revoked = ref(new Set<number>())
+const visibleApps = computed(
+    () => data.value?.filter((app) => !revoked.value.has(app.consent_id)) ?? [],
+)
+function revoke(app: AuthorizedAppVO) {
+    void showModal({
+        title: '撤销应用授权？',
+        content: '「' + app.client_name + '」的所有令牌将被吊销，之后需要重新授权。',
+        destructive: true,
+        confirmText: '撤销授权',
+        confirmCallback: async () => {
+            await revokeAuthorizedApp(app.consent_id, { errorPresentation: 'local' })
+            revoked.value.add(app.consent_id)
+            emitToast({ type: 'success', message: '已撤销授权' })
+            await state.refresh()
+        },
+    })
 }
-
-function openRevokeDialog(app: AuthorizedAppVO) {
-  appToRevoke.value = app
-  confirmingRevoke.value = true
-}
-
-async function confirmRevoke() {
-  if (!appToRevoke.value) return
-  try {
-    await revokeAuthorizedApp(appToRevoke.value.consent_id)
-    emitToast({ type: 'success', message: '已撤销授权' })
-    await loadApps()
-  } catch (e) {
-    console.error('撤销失败', e)
-    emitToast({ type: 'error', message: '撤销失败' })
-  } finally {
-    confirmingRevoke.value = false
-    appToRevoke.value = null
-  }
-}
-
-onMounted(loadApps)
 </script>
-
 <template>
-  <div class="space-y-6">
-    <!-- 页面头部 -->
-    <div>
-      <h2 class="text-2xl font-bold text-foreground">已授权应用</h2>
-      <p class="text-sm text-muted-foreground mt-1">
-        管理你已授权访问账户的第三方应用。撤销授权后，该应用将无法再访问你的数据。
-      </p>
-    </div>
-
-    <!-- Loading -->
-    <div v-if="loading" class="flex items-center justify-center py-20">
-      <span class="h-8 w-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></span>
-    </div>
-
-    <!-- 应用列表 -->
-    <div v-else class="space-y-3">
-      <div
-        v-for="app in apps"
-        :key="app.consent_id"
-        class="bg-card rounded-lg border border-border shadow-sm"
-      >
-        <div class="px-6 py-4 flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <!-- App Icon -->
-            <div class="w-12 h-12 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
-              <svg class="w-6 h-6 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-              </svg>
-            </div>
-            <div>
-              <div class="text-base font-semibold text-foreground">{{ app.client_name }}</div>
-              <div class="text-sm text-muted-foreground mt-0.5">
-                授权时间：{{ app.authorized_at }}
-              </div>
-              <div class="flex flex-wrap gap-1 mt-1">
-                <span
-                  v-for="s in app.scope.split(' ').filter(Boolean)"
-                  :key="s"
-                  class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary"
-                >
-                  {{ s }}
-                </span>
-              </div>
-            </div>
-          </div>
-          <UiButton
-            size="sm"
-            variant="destructive"
-            @click="openRevokeDialog(app)"
-          >
-            撤销
-          </UiButton>
+    <section class="workspace-page">
+        <PageHeader
+            title="已授权应用"
+            description="查看获准访问账户的应用，随时撤回访问权限。"
+            eyebrow="APPLICATIONS"
+            ><template #actions
+                ><UiButton variant="outline" :disabled="refreshing" @click="state.refresh"
+                    ><RefreshCw :size="15" aria-hidden="true" />刷新</UiButton
+                ></template
+            ></PageHeader
+        >
+        <div class="panel">
+            <DataState
+                :status="status"
+                :error="error"
+                :refreshing="refreshing"
+                :empty="!visibleApps.length"
+                empty-title="尚未授权任何应用"
+                empty-description="授权应用后，可以在这里管理访问权限。"
+                @retry="state.refresh"
+                ><div class="divide-y divide-border">
+                    <article
+                        v-for="app in visibleApps"
+                        :key="app.consent_id"
+                        class="flex flex-col sm:flex-row gap-4 p-5 sm:items-center"
+                    >
+                        <div
+                            class="bg-secondary text-primary w-11 h-11 rounded-lg flex items-center justify-center shrink-0"
+                        >
+                            <Blocks :size="21" aria-hidden="true" />
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h2 class="font-semibold">{{ app.client_name }}</h2>
+                            <p class="text-xs text-muted-foreground mt-1">
+                                授权于 {{ app.authorized_at }}
+                            </p>
+                            <div class="flex flex-wrap gap-1.5 mt-3">
+                                <span
+                                    v-for="scope in app.scope.split(' ').filter(Boolean)"
+                                    :key="scope"
+                                    class="status-badge"
+                                    >{{ scope }}</span
+                                >
+                            </div>
+                        </div>
+                        <UiButton variant="outline" class="text-destructive" @click="revoke(app)"
+                            >撤销</UiButton
+                        >
+                    </article>
+                </div></DataState
+            >
         </div>
-      </div>
-
-      <!-- 空状态 -->
-      <div v-if="apps.length === 0 && !loading" class="bg-card rounded-lg border border-border shadow-sm text-center py-16">
-        <svg class="w-16 h-16 text-muted-foreground mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-        </svg>
-        <h3 class="text-lg font-medium text-foreground mb-2">暂无已授权应用</h3>
-        <p class="text-muted-foreground">
-          您尚未授权任何第三方应用访问您的账户。
-        </p>
-      </div>
-    </div>
-
-    <!-- 撤销确认 -->
-    <UiDialog
-      v-model:open="confirmingRevoke"
-      title="撤销授权"
-      @confirm="confirmRevoke"
-      @cancel="() => { confirmingRevoke = false; appToRevoke = null }"
-    >
-      <p class="text-sm text-muted-foreground">
-        确认撤销对「<strong>{{ appToRevoke?.client_name }}</strong>」的授权？
-        该应用的所有 token 将被立即吊销，且该操作不可恢复。
-      </p>
-    </UiDialog>
-  </div>
+    </section>
 </template>

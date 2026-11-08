@@ -1,68 +1,52 @@
-use crate::entity::refresh_token;
-use crate::entity::role::{self, Entity as Role, RoleEnum, RoleVO};
+use crate::entity::role::{self, Entity as Role, RoleVO};
 use crate::entity::user::{self, Entity as User, UserVO};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
 use crate::{AppState, IdType};
 use anyhow::anyhow;
-use auth::token_manager::TokenManager;
-use bcrypt::{DEFAULT_COST, hash, verify};
+use bcrypt::{DEFAULT_COST, hash};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, Set};
 use sea_orm::{DatabaseConnection, EntityTrait};
 
-/// Audience used for tokens issued to cobotsrv's own UI / legacy login flow.
-pub const SELF_AUD: &str = "cobotsrv";
+use super::security::{
+    lifecycle::{
+        CredentialLifecycle, LocalLoginRequest, LocalPassword, LocalRegisterRequest,
+        SessionTokenConfig,
+    },
+    repository::PgSecurityRepository,
+};
+use auth::security::{budget::SecurityBudget, error::SecurityError, identity::SecretToken};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct UserService;
 
 impl UserService {
-    // 登陆返回string token
     pub async fn auth(
         state: &AppState,
         username: &str,
         password: &str,
+        budget: &SecurityBudget,
     ) -> Result<(String, String, UserVO)> {
-        let db = &state.database.connection;
-        // 查找用户
-        if let Some(exsiting_user) = User::find()
-            .filter(user::Column::Username.eq(username))
-            .one(db)
-            .await?
-        {
-            // 1. 查找成功，校验密码
-            if let Some(password_db) = exsiting_user.clone().password {
-                let is_valid = verify(password, &password_db).unwrap_or(false);
-                if is_valid {
-                    // 2.1 校验成功，分发对应权限的token
-                    let jti = uuid::Uuid::new_v4().to_string();
-
-                    let access_token = state
-                        .sign_access_token(exsiting_user.id, SELF_AUD, "")
-                        .await?;
-                    let refresh_token = state
-                        .refresh_token_manager()
-                        .generate_refresh_token::<IdType>(jti.clone(), exsiting_user.id)?;
-
-                    // 2.1.2 插入到 refresh_token 中 用户SSO 单点登陆
-                    refresh_token::Entity::upsert_refresh_token(db, jti, exsiting_user.id).await?;
-
-                    Ok((access_token, refresh_token, exsiting_user.into()))
-                } else {
-                    // 2.2 失败，密码错误
-                    Err(AppError::Unauthorized("password is error".into()))
-                }
-            } else {
-                // 2. 数据错误，没有设置密码
-                Err(AppError::InternalServerError(anyhow!(
-                    "user database error"
-                )))
-            }
-        } else {
-            // 用户不存在
-            Err(AppError::Unauthorized("username is not found".into()))
-        }
+        let (lifecycle, config) = Self::local_lifecycle(state)?;
+        let password = LocalPassword::new(password.to_owned())?;
+        let session = lifecycle
+            .login_local(
+                LocalLoginRequest {
+                    username,
+                    password: &password,
+                },
+                &config,
+                state.id_token_signer().as_ref(),
+                budget,
+            )
+            .await?;
+        Ok((
+            session.tokens.access_token.expose_secret().to_owned(),
+            session.tokens.refresh_token.expose_secret().to_owned(),
+            session.user,
+        ))
     }
 
     pub async fn register(
@@ -70,25 +54,27 @@ impl UserService {
         username: &str,
         password: &str,
         nickname: &str,
+        budget: &SecurityBudget,
     ) -> Result<(String, String)> {
-        let (user_db, access_token): (UserVO, String) = UserService::add_user_with_role(
-            state,
-            username,
-            password,
-            nickname,
-            RoleEnum::User.default_id(),
-        )
-        .await?;
-
-        // 签发 refresh_token
-        let jti = uuid::Uuid::new_v4().to_string();
-        let refresh_token = state
-            .refresh_token_manager()
-            .generate_refresh_token::<IdType>(jti.clone(), user_db.id)?;
-        refresh_token::Entity::upsert_refresh_token(&state.database.connection, jti, user_db.id)
-            .await?;
-
-        Ok((access_token, refresh_token))
+        let (lifecycle, config) = Self::local_lifecycle(state)?;
+        let password = LocalPassword::new(password.to_owned()).map_err(local_registration_error)?;
+        let session = lifecycle
+            .register_local(
+                LocalRegisterRequest {
+                    username,
+                    password: &password,
+                    nickname,
+                },
+                &config,
+                state.id_token_signer().as_ref(),
+                budget,
+            )
+            .await
+            .map_err(local_registration_error)?;
+        Ok((
+            session.tokens.access_token.expose_secret().to_owned(),
+            session.tokens.refresh_token.expose_secret().to_owned(),
+        ))
     }
 
     pub async fn add_user_with_role(
@@ -97,7 +83,8 @@ impl UserService {
         password: &str,
         nickname: &str,
         role_id: IdType,
-    ) -> Result<(UserVO, String)> {
+    ) -> Result<UserVO> {
+        LocalPassword::new(password.to_owned()).map_err(local_registration_error)?;
         let db = &state.database.connection;
         // 1. 检查role是否存在
         let role = role::Entity::find_by_id(role_id)
@@ -128,9 +115,7 @@ impl UserService {
 
         let mut user_vo = UserVO::from(inserted);
         user_vo.set_role(role::RoleVO::from(role));
-        let access_token = state.sign_access_token(user_vo.id, SELF_AUD, "").await?;
-
-        Ok((user_vo, access_token))
+        Ok(user_vo)
     }
 
     pub async fn get_user_by_id(db: &DatabaseConnection, user_id: IdType) -> Result<UserVO> {
@@ -148,52 +133,47 @@ impl UserService {
     }
 
     // 获取刷新token
-    pub async fn refresh_tokens(state: &AppState, refresh_token: &str) -> Result<(String, String)> {
-        let db = &state.database.connection;
-        let refresh_manager = state.refresh_token_manager();
-        let claims = match refresh_manager.verify_refresh_token::<IdType>(refresh_token) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(AppError::Unauthorized(format!(
-                    "refresh token invalid: {:?}",
-                    e
-                )));
-            }
+    pub async fn refresh_tokens(
+        state: &AppState,
+        refresh_token: &str,
+        budget: &SecurityBudget,
+    ) -> Result<(String, String)> {
+        let (lifecycle, config) = Self::local_lifecycle(state)?;
+        let refresh = SecretToken::new(refresh_token.to_owned())?;
+        let tokens = lifecycle
+            .rotate_local_refresh(&refresh, &config, state.id_token_signer().as_ref(), budget)
+            .await?;
+        Ok((
+            tokens.access_token.expose_secret().to_owned(),
+            tokens.refresh_token.expose_secret().to_owned(),
+        ))
+    }
+    fn local_lifecycle(state: &AppState) -> Result<(CredentialLifecycle, SessionTokenConfig)> {
+        let clock = state.security_clock()?;
+        let config = SessionTokenConfig {
+            issuer: state.issuer(),
+            access_ttl_seconds: u64::try_from(state.config.auth.exp_seconds)
+                .map_err(|_| SecurityError::DependencyUnavailable)?,
+            refresh_ttl_seconds: u64::try_from(state.config.auth.refresh_exp_seconds)
+                .map_err(|_| SecurityError::DependencyUnavailable)?,
         };
-        // 1. 查找 refresh_token 中是否存储
-        if !refresh_token::Entity::find_exist(db, claims.jti).await? {
-            // 无权限 被下线了
-            return Err(AppError::Unauthorized("请重新登陆".to_string()));
-        }
-
-        // 2. 存储了 refresh token -> 返回 access_token
-        let jti = uuid::Uuid::new_v4().to_string();
-
-        let access_token = state.sign_access_token(claims.sub, SELF_AUD, "").await?;
-        let refresh_token_new =
-            refresh_manager.generate_refresh_token::<IdType>(jti.clone(), claims.sub)?;
-        refresh_token::Entity::upsert_refresh_token(db, jti, claims.sub).await?;
-        Ok((access_token, refresh_token_new))
+        let repository = Arc::new(PgSecurityRepository::new(
+            state.database.connection.clone(),
+            clock.clone(),
+        ));
+        Ok((CredentialLifecycle::new(repository, clock), config))
     }
 
-    // 登出 & 清除 刷新token
+    /// End the registered local session; never infer a user from a legacy JWT.
     pub async fn logout_by_refresh(
-        db: &DatabaseConnection,
-        refresh_manager: &TokenManager,
-        refresh_token: &str,
-    ) -> Result<()> {
-        let claims = match refresh_manager.verify_refresh_token::<IdType>(refresh_token) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(AppError::Unauthorized(format!(
-                    "refresh token invalid: {:?}",
-                    e
-                )));
-            }
-        };
-
-        refresh_token::Entity::delete_by_sub(db, claims.sub).await?;
-        Ok(())
+        state: &AppState,
+        refresh: &SecretToken,
+        redirect: Option<(&str, &str)>,
+        budget: &SecurityBudget,
+    ) -> Result<super::security::revocation::RevocationReceipt> {
+        Ok(super::security::browser::lifecycle(state)?
+            .logout_local(refresh, &state.issuer(), redirect, budget)
+            .await?)
     }
 
     /// 获取用户角色
@@ -219,5 +199,13 @@ impl UserService {
 
         // 转换为 VO
         Ok(role_db.into())
+    }
+}
+fn local_registration_error(error: SecurityError) -> AppError {
+    match error {
+        SecurityError::InvalidCredential => {
+            AppError::BadRequest("invalid registration data".into())
+        }
+        error => AppError::Security(error),
     }
 }

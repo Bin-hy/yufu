@@ -1,64 +1,51 @@
-import { createVNode, render } from 'vue'
-import UiDialog from '@/components/ui/dialog/dialog.vue'
-
-interface ModalOptions {
-  title: string
-  content: string
-  confirmText?: string
-  cancelText?: string
-  confirmCallback?: Function
-  cancleCallback?: Function
+import { shallowRef, ref } from 'vue'
+import { onSessionReset } from '@/workspace/session'
+import { captureFocusOrigin } from '@/utils/focus'
+export interface ModalOptions {
+    title: string
+    content: string
+    confirmText?: string
+    cancelText?: string
+    destructive?: boolean
+    confirmCallback?: () => unknown | Promise<unknown>
+    cancleCallback?: () => unknown
 }
-
-/**
- * 弹出弹窗
- * 使用: showModal({title:"" , content: "", confirmCallback:()=>{}, cancleCallback: ()=>{} })
- * */
+interface Confirmation {
+    options: ModalOptions
+    resolve: (value: boolean) => void
+    trigger: HTMLElement | null
+}
+export const currentConfirmation = shallowRef<Confirmation | null>(null)
+export const confirmationBusy = ref(false)
+const queue: Confirmation[] = []
 export function showModal(options: ModalOptions): Promise<boolean> {
-  return new Promise((resolve) => {
-    const container = document.createElement('div')
-    document.body.appendChild(container)
-    handle_default_value(options)
-    // 通过 UiDialog 的默认插槽渲染内容，避免 content 作为 props 被忽略
-    const vnode = createVNode(
-      UiDialog as any,
-      {
-        title: options.title,
-        open: true,
-        confirmText: options.confirmText,
-        cancelText: options.cancelText,
-        onConfirm: () => {
-          options.confirmCallback ? options.confirmCallback() : ''
-          resolve(true)
-          cleanup()
-        },
-        onCancel: () => {
-          options.cancleCallback ? options.cancleCallback() : ''
-          resolve(false)
-          cleanup()
-        },
-        'onUpdate:open': (v: boolean) => { if (!v) cleanup() },
-      },
-      {
-        default: () => options.content,
-      }
-    )
-
-    function cleanup() {
-      render(null, container)
-      container.remove()
-    }
-
-    render(vnode, container)
-    // 弹出 modal
-    // UiDialog 通过 open: true 初始化显示
-  })
+    return new Promise((resolve) => {
+        queue.push({
+            options,
+            resolve,
+            trigger: captureFocusOrigin(),
+        })
+        next()
+    })
 }
-function handle_default_value(options: ModalOptions){
-    if(!options.cancelText){
-        options.cancelText = "取消"
-    }
-    if(!options.confirmText){
-        options.confirmText = "确认"
-    }
+function next() {
+    if (!currentConfirmation.value) currentConfirmation.value = queue.shift() ?? null
 }
+export function settleConfirmation(value: boolean) {
+    const current = currentConfirmation.value
+    if (!current) return
+    currentConfirmation.value = null
+    confirmationBusy.value = false
+    current.resolve(value)
+    queueMicrotask(() => {
+        if (current.trigger?.isConnected) current.trigger.focus()
+        next()
+    })
+}
+export function cleanupConfirmations() {
+    confirmationBusy.value = false
+    currentConfirmation.value?.resolve(false)
+    currentConfirmation.value = null
+    for (const current of queue.splice(0)) current.resolve(false)
+}
+onSessionReset(cleanupConfirmations)

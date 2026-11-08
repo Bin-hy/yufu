@@ -1,12 +1,15 @@
 <script setup lang="ts">
-// 全局错误提示宿主
+import { TooltipProvider } from 'reka-ui'
+import { onMounted, onUnmounted } from 'vue'
+import { trackFocusOrigins } from '@/utils/focus'
 import ToastHost from '@/components/Feedback/toast-host.vue'
+import ConfirmHost from '@/components/Feedback/confirm-host.vue'
+let stopTracking: (() => void) | undefined
+onMounted(() => {
+    stopTracking = trackFocusOrigins()
+})
+onUnmounted(() => stopTracking?.())
 </script>
-
 <template>
-    <div>
-        <router-view/>
-        <ToastHost />
-    </div>
-
+    <TooltipProvider :delay-duration="150"><router-view /><ToastHost /><ConfirmHost /></TooltipProvider>
 </template>

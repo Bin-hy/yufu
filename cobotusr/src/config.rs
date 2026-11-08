@@ -15,7 +15,34 @@ pub struct Config {
     #[serde(default)]
     pub database: Database,
     #[serde(default)]
-    pub storage: Storage,
+    pub security_clock: SecurityClock,
+}
+
+/// The deployment's trusted NTP sources. Clock checks never adjust the OS clock.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SecurityClock {
+    pub servers: Vec<String>,
+    pub min_agreeing_sources: usize,
+    pub poll_interval_seconds: u64,
+    pub sample_ttl_seconds: u64,
+    pub timeout_millis: u64,
+}
+
+impl Default for SecurityClock {
+    fn default() -> Self {
+        Self {
+            servers: vec![
+                "time.apple.com:123".into(),
+                "time.cloudflare.com:123".into(),
+                "ntp.aliyun.com:123".into(),
+            ],
+            min_agreeing_sources: 2,
+            poll_interval_seconds: 10,
+            sample_ttl_seconds: 30,
+            timeout_millis: 1500,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -30,6 +57,9 @@ pub struct Http {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Auth {
+    /// Explicit local HTTP development mode; listener and issuer must be loopback.
+    #[serde(default)]
+    pub allow_insecure_loopback_cookies: bool,
     #[serde(default = "default_auth_secret")]
     pub secret: String,
     #[serde(default)]
@@ -48,6 +78,43 @@ pub struct Auth {
     /// Defaults to `conf/oidc_rsa_private.pem`. If the file does not exist, auto-generates.
     #[serde(default = "default_rsa_private_key_path")]
     pub rsa_private_key_path: String,
+}
+
+impl Config {
+    pub fn validate_browser_cookie_policy(&self) -> anyhow::Result<()> {
+        if !self.auth.allow_insecure_loopback_cookies {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            self.http.listen.ip().is_loopback(),
+            "insecure development cookies require a loopback HTTP listener"
+        );
+        let issuer = if !self.oidc.issuer.is_empty() {
+            self.oidc.issuer.clone()
+        } else if !self.http.public.is_empty() {
+            self.http.public.clone()
+        } else {
+            format!("http://{}", self.http.listen)
+        };
+        let url = url::Url::parse(&issuer)?;
+        anyhow::ensure!(
+            matches!(url.scheme(), "http" | "https"),
+            "invalid loopback issuer scheme"
+        );
+        anyhow::ensure!(
+            url.host_str().is_some_and(is_loopback_host),
+            "insecure development cookies require a loopback issuer"
+        );
+        Ok(())
+    }
+}
+
+pub(crate) fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -272,24 +339,42 @@ fn default_oidc_email_domain() -> String {
     "cobotrix.local".to_string()
 }
 
-// ---------------------------------------------------------------------------
-// Storage Configuration (for IM uploads)
-// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Storage {
-    #[serde(default = "default_storage_root_dir")]
-    pub root_dir: String,
-}
-
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            root_dir: default_storage_root_dir(),
+    #[test]
+    fn test_insecure_cookie_mode_requires_loopback_listener_and_issuer() {
+        let mut config = Config::default();
+        assert!(!config.auth.allow_insecure_loopback_cookies);
+        assert!(config.validate_browser_cookie_policy().is_ok());
+        config.auth.allow_insecure_loopback_cookies = true;
+        config.http.listen = "0.0.0.0:4000".parse().unwrap();
+        assert!(config.validate_browser_cookie_policy().is_err());
+        config.http.listen = "127.0.0.1:4000".parse().unwrap();
+        assert!(config.validate_browser_cookie_policy().is_ok());
+        for issuer in [
+            "http://localhost:4000",
+            "http://127.0.0.2:4000",
+            "http://[::1]:4000",
+        ] {
+            config.oidc.issuer = issuer.into();
+            assert!(config.validate_browser_cookie_policy().is_ok(), "{issuer}");
         }
+        for issuer in [
+            "https://auth.example.test",
+            "http://localhost.example.test",
+            "http://192.168.1.2:4000",
+            "file:///tmp/auth",
+        ] {
+            config.oidc.issuer = issuer.into();
+            assert!(config.validate_browser_cookie_policy().is_err(), "{issuer}");
+        }
+        config.oidc.issuer.clear();
+        config.http.public = "https://auth.example.test".into();
+        assert!(config.validate_browser_cookie_policy().is_err());
+        config.http.public.clear();
+        config.http.listen = "[::]:4000".parse().unwrap();
+        assert!(config.validate_browser_cookie_policy().is_err());
     }
-}
-
-fn default_storage_root_dir() -> String {
-    "storage".to_string()
 }
