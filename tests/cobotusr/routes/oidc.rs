@@ -1,7 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::http::StatusCode;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use cobotusr::config::{BootstrapClient, Config};
+use cobotusr::entity::role::RoleEnum;
 use reqwest::{Client, Url};
 use tokio::net::TcpListener;
 
@@ -14,6 +16,46 @@ const REDIRECT_URI: &str = "http://localhost:5174/oauth/callback";
 const POST_LOGOUT_REDIRECT_URI: &str = "http://localhost:5174/login";
 const CODE_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const CODE_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+async fn assert_subject_consistency(
+    client: &Client,
+    base_url: &str,
+    tokens: &serde_json::Value,
+    expected_subject: &str,
+) {
+    // Signature verification is covered by auth's signer unit tests; inspect
+    // the wire payload here so a numeric subject cannot be coerced to a string.
+    let id_token = tokens["id_token"].as_str().expect("ID Token should exist");
+    let payload = id_token
+        .split('.')
+        .nth(1)
+        .expect("JWT should have a payload");
+    let claims: serde_json::Value = serde_json::from_slice(
+        &URL_SAFE_NO_PAD
+            .decode(payload)
+            .expect("JWT payload should be base64url"),
+    )
+    .expect("JWT payload should be JSON");
+    assert_eq!(claims["sub"].as_str(), Some(expected_subject));
+
+    let userinfo = client
+        .get(format!("{base_url}/api/v1/oidc/userinfo"))
+        .bearer_auth(
+            tokens["access_token"]
+                .as_str()
+                .expect("Access Token should exist"),
+        )
+        .send()
+        .await
+        .expect("UserInfo request should complete")
+        .error_for_status()
+        .expect("UserInfo request should succeed")
+        .json::<serde_json::Value>()
+        .await
+        .expect("UserInfo response should be JSON");
+    assert_eq!(userinfo["sub"].as_str(), Some(expected_subject));
+    assert_eq!(userinfo["sub"], claims["sub"]);
+}
 
 async fn authorize_code(client: &Client, base_url: &str, access_token: &str) -> String {
     authorize_code_for_client(client, base_url, access_token, CLIENT_ID).await
@@ -113,6 +155,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
 
     let client = Client::new();
     let base_url = format!("http://{address}");
+    let expected_subject = RoleEnum::Superadmin.default_id().to_string();
 
     let end_session = client
         .get(format!("{base_url}/oidc/logout"))
@@ -225,6 +268,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         .expect("confidential token response should be valid JSON");
     assert!(confidential_json["access_token"].as_str().is_some());
     assert!(confidential_json["id_token"].as_str().is_some());
+    assert_subject_consistency(&client, &base_url, &confidential_json, &expected_subject).await;
 
     let code = authorize_code(&client, &base_url, &access_token).await;
     let exchanged = client
@@ -246,6 +290,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         .expect("token response should be valid JSON");
     assert!(token_json["access_token"].as_str().is_some());
     assert!(token_json["id_token"].as_str().is_some());
+    assert_subject_consistency(&client, &base_url, &token_json, &expected_subject).await;
     let refresh_token = token_json["refresh_token"]
         .as_str()
         .expect("authorization code exchange should return a refresh token");
@@ -265,6 +310,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         .json::<serde_json::Value>()
         .await
         .expect("refresh response should be valid JSON");
+    assert_subject_consistency(&client, &base_url, &refreshed_json, &expected_subject).await;
     let rotated_refresh_token = refreshed_json["refresh_token"]
         .as_str()
         .expect("refresh response should rotate the refresh token");

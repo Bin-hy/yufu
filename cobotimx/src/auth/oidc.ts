@@ -5,7 +5,7 @@ export interface OidcTokens {
 }
 
 export interface UserInfo {
-  sub: number | string;
+  sub: string;
   preferred_username?: string;
   name?: string;
   nickname?: string;

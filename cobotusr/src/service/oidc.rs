@@ -452,8 +452,8 @@ impl OidcService {
             )
             .await?;
 
-        let id_token = state.id_token_signer().sign_id_token::<IdType>(
-            entry.user_id,
+        let id_token = state.id_token_signer().sign_id_token(
+            &entry.user_id.to_string(),
             &base,
             Some(&client.client_id),
             entry.nonce.as_deref(),
@@ -502,8 +502,8 @@ impl OidcService {
             )
             .await?;
 
-        let id_token = state.id_token_signer().sign_id_token::<IdType>(
-            rec.user_id,
+        let id_token = state.id_token_signer().sign_id_token(
+            &rec.user_id.to_string(),
             &base,
             Some(&rec.client_id),
             None,

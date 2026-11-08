@@ -183,23 +183,20 @@ impl TokenManager {
     }
 
     /// Generates an OIDC ID Token (HMAC fallback, prefer IdTokenSigner for RSA).
-    pub fn generate_id_token<IDTYPE>(
+    pub fn generate_id_token(
         &self,
-        subject: IDTYPE,
+        subject: &str,
         issuer: &str,
         audience: Option<&str>,
         nonce: Option<&str>,
         access_token: Option<&str>,
-    ) -> JwtResult<String>
-    where
-        IDTYPE: Clone + Send + Sync + 'static + Serialize,
-    {
+    ) -> JwtResult<String> {
         let now = Utc::now();
         let exp = now + Duration::seconds(self.expire_seconds);
         let at_hash = compute_at_hash(access_token);
         let claims = IdTokenClaims {
             iss: issuer.to_string(),
-            sub: subject,
+            sub: subject.to_owned(),
             aud: audience.map(|s| s.to_string()),
             iat: now.timestamp() as u64,
             exp: exp.timestamp() as u64,
@@ -306,23 +303,20 @@ impl IdTokenSigner {
     }
 
     /// Generate a signed ID Token.
-    pub fn sign_id_token<IDTYPE>(
+    pub fn sign_id_token(
         &self,
-        subject: IDTYPE,
+        subject: &str,
         issuer: &str,
         audience: Option<&str>,
         nonce: Option<&str>,
         access_token: Option<&str>,
-    ) -> JwtResult<String>
-    where
-        IDTYPE: Clone + Send + Sync + 'static + Serialize,
-    {
+    ) -> JwtResult<String> {
         let now = Utc::now();
         let exp = now + Duration::seconds(self.expire_seconds);
         let at_hash = compute_at_hash(access_token);
         let claims = IdTokenClaims {
             iss: issuer.to_string(),
-            sub: subject,
+            sub: subject.to_owned(),
             aud: audience.map(|s| s.to_string()),
             iat: now.timestamp() as u64,
             exp: exp.timestamp() as u64,
@@ -483,6 +477,77 @@ impl IdTokenSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_id_token_subject(token: &str, key: &DecodingKey, algorithm: Algorithm) {
+        let mut validation = Validation::new(algorithm);
+        validation.set_issuer(&["https://issuer.test"]);
+        validation.set_audience(&["test-client"]);
+        let claims = decode::<serde_json::Value>(token, key, &validation)
+            .expect("ID Token signature and claims should be valid")
+            .claims;
+        assert_eq!(claims["sub"], serde_json::json!("123"));
+    }
+
+    #[test]
+    fn test_generate_id_token_hmac_string_subject() {
+        let manager = TokenManager::new("test-secret", 300);
+        let token = manager
+            .generate_id_token(
+                &123.to_string(),
+                "https://issuer.test",
+                Some("test-client"),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_id_token_subject(
+            &token,
+            &DecodingKey::from_secret(b"test-secret"),
+            Algorithm::HS256,
+        );
+    }
+
+    #[test]
+    fn test_sign_id_token_hmac_string_subject() {
+        let signer = IdTokenSigner::from_hmac("test-secret", 300);
+        let token = signer
+            .sign_id_token(
+                &123.to_string(),
+                "https://issuer.test",
+                Some("test-client"),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_id_token_subject(
+            &token,
+            &DecodingKey::from_secret(b"test-secret"),
+            Algorithm::HS256,
+        );
+    }
+
+    #[test]
+    fn test_sign_id_token_rsa_string_subject() {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+
+        let private_key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+        let pem = private_key.to_pkcs8_pem(LineEnding::LF).unwrap();
+        let signer = IdTokenSigner::from_rsa_pem(pem.as_bytes(), 300).unwrap();
+        let token = signer
+            .sign_id_token(
+                &123.to_string(),
+                "https://issuer.test",
+                Some("test-client"),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_id_token_subject(
+            &token,
+            signer.rsa_decoding_key.as_ref().unwrap(),
+            Algorithm::RS256,
+        );
+    }
 
     #[test]
     fn test_expired_token() {

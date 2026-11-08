@@ -62,7 +62,7 @@ pub struct TokenResponse {
 
 #[derive(Serialize)]
 pub struct UserInfoResp {
-    pub sub: IdType,
+    pub sub: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preferred_username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -640,7 +640,7 @@ async fn userinfo(
 
     let email_domain = &state.config.oidc.email_domain;
     Ok(Json(UserInfoResp {
-        sub: user_vo.id,
+        sub: user_vo.id.to_string(),
         preferred_username: Some(user_vo.username.clone()),
         name: user_vo.nickname.clone(),
         nickname: user_vo.nickname,
