@@ -268,3 +268,59 @@ git diff --check
 - 普通API当前凭据检查完整接线仍待T32。生产宿主必须通过serve_with_security_clock注入真实同步监控；普通serve无监控时新的OIDC及本地签发/刷新均失败关闭。生产时钟组装、前端、完整workspace/all-features、故障矩阵、跨服务10秒撤权与完整checklist尚未验收，不能宣称完整链路或全部漏洞已修复。
 - 核心生命周期、仓储、OIDC可选ID Token适配及事务测试提交为 `19cf7df7ab113c139169404bd3f73121b31cec1a`（`feat(auth): add registered local sessions to the shared lifecycle`）。实际本地入口、用户服务清理、HTTP测试与本轮文档作为第二组本地提交；提交身份由本分支git log查询。仅暂存任务文件，没有push、部署或真实设备操作。
 - 核心提交后宿主自动触发神医分析，4个文件回传均没有具体display/finds/vulnerability内容。该回传不证明安全或完整分析已结束，没有作为验收证据；本轮没有额外主动扫描或上传。
+
+## 2026-11-08：T25 明确撤销作用域与浏览器证据
+
+四份设计已经批准，沿用mew-spec和rust-dev-workflow继续，不重新审批。工作目录为 `/Users/xionghaoyi.binhy/BinhyPC/cobot-for`，分支 `codex/gateway-oidc-authorization`；保留T21–T24本地提交，只暂存本任务文件。没有Cargo.toml/Cargo.lock变化，没有push、部署或真实设备操作。
+
+### 失败测试先行与修正过程
+
+- 先注册并实际运行6项事务/并发测试：`0 passed; 6 failed; 100 filtered out`（`/tmp/cobot-t25-red.log`）。覆盖会话退出/独立MCP、单凭据/族显式委托传播、应用所有根、提交失败/继承预算、跨实例刷新竞争及OIDC客户端隔离。
+- CSRF的3项单元失败测试：`0 passed; 3 failed; 45 filtered out`（`/tmp/cobot-t25-csrf-red.log`），覆盖issuer/refresh绑定、签名/专用用途、到期及不健康时钟。早期缺少Clone/sha2造成的编译失败不作为行为失败证据；SecretToken仍没有Clone，验证后显式复制必要证据。
+- 实际HTTP先运行6项失败测试：`0 passed; 6 failed; 106 filtered out`（`/tmp/cobot-t25-http-red.log`），覆盖缺失/非受信/重复Origin及Cookie/证据、提交失败不清Cookie、consent、kickout、OIDC无hint撤销和GET退出确认。
+- 通用日志脱敏先运行1项失败测试：`0 passed; 1 failed; 23 filtered out`（`/tmp/cobot-t25-logging-red.log`），随后剔除x-csrf-token头及csrf/logout表单和响应。
+- 核心首轮实现为5通过/1失败（`/tmp/cobot-t25-core.log`）：100毫秒继承预算的数据库statement timeout可能先于外层截止返回DependencyUnavailable。测试接受DeadlineExceeded或DependencyUnavailable，两者均503；继续要求耗时小于1秒且回滚后凭据活动，没有调整全局错误分类或重新计时。初版12项T25集成测试随后全部通过（`/tmp/cobot-t25-integration.log`）。
+- 扩展到9项事务/并发及9项HTTP测试，加入管理用途/所有权/显式拒绝/旧权限上界、kickout保留独立MCP、撤销与新根登记的旧快照竞争、consent提交回滚/授权码取消、真实CSRF启动/轮换、OIDC Basic认证与未知值无操作。确认POST退出从真实GET表单取得证据，并验证非法redirect无副作用。
+- 完整回归曾为116通过/1失败（`/tmp/cobot-t25-all.log`）：历史OIDC夹具auth.secret为空，新CSRF确认页正确503，补齐夹具配置后重跑。随后117通过/1失败（`/tmp/cobot-t25-all-final.log`）：新增Basic测试把含空格的登录密码作为client secret，被SecretToken严格规则拒绝。改用实际regenerate_client_secret生成值，保留生产验证规则。最终专项18项及完整118项全部通过。
+
+### 实现及证明范围
+
+- RevocationScope明确区分单凭据、当前session、refresh family和应用下全部grant；kickout内部使用用户交互会话作用域。同一主库一致事务锁定稳定根/凭据、更新明确状态并提交，回执仅在提交后返回；committed_at/effective_by为毫秒，effective_by=committed_at+10_000。最多4次序列化/死锁冲突重试继承最初SecurityBudget。
+- 本地logout通过opaque refresh摘要和历史定位完整配对及根；已消费旧refresh仍能终止对应当前会话。logout/kickout撤销对应session、family及凭据，保留独立MCP/其他用户根。应用撤销包含该用户在该应用下的所有session/MCP grant，并在同一事务删除对应consent和未兑换授权码、标记旧oauth_token撤销。consent须归属当前主体，绑定/历史应用映射缺失或歧义失败关闭。
+- 应用撤销和kickout与新会话根登记共用用户行写屏障，撤销前的REPEATABLE READ签发快照不能在撤销提交后创建活动根；冲突后按原预算重新决策。T26的独立MCP新根登记必须复用这一约束。T25中的MCP记录由测试夹具创建，仅证明作用域隔离及撤销，未证明MCP新建/轮换入口已整改。
+- 撤销只沿显式revocation_parent_jti传播，minted_by仍仅审计。单凭据作用域不扩散到同grant的独立凭据；族/session/应用按明确稳定根更新。管理撤销要求登记UserSession、aud/application=cobotusr、当前RSA签名/claims/kid与锁定主库事实相符。单凭据限同用户；kickout和应用/consent删除在撤销事务重新检查URI权限、显式拒绝和旧权限上界，提交前仍检查原身份新鲜期。
+- LocalStrictAccessState只使用配置RSA进行本地验签并检查当前登记，支持调用方原预算；kickout和consent DELETE从旧中间件移入get_revocation_routes，没有对自身JWKS的HTTP回调。移除旧UserService JWT退出、旧OidcService撤销辅助及生命周期过渡revoke_session_refresh。
+- OIDC revoke支持Basic或body客户端认证并拒绝冲突；客户端认证先于登记查询和未知值成功无操作。hint仅作提示，可通过refresh摘要/消费历史或严格签名access引用撤销，配对refresh撤销也撤销其配对access；其他客户端/本地来源不被误撤销。revocation_reference允许过期签名凭据仅用于引用，校验RS256、at+jwt、kid和issuer，不生成可认证上下文，不回退旧明文登记。
+- CsrfProtector使用配置auth.secret签名HS256 csrf+jwt，绑定issuer、专用audience、nonce、iat/exp及当前refresh/启动状态的SHA-256摘要，期限900秒。CSRF不作为access凭据；access仍严格RS256。Cookie变更必须携带精确配置Origin（或配置issuer Origin）及匹配签名Cookie/Header或退出form证据，不信任Host/通配符；缺失/null/非受信/重复Origin、重复或非法Cookie、重复证据头及错误绑定均无副作用。
+- GET /api/v1/csrf提供启动或当前refresh绑定证据及Secure、Path=/、SameSite=Lax的__Host-cobotusr-csrf Cookie，响应no-store。登录/注册/刷新使用原预算校验证据，成功后返回绑定新refresh的csrf_token。管理撤销携带Cookie时也要求CSRF。GET /oidc/logout仅确认、不清会话；POST在事务复核redirect及登记会话，提交后才清Cookie/存储并跳转。提交失败HTTP503且不设置清Cookie响应。
+- 以上失败到通过验证覆盖当前仓储和实际撤销入口，保留原2秒预算、最多5秒当前状态新鲜期、拒绝优先与权限上界；不能据此认定普通业务API、前端、生产时钟或跨服务十秒撤权已验收。
+
+### 最终验证记录
+
+以下命令均实际执行并退出0；最后修改仅修正Basic测试夹具，随后重跑专项、完整集成及root-test Clippy，未再修改生产代码：
+
+```text
+cargo test --test mod security_t25 --locked -- --test-threads=4
+18 passed; 0 failed; 0 ignored; 100 filtered out
+
+cargo test --test mod --locked -- --test-threads=4
+118 passed; 0 failed; 0 ignored; 0 filtered out
+
+cargo test -p auth -p cobotusr --lib --locked
+auth: 48 passed; 0 failed; 0 ignored
+cobotusr: 24 passed; 0 failed; 0 ignored
+
+cargo clippy -p auth -p cobotusr --lib --tests --locked -- -D warnings
+cargo clippy --test mod --locked -- -D warnings
+cargo fmt --all -- --check
+git diff --check
+```
+
+最终临时日志为 `/tmp/cobot-t25-targeted-final.log`、`/tmp/cobot-t25-regression-final.log`、`/tmp/cobot-t25-libs-final.log`、`/tmp/cobot-t25-clippy-libs-final.log`、`/tmp/cobot-t25-clippy-mod-final.log`。本节持久记录命令/结果，临时日志不作为唯一证据。工具链及隔离Docker PostgreSQL沿用T24基线。修正1项collapsible-if后Clippy通过，未添加对应lint抑制；proc-macro-error2 future-incompat提示仍存在。
+
+### 未完成边界与分组提交
+
+- 当前完成25/80，T34仍部分完成，下一项T26/T27 MCP新建及轮换。普通API当前状态/管理组装仍待T32；旧OIDC introspect尚未迁移。本轮不证明全部业务入口已拒绝被撤销access。
+- 前端尚未适配当前CSRF、刷新及退出确认协议，仍待T67及后续链路任务。生产clock monitor/startup仍待T70/T71，普通serve没有注入真实监控时失败关闭。全workspace/all-features（含OpenAPI）、历史auth文档8失败/1 ignored、故障矩阵、跨服务十秒撤权和完整checklist仍待T79/T80等任务，不勾选完整链路验收或宣称全部漏洞已修复。
+- 核心撤销、主库串行约束、严格本地认证、CSRF与事务测试提交为 `5b45bbca4d6406d9297b3f0943e979378bb4f618`（`feat(auth): add scoped registry revocation and CSRF evidence`）。为保持该提交可独立组装，旧revoke_session_refresh删除与其旧调用方清理放入第二组。实际路由、Cookie/用户服务迁移、HTTP测试及本轮文档作为第二组本地提交，身份以本分支git log为准。
+- 核心提交后宿主自动触发神医分析，12个文件回传均没有具体display/finds/vulnerability内容；该回传不证明安全或完整分析已结束，没有作为验收证据，也没有额外主动扫描或上传。

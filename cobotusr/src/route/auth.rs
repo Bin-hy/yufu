@@ -2,15 +2,14 @@ use crate::result::Result;
 use crate::service::user::UserService;
 use crate::{AppState, IdType};
 
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router, extract::State};
-use axum_extra::TypedHeader;
-use axum_extra::headers::Cookie;
 use http::{HeaderMap, header::SET_COOKIE};
 use serde::{Deserialize, Serialize};
 
-use crate::entity::refresh_token;
 use crate::error::AppError;
+use crate::service::security::{browser, revocation::RevocationReceipt};
+use auth::security::budget::SecurityBudget;
 #[cfg(feature = "openapi")]
 use utoipa::OpenApi;
 // request body
@@ -36,6 +35,7 @@ pub struct RegistryData {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct LoginRespData {
     access_token: String,
+    csrf_token: String,
     username: String,
     nickname: String,
 }
@@ -44,6 +44,7 @@ pub struct LoginRespData {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct RegistryRespData {
     access_token: String,
+    csrf_token: String,
     username: String,
     nickname: String,
 }
@@ -52,6 +53,7 @@ pub struct RegistryRespData {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct RefreshRespData {
     access_token: String,
+    csrf_token: String,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -61,16 +63,36 @@ pub struct KickReqData {
 }
 
 // Build routes
-pub fn get_auth_routes() -> Router<AppState> {
+pub fn get_revocation_routes() -> Router<AppState> {
     Router::new().route("/kickout", post(kick_out))
 }
 
 pub fn get_public_routes() -> Router<AppState> {
     Router::new()
         .route("/login", post(login))
+        .route("/csrf", get(csrf_challenge))
         .route("/register", post(auth_register))
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
+}
+
+async fn csrf_challenge(
+    State(state): State<AppState>,
+    request_headers: HeaderMap,
+) -> Result<(HeaderMap, Json<serde_json::Value>)> {
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    let cookies = browser::cookies(&request_headers)?;
+    let mut headers = HeaderMap::new();
+    let proof = browser::issue_csrf(
+        &state,
+        cookies.get("refresh_token").map(String::as_str),
+        &mut headers,
+    )?;
+    budget.remaining()?;
+    Ok((
+        headers,
+        Json(serde_json::json!({"csrf_token": proof.expose_secret()})),
+    ))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -88,8 +110,11 @@ pub fn get_public_routes() -> Router<AppState> {
 ))]
 pub async fn auth_register(
     State(state): State<AppState>,
+    request_headers: HeaderMap,
     Json(payload): Json<RegistryData>,
 ) -> Result<(HeaderMap, Json<RegistryRespData>)> {
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    browser::validate_csrf(&state, &request_headers, None, &budget)?;
     let username = payload.username;
     let password = payload.password;
     let nickname = payload.nickname;
@@ -100,6 +125,7 @@ pub async fn auth_register(
         username.as_str(),
         password.as_str(),
         nickname.as_str(),
+        &budget,
     )
     .await?;
 
@@ -112,8 +138,10 @@ pub async fn auth_register(
         ))?,
     );
 
+    let csrf = browser::issue_csrf(&state, Some(&refresh_token), &mut headers)?;
     let resp = RegistryRespData {
         access_token,
+        csrf_token: csrf.expose_secret().into(),
         username,
         nickname,
     };
@@ -135,15 +163,18 @@ pub async fn auth_register(
 ))]
 pub async fn login(
     State(state): State<AppState>,
+    request_headers: HeaderMap,
     Json(login_data): Json<LoginData>,
 ) -> Result<(HeaderMap, Json<LoginRespData>)> {
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    browser::validate_csrf(&state, &request_headers, None, &budget)?;
     // 1. 校验请求数据
     let username = login_data.username.as_str();
     let password = login_data.password.as_str();
 
     // 2. 校验数据库账号密码
     let (access_token, refresh_token, user_vo) =
-        UserService::auth(&state, username, password).await?;
+        UserService::auth(&state, username, password, &budget).await?;
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -153,8 +184,10 @@ pub async fn login(
             refresh_token, state.config.auth.refresh_exp_seconds,
         ))?,
     );
+    let csrf = browser::issue_csrf(&state, Some(&refresh_token), &mut headers)?;
     let resp = LoginRespData {
         access_token,
+        csrf_token: csrf.expose_secret().into(),
         username: username.to_string(),
         nickname: user_vo.nickname.unwrap_or(username.to_string()),
     };
@@ -175,16 +208,16 @@ pub async fn login(
 ))]
 pub async fn refresh(
     State(state): State<AppState>,
-    TypedHeader(cookie): TypedHeader<Cookie>,
+    request_headers: HeaderMap,
 ) -> Result<(HeaderMap, Json<RefreshRespData>)> {
     // 从 Cookie 中读取 refresh_token
-    let refresh_token = cookie
-        .get("refresh_token")
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    let refresh_token = browser::validate_csrf(&state, &request_headers, None, &budget)?
         .ok_or_else(|| AppError::BadRequest("missing refresh token".to_string()))?;
 
     // 调用业务逻辑
     let (access_token, new_refresh_token) =
-        UserService::refresh_tokens(&state, refresh_token).await?;
+        UserService::refresh_tokens(&state, refresh_token.expose_secret(), &budget).await?;
 
     // 设置新的 refresh_token Cookie
     let mut headers = HeaderMap::new();
@@ -197,48 +230,38 @@ pub async fn refresh(
         .parse()?,
     );
 
-    Ok((headers, Json(RefreshRespData { access_token })))
+    let csrf = browser::issue_csrf(&state, Some(&new_refresh_token), &mut headers)?;
+    Ok((
+        headers,
+        Json(RefreshRespData {
+            access_token,
+            csrf_token: csrf.expose_secret().into(),
+        }),
+    ))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     path = "/logout",
     request_body(
-        description = "登出当前会话：提升刷新令牌版本，使现有刷新令牌失效",
+        description = "撤销当前登记会话及刷新族，提交后清除Cookie",
         content_type = "application/json"
     ),
     responses(
-        (status = 200, description = "登出成功，返回空的令牌占位", body = RefreshRespData),
+        (status = 200, description = "撤销提交成功，返回回执", body = RevocationReceipt),
         (status = 401, description = "刷新令牌无效或已失效"),
     ),
 ))]
 pub async fn logout(
     State(state): State<AppState>,
-    TypedHeader(cookie): TypedHeader<Cookie>,
-) -> Result<(HeaderMap, Json<RefreshRespData>)> {
-    let refresh_token = cookie
-        .get("refresh_token")
+    request_headers: HeaderMap,
+) -> Result<(HeaderMap, Json<RevocationReceipt>)> {
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    let refresh_token = browser::validate_csrf(&state, &request_headers, None, &budget)?
         .ok_or_else(|| AppError::BadRequest("missing refresh token".to_string()))?;
 
-    UserService::logout_by_refresh(
-        &state.database.connection,
-        state.refresh_token_manager(),
-        refresh_token,
-    )
-    .await?;
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        SET_COOKIE,
-        http::HeaderValue::from_str(
-            "refresh_token=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0",
-        )?,
-    );
-    Ok((
-        headers,
-        Json(RefreshRespData {
-            access_token: String::new(),
-        }),
-    ))
+    let receipt = UserService::logout_by_refresh(&state, &refresh_token, None, &budget).await?;
+    Ok((browser::clear_session_cookies(), Json(receipt)))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -256,11 +279,16 @@ pub async fn logout(
 ))]
 pub async fn kick_out(
     State(state): State<AppState>,
+    request_headers: HeaderMap,
     Json(payload): Json<KickReqData>,
-) -> Result<()> {
-    let db = &state.database.connection;
-    refresh_token::Entity::delete_by_sub(db, payload.sub).await?;
-    Ok(())
+) -> Result<Json<RevocationReceipt>> {
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    let manager = browser::authenticate_manager(&state, &request_headers, &budget).await?;
+    Ok(Json(
+        browser::lifecycle(&state)?
+            .kickout_sessions(&manager, &payload.sub.to_string(), &budget)
+            .await?,
+    ))
 }
 
 #[cfg(feature = "openapi")]

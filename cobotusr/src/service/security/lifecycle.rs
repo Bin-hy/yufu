@@ -223,42 +223,6 @@ impl CredentialLifecycle {
         self.rotate_session(refresh, SessionClient::Local, config, signer, budget)
             .await
     }
-    /// Preserve the existing OIDC refresh revocation endpoint while it migrates
-    /// to the shared registry. Broader logout/application scopes belong to T25.
-    pub async fn revoke_session_refresh(
-        &self,
-        request: RefreshRequest<'_>,
-        issuer: &str,
-        budget: &SecurityBudget,
-    ) -> Result<(), SecurityError> {
-        let mut txn = self.repository.begin(budget).await?;
-        let client = txn
-            .oidc_client(request.client_id)
-            .await?
-            .ok_or(SecurityError::InvalidCredential)?;
-        authenticate_session_client(&client, request.client_secret, "refresh_token", budget)
-            .await?;
-        if let Some(snapshot) = txn.lock_refresh(issuer, request.refresh_token).await? {
-            let row = &snapshot.current.credential;
-            if row.oidc_client_id.as_deref() == Some(client.client_id.as_str()) {
-                validate_refresh_roots(&snapshot.current)?;
-                let paired = CredentialRef::new(
-                    &row.issuer,
-                    row.paired_access_jti
-                        .as_deref()
-                        .ok_or(SecurityError::InvalidCredential)?,
-                )?;
-                let access = txn
-                    .credential(&paired)
-                    .await?
-                    .ok_or(SecurityError::InvalidCredential)?;
-                validate_session_access(row, &access.current.credential)?;
-                txn.revoke_session_pair(snapshot.reference(), now(self.clock.as_ref())?)
-                    .await?;
-            }
-        }
-        txn.commit().await
-    }
     pub async fn rotate_refresh(
         &self,
         request: RefreshRequest<'_>,

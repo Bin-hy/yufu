@@ -72,16 +72,6 @@ impl OidcService {
             .rotate_refresh(request, &config, state.id_token_signer().as_ref(), &budget)
             .await?)
     }
-
-    pub async fn revoke_session_refresh(
-        state: &AppState,
-        request: RefreshRequest<'_>,
-    ) -> Result<()> {
-        let (lifecycle, budget, config) = Self::session_lifecycle(state)?;
-        Ok(lifecycle
-            .revoke_session_refresh(request, &config.issuer, &budget)
-            .await?)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -145,28 +135,6 @@ impl OidcService {
             .ok_or(AppError::Unauthorized("invalid client_id".to_string()))?;
         if !Self::client_verify_secret(&client, secret) {
             return Err(AppError::Unauthorized("invalid client_secret".to_string()));
-        }
-        Ok(client)
-    }
-
-    /// Authenticate a token-management request. Public clients identify
-    /// themselves with client_id; confidential clients must additionally prove
-    /// possession of their registered client_secret.
-    pub async fn authenticate_token_client(
-        db: &DatabaseConnection,
-        client_id: Option<&str>,
-        client_secret: Option<&str>,
-    ) -> Result<oauth_client::Model> {
-        if client_secret.is_some() {
-            return Self::authenticate_client(db, client_id, client_secret).await;
-        }
-
-        let client_id = client_id.ok_or(AppError::BadRequest("missing client_id".to_string()))?;
-        let client = oauth_client::Entity::get_by_client_id(db, client_id)
-            .await?
-            .ok_or(AppError::Unauthorized("invalid client_id".to_string()))?;
-        if !client.public_client {
-            return Err(AppError::BadRequest("missing client_secret".to_string()));
         }
         Ok(client)
     }
@@ -463,26 +431,6 @@ impl OidcService {
 // Token operations (revoke, issue, refresh)
 // ---------------------------------------------------------------------------
 impl OidcService {
-    /// Revoke a token record by its refresh_token value.
-    pub async fn revoke_by_refresh_token(db: &DatabaseConnection, rt: &str) -> Result<()> {
-        if let Some(rec) = oauth_token::Entity::find_by_refresh_token(db, rt).await? {
-            let mut am: oauth_token::ActiveModel = rec.into();
-            am.revoked = Set(true);
-            am.update(db).await?;
-        }
-        Ok(())
-    }
-
-    /// Revoke a token record by its access_token value.
-    pub async fn revoke_by_access_token(db: &DatabaseConnection, at: &str) -> Result<()> {
-        if let Some(rec) = oauth_token::Entity::find_by_access_token(db, at).await? {
-            let mut am: oauth_token::ActiveModel = rec.into();
-            am.revoked = Set(true);
-            am.update(db).await?;
-        }
-        Ok(())
-    }
-
     /// Issue access_token for client_credentials grant (M2M, no user context).
     pub fn issue_client_credentials_token(
         state: &AppState,
@@ -581,49 +529,6 @@ impl OidcService {
             results.push((consent, client));
         }
         Ok(results)
-    }
-
-    /// Revoke a consent and all associated tokens for that user+client.
-    pub async fn revoke_consent(
-        db: &DatabaseConnection,
-        consent_id: i32,
-        user_id: IdType,
-    ) -> Result<()> {
-        // Find the consent to get client_id
-        let consent = oauth_consent::Entity::find_by_id(consent_id)
-            .one(db)
-            .await?
-            .ok_or(AppError::NotFound("consent not found".to_string()))?;
-        if consent.user_id != user_id {
-            return Err(AppError::Unauthorized("not your consent".to_string()));
-        }
-        let client_id = consent.client_id.clone();
-
-        // Delete the consent record
-        oauth_consent::Entity::delete_by_id_and_user(db, consent_id, user_id).await?;
-
-        // Revoke all tokens for this user+client
-        Self::revoke_tokens_for_user_client(db, user_id, &client_id).await
-    }
-
-    /// Revoke all active tokens for a user+client pair.
-    pub async fn revoke_tokens_for_user_client(
-        db: &DatabaseConnection,
-        user_id: IdType,
-        client_id: &str,
-    ) -> Result<()> {
-        let tokens = oauth_token::Entity::find()
-            .filter(oauth_token::Column::UserId.eq(user_id))
-            .filter(oauth_token::Column::ClientId.eq(client_id))
-            .filter(oauth_token::Column::Revoked.eq(false))
-            .all(db)
-            .await?;
-        for token in tokens {
-            let mut am: oauth_token::ActiveModel = token.into();
-            am.revoked = Set(true);
-            am.update(db).await?;
-        }
-        Ok(())
     }
 
     /// Get scopes with their descriptions for display on the consent page.

@@ -1,11 +1,9 @@
-use crate::entity::refresh_token;
 use crate::entity::role::{self, Entity as Role, RoleVO};
 use crate::entity::user::{self, Entity as User, UserVO};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
 use crate::{AppState, IdType};
 use anyhow::anyhow;
-use auth::token_manager::TokenManager;
 use bcrypt::{DEFAULT_COST, hash};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, QueryFilter, Set};
@@ -29,8 +27,9 @@ impl UserService {
         state: &AppState,
         username: &str,
         password: &str,
+        budget: &SecurityBudget,
     ) -> Result<(String, String, UserVO)> {
-        let (lifecycle, budget, config) = Self::local_lifecycle(state)?;
+        let (lifecycle, config) = Self::local_lifecycle(state)?;
         let password = LocalPassword::new(password.to_owned())?;
         let session = lifecycle
             .login_local(
@@ -40,7 +39,7 @@ impl UserService {
                 },
                 &config,
                 state.id_token_signer().as_ref(),
-                &budget,
+                budget,
             )
             .await?;
         Ok((
@@ -55,8 +54,9 @@ impl UserService {
         username: &str,
         password: &str,
         nickname: &str,
+        budget: &SecurityBudget,
     ) -> Result<(String, String)> {
-        let (lifecycle, budget, config) = Self::local_lifecycle(state)?;
+        let (lifecycle, config) = Self::local_lifecycle(state)?;
         let password = LocalPassword::new(password.to_owned()).map_err(local_registration_error)?;
         let session = lifecycle
             .register_local(
@@ -67,7 +67,7 @@ impl UserService {
                 },
                 &config,
                 state.id_token_signer().as_ref(),
-                &budget,
+                budget,
             )
             .await
             .map_err(local_registration_error)?;
@@ -133,22 +133,23 @@ impl UserService {
     }
 
     // 获取刷新token
-    pub async fn refresh_tokens(state: &AppState, refresh_token: &str) -> Result<(String, String)> {
-        let (lifecycle, budget, config) = Self::local_lifecycle(state)?;
+    pub async fn refresh_tokens(
+        state: &AppState,
+        refresh_token: &str,
+        budget: &SecurityBudget,
+    ) -> Result<(String, String)> {
+        let (lifecycle, config) = Self::local_lifecycle(state)?;
         let refresh = SecretToken::new(refresh_token.to_owned())?;
         let tokens = lifecycle
-            .rotate_local_refresh(&refresh, &config, state.id_token_signer().as_ref(), &budget)
+            .rotate_local_refresh(&refresh, &config, state.id_token_signer().as_ref(), budget)
             .await?;
         Ok((
             tokens.access_token.expose_secret().to_owned(),
             tokens.refresh_token.expose_secret().to_owned(),
         ))
     }
-    fn local_lifecycle(
-        state: &AppState,
-    ) -> Result<(CredentialLifecycle, SecurityBudget, SessionTokenConfig)> {
+    fn local_lifecycle(state: &AppState) -> Result<(CredentialLifecycle, SessionTokenConfig)> {
         let clock = state.security_clock()?;
-        let budget = SecurityBudget::new(clock.clone())?;
         let config = SessionTokenConfig {
             issuer: state.issuer(),
             access_ttl_seconds: u64::try_from(state.config.auth.exp_seconds)
@@ -160,27 +161,19 @@ impl UserService {
             state.database.connection.clone(),
             clock.clone(),
         ));
-        Ok((CredentialLifecycle::new(repository, clock), budget, config))
+        Ok((CredentialLifecycle::new(repository, clock), config))
     }
 
-    // 登出 & 清除 刷新token
+    /// End the registered local session; never infer a user from a legacy JWT.
     pub async fn logout_by_refresh(
-        db: &DatabaseConnection,
-        refresh_manager: &TokenManager,
-        refresh_token: &str,
-    ) -> Result<()> {
-        let claims = match refresh_manager.verify_refresh_token::<IdType>(refresh_token) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(AppError::Unauthorized(format!(
-                    "refresh token invalid: {:?}",
-                    e
-                )));
-            }
-        };
-
-        refresh_token::Entity::delete_by_sub(db, claims.sub).await?;
-        Ok(())
+        state: &AppState,
+        refresh: &SecretToken,
+        redirect: Option<(&str, &str)>,
+        budget: &SecurityBudget,
+    ) -> Result<super::security::revocation::RevocationReceipt> {
+        Ok(super::security::browser::lifecycle(state)?
+            .logout_local(refresh, &state.issuer(), redirect, budget)
+            .await?)
     }
 
     /// 获取用户角色

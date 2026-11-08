@@ -6,6 +6,9 @@ use tokio::net::TcpListener;
 
 use super::super::common::*;
 
+#[path = "auth_revocation.rs"]
+mod revocation;
+
 use cobotusr::route::auth::{LoginData, RegistryData};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 use std::sync::Arc;
@@ -79,6 +82,30 @@ fn bearer_headers(access: &str) -> axum::http::HeaderMap {
     headers.insert("authorization", format!("Bearer {access}").parse().unwrap());
     headers
 }
+
+fn csrf_request(
+    fixture: &LocalHttpFixture,
+    request: reqwest::RequestBuilder,
+    refresh_cookie: Option<&str>,
+) -> reqwest::RequestBuilder {
+    let refresh = refresh_cookie.and_then(|cookie| cookie.strip_prefix("refresh_token="));
+    let clock = test_clock(true);
+    let token = auth::security::csrf::CsrfProtector::new("t24-local-test-key".into())
+        .unwrap()
+        .issue(&fixture.root, refresh, clock.as_ref())
+        .unwrap();
+    let cookies = format!(
+        "__Host-cobotusr-csrf={}{}",
+        token.expose_secret(),
+        refresh_cookie
+            .map(|cookie| format!("; {cookie}"))
+            .unwrap_or_default()
+    );
+    request
+        .header("origin", &fixture.root)
+        .header("x-csrf-token", token.expose_secret())
+        .header("cookie", cookies)
+}
 #[tokio::test]
 async fn security_t24_http_register_login_refresh_and_replay_use_registered_idp_credentials() {
     use auth::security::{
@@ -89,17 +116,19 @@ async fn security_t24_http_register_login_refresh_and_replay_use_registered_idp_
         lifecycle::CredentialLifecycle, repository::PgSecurityRepository,
     };
     let fixture = local_http_fixture("healthy").await;
-    let registration = fixture
-        .client
-        .post(format!("{}/register", fixture.api))
-        .json(&RegistryData {
-            username: "local-http".into(),
-            nickname: "local-http-nick".into(),
-            password: "test password".into(),
-        })
-        .send()
-        .await
-        .unwrap();
+    let registration = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/register", fixture.api)),
+        None,
+    )
+    .json(&RegistryData {
+        username: "local-http".into(),
+        nickname: "local-http-nick".into(),
+        password: "test password".into(),
+    })
+    .send()
+    .await
+    .unwrap();
     assert_eq!(registration.status(), 200);
     let original_cookie = response_refresh_cookie(&registration);
     let registered: serde_json::Value = registration.json().await.unwrap();
@@ -133,41 +162,45 @@ async fn security_t24_http_register_login_refresh_and_replay_use_registered_idp_
     let original_headers = bearer_headers(registered["access_token"].as_str().unwrap());
     let context = strict.authenticate(&original_headers).await.unwrap();
     assert_eq!(context.audience(), "cobotusr");
-    let wrong_login = fixture
-        .client
-        .post(format!("{}/login", fixture.api))
-        .json(&LoginData {
-            username: "local-http".into(),
-            password: "wrong".into(),
-        })
-        .send()
-        .await
-        .unwrap();
+    let wrong_login = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/login", fixture.api)),
+        None,
+    )
+    .json(&LoginData {
+        username: "local-http".into(),
+        password: "wrong".into(),
+    })
+    .send()
+    .await
+    .unwrap();
     assert_eq!(wrong_login.status(), 401);
     assert!(!wrong_login.headers().contains_key("set-cookie"));
-    let logged = fixture
-        .client
-        .post(format!("{}/login", fixture.api))
-        .json(&LoginData {
-            username: "local-http".into(),
-            password: "test password".into(),
-        })
-        .send()
-        .await
-        .unwrap();
+    let logged = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/login", fixture.api)),
+        None,
+    )
+    .json(&LoginData {
+        username: "local-http".into(),
+        password: "test password".into(),
+    })
+    .send()
+    .await
+    .unwrap();
     assert_eq!(logged.status(), 200);
     let _other_cookie = response_refresh_cookie(&logged);
     let logged: serde_json::Value = logged.json().await.unwrap();
     let other_headers = bearer_headers(logged["access_token"].as_str().unwrap());
     strict.authenticate(&other_headers).await.unwrap();
-    let refreshed = fixture
-        .client
-        .post(format!("{}/refresh", fixture.api))
-        .header("cookie", &original_cookie)
-        .header("origin", &fixture.root)
-        .send()
-        .await
-        .unwrap();
+    let refreshed = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/refresh", fixture.api)),
+        Some(&original_cookie),
+    )
+    .send()
+    .await
+    .unwrap();
     assert_eq!(refreshed.status(), 200);
     let rotated_cookie = response_refresh_cookie(&refreshed);
     assert_ne!(rotated_cookie, original_cookie);
@@ -175,14 +208,14 @@ async fn security_t24_http_register_login_refresh_and_replay_use_registered_idp_
     let rotated_headers = bearer_headers(refreshed["access_token"].as_str().unwrap());
     strict.authenticate(&rotated_headers).await.unwrap();
     assert!(strict.authenticate(&original_headers).await.is_err());
-    let replay = fixture
-        .client
-        .post(format!("{}/refresh", fixture.api))
-        .header("cookie", &original_cookie)
-        .header("origin", &fixture.root)
-        .send()
-        .await
-        .unwrap();
+    let replay = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/refresh", fixture.api)),
+        Some(&original_cookie),
+    )
+    .send()
+    .await
+    .unwrap();
     assert_eq!(replay.status(), 401);
     assert!(!replay.headers().contains_key("set-cookie"));
     assert!(strict.authenticate(&rotated_headers).await.is_err());
@@ -204,41 +237,48 @@ async fn security_t24_http_legacy_refresh_missing_and_invalid_inputs_never_issue
     let legacy = auth::token_manager::TokenManager::new("t24-local-test-key", 3600)
         .generate_refresh_token::<i32>(jti.into(), 1)
         .unwrap();
-    let response = fixture
-        .client
-        .post(format!("{}/refresh", fixture.api))
-        .header("cookie", format!("refresh_token={legacy}"))
-        .send()
-        .await
-        .unwrap();
+    let response = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/refresh", fixture.api)),
+        Some(&format!("refresh_token={legacy}")),
+    )
+    .send()
+    .await
+    .unwrap();
     assert_eq!(response.status(), 401);
     assert!(!response.headers().contains_key("set-cookie"));
-    let missing = fixture
-        .client
-        .post(format!("{}/refresh", fixture.api))
-        .send()
-        .await
-        .unwrap();
+    let missing = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/refresh", fixture.api)),
+        None,
+    )
+    .send()
+    .await
+    .unwrap();
     assert_eq!(missing.status(), 400);
-    let invalid = fixture
-        .client
-        .post(format!("{}/register", fixture.api))
-        .json(&RegistryData {
-            username: "empty-password".into(),
-            nickname: "test".into(),
-            password: "".into(),
-        })
-        .send()
-        .await
-        .unwrap();
+    let invalid = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/register", fixture.api)),
+        None,
+    )
+    .json(&RegistryData {
+        username: "empty-password".into(),
+        nickname: "test".into(),
+        password: "".into(),
+    })
+    .send()
+    .await
+    .unwrap();
     assert_eq!(invalid.status(), 400);
-    let malformed = fixture
-        .client
-        .post(format!("{}/login", fixture.api))
-        .json(&serde_json::json!({"username":"no-password"}))
-        .send()
-        .await
-        .unwrap();
+    let malformed = csrf_request(
+        &fixture,
+        fixture.client.post(format!("{}/login", fixture.api)),
+        None,
+    )
+    .json(&serde_json::json!({"username":"no-password"}))
+    .send()
+    .await
+    .unwrap();
     assert_eq!(malformed.status(), 422);
     let row = fixture
         .db
@@ -264,29 +304,33 @@ async fn security_t24_http_missing_clock_unhealthy_and_hmac_preserve_accounts_an
             ))
             .await
             .unwrap();
-        let registered = fixture
-            .client
-            .post(format!("{}/register", fixture.api))
-            .json(&RegistryData {
-                username: "must-not-exist".into(),
-                nickname: "test".into(),
-                password: "test password".into(),
-            })
-            .send()
-            .await
-            .unwrap();
+        let registered = csrf_request(
+            &fixture,
+            fixture.client.post(format!("{}/register", fixture.api)),
+            None,
+        )
+        .json(&RegistryData {
+            username: "must-not-exist".into(),
+            nickname: "test".into(),
+            password: "test password".into(),
+        })
+        .send()
+        .await
+        .unwrap();
         assert_eq!(registered.status(), 503, "{mode}");
         assert!(!registered.headers().contains_key("set-cookie"));
-        let logged = fixture
-            .client
-            .post(format!("{}/login", fixture.api))
-            .json(&LoginData {
-                username: "fault-user".into(),
-                password: "test password".into(),
-            })
-            .send()
-            .await
-            .unwrap();
+        let logged = csrf_request(
+            &fixture,
+            fixture.client.post(format!("{}/login", fixture.api)),
+            None,
+        )
+        .json(&LoginData {
+            username: "fault-user".into(),
+            password: "test password".into(),
+        })
+        .send()
+        .await
+        .unwrap();
         assert_eq!(logged.status(), 503, "{mode}");
         assert!(!logged.headers().contains_key("set-cookie"));
         let row = fixture.db.query_one_raw(Statement::from_string(DbBackend::Postgres,
@@ -307,6 +351,7 @@ fn configure_local_server(cfg: &mut Config, address: SocketAddr) -> super::oidc:
     cfg.auth.exp_seconds = 300;
     cfg.auth.refresh_exp_seconds = 3600;
     cfg.auth.secret = "t24-local-test-key".into();
+    cfg.auth.origins = vec!["*".into()];
     // Local lifetimes must not inherit a different client's OIDC overrides.
     cfg.oidc.access_token_expire_seconds = Some(30);
     cfg.oidc.refresh_token_expire_seconds = Some(60);
@@ -343,12 +388,16 @@ async fn test_register() -> Result<(), AppError> {
         password: "test_user".to_string(),
     };
 
-    let resp = client
-        .post(format!("http://{}{}{}", addr, api_prefix, uri))
-        .json(&body)
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp = bootstrap_request(
+        &client,
+        &format!("http://{addr}"),
+        client.post(format!("http://{}{}{}", addr, api_prefix, uri)),
+    )
+    .await?
+    .json(&body)
+    .send()
+    .await?
+    .error_for_status()?;
 
     assert!(resp.status().is_success());
     Ok(())
@@ -383,17 +432,16 @@ async fn test_login() -> Result<(), AppError> {
         nickname: "test_user".to_string(),
         password: "test_user".to_string(),
     };
-    let resp_register = client_register
-        .post(format!(
-            "http://{}{}{}",
-            addr.clone(),
-            api_prefix,
-            uri_register
-        ))
-        .json(&body_register)
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp_register = bootstrap_request(
+        &client_register,
+        &format!("http://{addr}"),
+        client_register.post(format!("http://{}{}{}", addr, api_prefix, uri_register)),
+    )
+    .await?
+    .json(&body_register)
+    .send()
+    .await?
+    .error_for_status()?;
     assert!(resp_register.status().is_success());
 
     // 2. 登陆用户
@@ -405,13 +453,44 @@ async fn test_login() -> Result<(), AppError> {
         username: "test_user".to_string(),
         password: "test_user".to_string(),
     };
-    let resp = client
-        .post(format!("http://{}{}{}", addr, api_prefix, uri))
-        .json(&body)
-        .send()
-        .await?
-        .error_for_status()?;
+    let resp = bootstrap_request(
+        &client,
+        &format!("http://{addr}"),
+        client.post(format!("http://{}{}{}", addr, api_prefix, uri)),
+    )
+    .await?
+    .json(&body)
+    .send()
+    .await?
+    .error_for_status()?;
 
     assert!(resp.status().is_success());
     Ok(())
+}
+
+async fn bootstrap_request(
+    client: &Client,
+    root: &str,
+    request: reqwest::RequestBuilder,
+) -> Result<reqwest::RequestBuilder, AppError> {
+    let response = client
+        .get(format!("{root}/api/v1/csrf"))
+        .send()
+        .await?
+        .error_for_status()?;
+    let cookie = response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let body: serde_json::Value = response.json().await?;
+    Ok(request
+        .header("origin", root)
+        .header("cookie", cookie)
+        .header("x-csrf-token", body["csrf_token"].as_str().unwrap()))
 }

@@ -1,5 +1,5 @@
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, header::SET_COOKIE};
+use axum::http::HeaderMap;
 use axum::response::{Html, Redirect};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::entity::oauth_client;
 use crate::result::Result;
 use crate::service::oidc::{CreateAuthCodeParams, OidcService, get_issuer_base};
+use crate::service::security::{browser, revocation::RevocationReceipt};
 use crate::{AppState, IdType, parse_user_id};
 use auth::claims::AccessTokenClaims;
+use auth::security::{budget::SecurityBudget, error::SecurityError, identity::SecretToken};
 use chrono::Utc;
 
 #[derive(Serialize, Clone)]
@@ -105,6 +107,13 @@ pub struct EndSessionQuery {
     pub post_logout_redirect_uri: String,
 }
 
+#[derive(Deserialize)]
+struct EndSessionForm {
+    client_id: String,
+    post_logout_redirect_uri: String,
+    csrf_token: Option<String>,
+}
+
 fn default_token_type_hint() -> String {
     "refresh_token".to_string()
 }
@@ -197,7 +206,7 @@ pub fn get_public_routes() -> Router<AppState> {
         .route("/oidc/token", post(token_endpoint))
         .route("/oidc/revoke", post(revoke))
         .route("/oidc/introspect", post(introspect))
-        .route("/oidc/logout", get(end_session))
+        .route("/oidc/logout", get(end_session).post(confirm_end_session))
         .route("/oidc/authorize", get(authorize))
 }
 
@@ -207,10 +216,13 @@ pub fn get_auth_routes() -> Router<AppState> {
         .route("/oidc/authorize/client-info", get(authorize_client_info))
         .route("/oidc/authorize/consent", post(authorize_consent))
         .route("/oidc/authorized-apps", get(list_authorized_apps))
-        .route(
-            "/oidc/authorized-apps/{consent_id}",
-            delete(revoke_authorized_app),
-        )
+}
+
+pub fn get_revocation_routes() -> Router<AppState> {
+    Router::new().route(
+        "/oidc/authorized-apps/{consent_id}",
+        delete(revoke_authorized_app),
+    )
 }
 
 // --- Handlers ---
@@ -456,75 +468,74 @@ async fn handle_client_credentials(
 
 async fn revoke(
     State(state): State<AppState>,
-    axum::extract::Form(req): axum::extract::Form<RevokeRequest>,
-) -> Result<http::StatusCode> {
-    if req.token_type_hint == "refresh_token" {
-        use crate::service::security::lifecycle::RefreshRequest;
-        use auth::security::identity::SecretToken;
-        let token = SecretToken::new(req.token.clone())?;
-        let secret = req
-            .client_secret
-            .clone()
-            .map(SecretToken::new)
-            .transpose()?;
-        let client_id = req
-            .client_id
-            .as_deref()
-            .ok_or(crate::error::AppError::BadRequest(
-                "missing client_id".into(),
-            ))?;
-        OidcService::revoke_session_refresh(
-            &state,
-            RefreshRequest {
-                refresh_token: &token,
-                client_id,
-                client_secret: secret.as_ref(),
-            },
-        )
-        .await?;
-        return Ok(http::StatusCode::OK);
-    }
-    let db = &state.database.connection;
-    let client = OidcService::authenticate_token_client(
-        db,
-        req.client_id.as_deref(),
-        req.client_secret.as_deref(),
-    )
-    .await?;
+    headers: HeaderMap,
+    axum::extract::Form(mut req): axum::extract::Form<RevokeRequest>,
+) -> Result<Json<RevocationReceipt>> {
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    // A hint is advisory; registered refresh history and signed access evidence
+    // are both tried regardless of its value.
+    normalize_revocation_client_auth(&headers, &mut req)?;
+    let client_id = req
+        .client_id
+        .as_deref()
+        .ok_or(crate::error::AppError::BadRequest(
+            "missing client_id".into(),
+        ))?;
+    let token = SecretToken::new(req.token)?;
+    let secret = req.client_secret.map(SecretToken::new).transpose()?;
+    let reference = if token.expose_secret().split('.').count() == 3 {
+        let (signer, issuer, evidence) = (
+            state.id_token_signer().clone(),
+            state.issuer(),
+            SecretToken::new(token.expose_secret().to_owned())?,
+        );
+        match budget
+            .run(tokio::task::spawn_blocking(move || {
+                signer.revocation_reference(&evidence, &issuer)
+            }))
+            .await?
+            .map_err(|_| SecurityError::DependencyUnavailable)?
+        {
+            Ok(reference) => Some(reference),
+            Err(SecurityError::InvalidCredential) => None,
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        None
+    };
+    Ok(Json(
+        browser::lifecycle(&state)?
+            .revoke_oidc(
+                crate::service::security::revocation::OidcRevocationRequest {
+                    token: &token,
+                    client_id,
+                    client_secret: secret.as_ref(),
+                    access_reference: reference.as_ref(),
+                },
+                &state.issuer(),
+                &budget,
+            )
+            .await?,
+    ))
+}
 
-    match req.token_type_hint.as_str() {
-        "refresh_token" => {
-            if let Some(token) =
-                crate::entity::oauth_token::Entity::find_by_refresh_token(db, &req.token).await?
-                && token.client_id == client.client_id
-            {
-                OidcService::revoke_by_refresh_token(db, &req.token).await?;
-            }
+fn normalize_revocation_client_auth(headers: &HeaderMap, req: &mut RevokeRequest) -> Result<()> {
+    if let Some(value) = browser::single_header(headers, "authorization")? {
+        if !value.starts_with("Basic ") {
+            return Err(SecurityError::InvalidCredential.into());
         }
-        "access_token" => {
-            if let Some(token) =
-                crate::entity::oauth_token::Entity::find_by_access_token(db, &req.token).await?
-                && token.client_id == client.client_id
-            {
-                OidcService::revoke_by_access_token(db, &req.token).await?;
-            }
+        let (id, secret) = extract_basic_auth(headers);
+        let id = id.ok_or(SecurityError::InvalidCredential)?;
+        let secret = secret.ok_or(SecurityError::InvalidCredential)?;
+        if req.client_secret.is_some() || req.client_id.as_ref().is_some_and(|body| body != &id) {
+            return Err(crate::error::AppError::BadRequest(
+                "conflicting client authentication".into(),
+            ));
         }
-        _ => {
-            if let Some(token) =
-                crate::entity::oauth_token::Entity::find_by_refresh_token(db, &req.token).await?
-                && token.client_id == client.client_id
-            {
-                OidcService::revoke_by_refresh_token(db, &req.token).await?;
-            }
-            if let Some(token) =
-                crate::entity::oauth_token::Entity::find_by_access_token(db, &req.token).await?
-                && token.client_id == client.client_id
-            {
-                OidcService::revoke_by_access_token(db, &req.token).await?;
-            }
-        }
+        req.client_id = Some(id);
+        req.client_secret = Some(secret);
     }
-    Ok(http::StatusCode::OK)
+    Ok(())
 }
 
 async fn introspect(
@@ -598,74 +609,83 @@ async fn userinfo(
     }))
 }
 
-/// Read a single cookie value from the Cookie header. Returns None when the
-/// request carries no cookies — logout may arrive unauthenticated.
-fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
-    let header = headers.get(http::header::COOKIE)?.to_str().ok()?;
-    header.split(';').map(str::trim).find_map(|pair| {
-        let (key, value) = pair.split_once('=')?;
-        (key == name).then_some(value)
-    })
+fn html_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
-/// Clear the browser-local IdP session and return to a registered client.
-///
-/// cobotusr's management SPA stores its access token at the IdP origin, so an
-/// IM-origin page cannot remove it directly. The registered redirect URI is
-/// checked before this response emits a same-origin cleanup script.
+/// GET only prepares a confirmation; it never revokes or clears a session.
 async fn end_session(
     State(state): State<AppState>,
     Query(query): Query<EndSessionQuery>,
-    headers: HeaderMap,
+    request_headers: HeaderMap,
 ) -> Result<(HeaderMap, Html<String>)> {
-    let db = &state.database.connection;
-    let client = oauth_client::Entity::get_by_client_id(db, &query.client_id)
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    let client = budget
+        .run(oauth_client::Entity::get_by_client_id(
+            &state.database.connection,
+            &query.client_id,
+        ))
         .await?
-        .ok_or(crate::error::AppError::Unauthorized(
-            "invalid client_id".to_string(),
-        ))?;
+        .map_err(|_| SecurityError::DependencyUnavailable)?
+        .ok_or(SecurityError::InvalidCredential)?;
     if !OidcService::client_has_redirect(&client, &query.post_logout_redirect_uri) {
-        return Err(crate::error::AppError::BadRequest(
-            "invalid post_logout_redirect_uri".to_string(),
-        ));
+        return Err(SecurityError::InvalidResource.into());
     }
+    let cookies = browser::cookies(&request_headers)?;
+    let mut headers = HeaderMap::new();
+    let proof = browser::issue_csrf(
+        &state,
+        cookies.get("refresh_token").map(String::as_str),
+        &mut headers,
+    )?;
+    headers.insert("x-frame-options", http::HeaderValue::from_static("DENY"));
+    let body = format!(
+        "<!doctype html><html><body><form method=\"post\" action=\"/oidc/logout\"><input type=\"hidden\" name=\"client_id\" value=\"{}\"><input type=\"hidden\" name=\"post_logout_redirect_uri\" value=\"{}\"><input type=\"hidden\" name=\"csrf_token\" value=\"{}\"><button type=\"submit\">确认退出当前会话</button></form></body></html>",
+        html_attribute(&query.client_id),
+        html_attribute(&query.post_logout_redirect_uri),
+        proof.expose_secret()
+    );
+    budget.remaining()?;
+    Ok((headers, Html(body)))
+}
 
-    // Best-effort server-side revocation: logout is usually an unauthenticated
-    // browser redirect, so credentials may be absent. When the browser still
-    // carries an access_token cookie we resolve the user from the stored token
-    // and revoke their tokens for this client; otherwise we degrade to the
-    // browser-storage cleanup below.
-    if let Some(access_token) = cookie_value(&headers, "access_token") {
-        match crate::entity::oauth_token::Entity::find_by_access_token(db, access_token).await {
-            Ok(Some(token)) => {
-                if let Err(err) =
-                    OidcService::revoke_tokens_for_user_client(db, token.user_id, &client.client_id)
-                        .await
-                {
-                    tracing::warn!("logout: failed to revoke tokens: {err:?}");
-                }
-            }
-            Ok(None) => {}
-            Err(err) => tracing::warn!("logout: failed to look up access token: {err}"),
-        }
-    }
-
-    let redirect_uri = serde_json::to_string(&query.post_logout_redirect_uri)
-        .map_err(crate::error::AppError::from)?
+async fn confirm_end_session(
+    State(state): State<AppState>,
+    request_headers: HeaderMap,
+    axum::extract::Form(form): axum::extract::Form<EndSessionForm>,
+) -> Result<(HeaderMap, Html<String>)> {
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    let refresh = browser::validate_csrf(
+        &state,
+        &request_headers,
+        form.csrf_token.as_deref(),
+        &budget,
+    )?
+    .ok_or(crate::error::AppError::BadRequest(
+        "missing refresh token".into(),
+    ))?;
+    let receipt = crate::service::user::UserService::logout_by_refresh(
+        &state,
+        &refresh,
+        Some((&form.client_id, &form.post_logout_redirect_uri)),
+        &budget,
+    )
+    .await?;
+    let redirect = serde_json::to_string(&form.post_logout_redirect_uri)?
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
         .replace('&', "\\u0026");
     let body = format!(
-        "<!doctype html><html><body><script>localStorage.removeItem('userInfo');for(const part of document.cookie.split(';')){{const name=part.trim().split('=',1)[0];if(name==='access_token'||name.endsWith('-token-key'))document.cookie=name+'=; Path=/; Max-Age=0; SameSite=Lax';}}window.location.replace({redirect_uri});</script></body></html>"
+        "<!doctype html><html><body data-committed-at=\"{}\" data-effective-by=\"{}\"><script>localStorage.removeItem('userInfo');for(const part of document.cookie.split(';')){{const name=part.trim().split('=',1)[0];if(name==='access_token'||name.endsWith('-token-key'))document.cookie=name+'=; Path=/; Max-Age=0; SameSite=Lax';}}window.location.replace({redirect});</script></body></html>",
+        receipt.committed_at, receipt.effective_by
     );
-
-    let mut headers = HeaderMap::new();
-    headers.append(
-        SET_COOKIE,
-        "refresh_token=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0"
-            .parse()
-            .map_err(crate::error::AppError::from)?,
-    );
+    let mut headers = browser::clear_session_cookies();
+    headers.insert("x-frame-options", http::HeaderValue::from_static("DENY"));
     Ok((headers, Html(body)))
 }
 
@@ -950,12 +970,15 @@ async fn list_authorized_apps(
 
 /// DELETE /api/v1/oidc/authorized-apps/:consent_id — revoke user's authorization
 async fn revoke_authorized_app(
-    claims: AccessTokenClaims,
     State(state): State<AppState>,
+    request_headers: HeaderMap,
     axum::extract::Path(consent_id): axum::extract::Path<i32>,
-) -> Result<http::StatusCode> {
-    let user_id = parse_user_id(&claims.sub)?;
-    let db = &state.database.connection;
-    OidcService::revoke_consent(db, consent_id, user_id).await?;
-    Ok(http::StatusCode::OK)
+) -> Result<Json<RevocationReceipt>> {
+    let budget = SecurityBudget::new(state.security_clock()?)?;
+    let manager = browser::authenticate_manager(&state, &request_headers, &budget).await?;
+    Ok(Json(
+        browser::lifecycle(&state)?
+            .revoke_consent(&manager, consent_id, &budget)
+            .await?,
+    ))
 }

@@ -159,6 +159,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
     // fallbacks only apply to file-based configs); set explicit values so
     // issued refresh tokens do not expire immediately.
     config.auth.exp_seconds = 7200;
+    config.auth.secret = "oidc-regression-csrf-key".into();
     config.auth.refresh_exp_seconds = 604800;
     config.oidc.bootstrap_clients.push(BootstrapClient {
         client_id: CLIENT_ID.to_string(),
@@ -227,12 +228,20 @@ async fn test_oidc_authorization_code_pkce_exchange() {
             [base_url.clone().into(), client_id.into()])).await.unwrap();
     }
     assert!(end_session.headers().contains_key("set-cookie"));
+    assert!(
+        !end_session
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .any(|v| v.to_str().unwrap().starts_with("refresh_token="))
+    );
     let end_session_body = end_session
         .text()
         .await
         .expect("end-session response should be text");
     assert!(end_session_body.contains(POST_LOGOUT_REDIRECT_URI));
-    assert!(end_session_body.contains("name.endsWith('-token-key')"));
+    assert!(end_session_body.contains("method=\"post\""));
+    assert!(!end_session_body.contains("localStorage.removeItem"));
 
     let invalid_end_session = client
         .get(format!("{base_url}/oidc/logout"))

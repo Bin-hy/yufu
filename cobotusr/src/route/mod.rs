@@ -22,7 +22,6 @@ pub mod user_permission;
 pub fn get_auth_routes() -> Router<AppState> {
     Router::new()
         .merge(user::get_auth_routes())
-        .merge(auth::get_auth_routes())
         .merge(role::get_auth_routes())
         .merge(authority::get_auth_routes())
         .merge(recording::get_auth_routes())
@@ -44,6 +43,13 @@ pub fn get_public_routes() -> Router<AppState> {
         .merge(auth::get_public_routes())
         .merge(rbac::get_public_routes())
         .merge(sync_permissions::get_public_routes())
+}
+
+/// These mutations authenticate and authorize through the local primary transaction.
+pub fn get_revocation_routes() -> Router<AppState> {
+    Router::new()
+        .merge(auth::get_revocation_routes())
+        .merge(oidc::get_revocation_routes())
 }
 
 /// Service-to-service routes: JWT-verified, but deliberately WITHOUT the

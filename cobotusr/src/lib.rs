@@ -77,6 +77,7 @@ fn redact_sensitive_headers(mut headers: HeaderMap) -> HeaderMap {
     headers.remove(AUTHORIZATION);
     headers.remove(COOKIE);
     headers.remove(SET_COOKIE);
+    headers.remove("x-csrf-token");
     headers
 }
 
@@ -86,15 +87,19 @@ fn redact_sensitive_headers(mut headers: HeaderMap) -> HeaderMap {
 /// `http.api_prefix` instead of being hard-coded.
 fn should_skip_body_logging(uri: &http::Uri, headers: &HeaderMap, api_prefix: &str) -> bool {
     let path = uri.path();
-    matches!(path, "/oidc/token" | "/oidc/revoke" | "/oidc/introspect")
-        || [
-            format!("{api_prefix}/login"),
-            format!("{api_prefix}/register"),
-            format!("{api_prefix}/refresh"),
-            format!("{api_prefix}/im/files"),
-        ]
-        .iter()
-        .any(|skip| skip == path)
+    matches!(
+        path,
+        "/oidc/token" | "/oidc/revoke" | "/oidc/introspect" | "/oidc/logout"
+    ) || [
+        format!("{api_prefix}/login"),
+        format!("{api_prefix}/register"),
+        format!("{api_prefix}/refresh"),
+        format!("{api_prefix}/csrf"),
+        format!("{api_prefix}/logout"),
+        format!("{api_prefix}/im/files"),
+    ]
+    .iter()
+    .any(|skip| skip == path)
         || headers
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
@@ -339,12 +344,18 @@ async fn serve_internal<F>(
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
         .nest(api_prefix, sub_service_router)
+        .nest(api_prefix, route::get_revocation_routes())
         .merge(get_no_prefix_routes())
         .layer({
             let origins: Vec<String> = app_state.clone().config.auth.origins;
             let has_wildcard = origins.iter().any(|o| o == "*");
             let cors_layer = CorsLayer::new()
-                .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
+                .allow_headers([
+                    AUTHORIZATION,
+                    CONTENT_TYPE,
+                    ACCEPT,
+                    http::HeaderName::from_static("x-csrf-token"),
+                ])
                 .allow_methods([
                     Method::GET,
                     Method::PATCH,
@@ -985,5 +996,21 @@ mod tests {
         assert!(!body_exceeds_log_limit(&invalid));
 
         assert!(!body_exceeds_log_limit(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn security_t25_csrf_and_logout_evidence_is_excluded_from_generic_logs() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-csrf-token",
+            HeaderValue::from_static("signed-test-proof"),
+        );
+        assert!(!redact_sensitive_headers(headers.clone()).contains_key("x-csrf-token"));
+        for path in ["/custom/csrf", "/custom/logout", "/oidc/logout"] {
+            assert!(
+                should_skip_body_logging(&path.parse().unwrap(), &headers, "/custom"),
+                "{path}"
+            );
+        }
     }
 }
