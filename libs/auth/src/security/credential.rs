@@ -305,25 +305,50 @@ impl VerifiedCredential {
 }
 
 pub(crate) fn access_key_id(token: &SecretToken) -> Result<String, SecurityError> {
-    use jsonwebtoken::{Algorithm, decode_header};
     if token.expose_secret().len() > 65_536 {
         return Err(SecurityError::InvalidCredential);
     }
-    let header =
-        decode_header(token.expose_secret()).map_err(|_| SecurityError::InvalidCredential)?;
-    if header.alg != Algorithm::RS256
-        || header.typ.as_deref() != Some("at+jwt")
-        || header.jku.is_some()
-        || header.jwk.is_some()
-        || header.x5u.is_some()
-        || header.x5c.is_some()
+    restricted_jws_key_id(token.expose_secret(), "at+jwt")
+}
+
+/// Only this profile's supported JOSE parameters are accepted. In particular,
+/// unknown `crit`/`b64` extensions must not be silently ignored by the JWT library.
+pub(crate) fn restricted_jws_key_id(
+    token: &str,
+    expected_type: &str,
+) -> Result<String, SecurityError> {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct SupportedHeader {
+        alg: String,
+        typ: String,
+        kid: String,
+    }
+    let mut parts = token.split('.');
+    let raw = parts
+        .next()
+        .filter(|s| !s.is_empty() && s.len() <= 4096)
+        .ok_or(SecurityError::InvalidCredential)?;
+    if parts.next().is_none_or(str::is_empty)
+        || parts.next().is_none_or(str::is_empty)
+        || parts.next().is_some()
     {
         return Err(SecurityError::InvalidCredential);
     }
-    header
-        .kid
-        .filter(|kid| !kid.is_empty() && kid.len() <= 128)
-        .ok_or(SecurityError::InvalidCredential)
+    let bytes = URL_SAFE_NO_PAD
+        .decode(raw)
+        .map_err(|_| SecurityError::InvalidCredential)?;
+    let header: SupportedHeader =
+        serde_json::from_slice(&bytes).map_err(|_| SecurityError::InvalidCredential)?;
+    if header.alg != "RS256"
+        || header.typ != expected_type
+        || header.kid.is_empty()
+        || header.kid.len() > 128
+    {
+        return Err(SecurityError::InvalidCredential);
+    }
+    Ok(header.kid)
 }
 
 pub(crate) fn verify_access_with_key(
@@ -489,6 +514,12 @@ impl DecisionValidity {
     }
     pub fn valid_until(&self) -> u64 {
         self.valid_until
+    }
+
+    /// Immediate check against a trusted clock; cache insertion must still pin a
+    /// monotonic deadline with bind_to_clock.
+    pub fn ensure_fresh(&self, clock: &dyn Clock) -> Result<(), SecurityError> {
+        self.remaining_at(healthy_reading(clock)?).map(|_| ())
     }
 
     fn remaining_at(&self, reading: ClockReading) -> Result<Duration, SecurityError> {

@@ -236,6 +236,19 @@ pub struct IdTokenSigner {
 }
 
 impl IdTokenSigner {
+    /// Sign only the dedicated operation profile; never fall back to shared HMAC.
+    pub fn sign_gateway_operation(
+        &self,
+        permit: &crate::security::message::GatewayOperationPermit,
+    ) -> Result<crate::security::message::SignedDocument, crate::security::error::SecurityError>
+    {
+        let key = self
+            .rsa_encoding_key
+            .as_ref()
+            .ok_or(crate::security::error::SecurityError::InvalidCredential)?;
+        crate::security::message::sign_gateway_operation(permit, key, &self.kid)
+    }
+
     /// Create from RSA PEM private key.
     pub fn from_rsa_pem(pem: &[u8], expire_seconds: i64) -> Result<Self, String> {
         let encoding_key = EncodingKey::from_rsa_pem(pem)

@@ -59,3 +59,21 @@ checklist.md 全部条目保持未验证。只在取得对应实际证据后勾�
 - 最终回归：`cargo test -p auth --lib --locked` 退出码0，24 passed、0 failed、0 ignored；`cargo test --test mod --locked -- --test-threads=4` 退出码0，51 passed、0 failed、0 ignored。
 - `cargo clippy -p auth --lib --tests --locked -- -D warnings`、`cargo fmt --all -- --check` 和 `git diff --check` 均退出码0。
 - T07、T08 组件任务已完成；完整workspace所有feature、实际生产状态仓储及端到端安全清单仍未验收。
+
+## T09 签名消息契约（2026-11-08）
+
+- 先新增签名/篡改测试再实现；首轮 `cargo test -p auth --lib security_t09 --locked` 退出码101，待实现类型未定义。实现时补启用UUID的serde feature，未变更Cargo.lock。
+- 新增独立的操作许可与网关事件JWT类型，仅支持RS256和可信配置中的kid。访问凭据、许可、结果不能互换；不接受HMAC回退或令牌提供的密钥URL。统一JOSE头解析只接受alg/typ/kid，拒绝未知crit/b64等扩展。
+- CommandEnvelope携带不可变原始载荷字节，先检查SHA-256摘要再解析，校验请求/任务、操作、资源、能力版本和目标绑定版本与许可一致。输入、头、超时及工具名都在原始摘要覆盖范围内。
+- 覆盖合法命令与结果、过期/错误受众/错误网关、原始载荷篡改（包括只添加空白）、签名许可与载荷元数据冲突、超长载荷，以及非整秒授权查询时间的边界。结果带task/claim/执行实例/digest，设备事件带绑定版本/流ID/序号。
+- 签名证明不等于执行授权；当前父凭据状态、任务claim、注册公钥状态及事件去重仍由后续任务接入。
+
+## T10 统一脱敏（2026-11-08）
+
+- 先新增日志捕获测试，首轮退出码101（接口未实现），实现后两项测试通过。
+- URI移除authority及全部query内容；请求头只保留白名单传输元数据；所有路由默认省略请求/响应body；配置所有标量值脱敏；连接URL去掉用户信息、路径、query及fragment。SignedDocument和PayloadBytes的Debug不暴露凭据或内容。
+- tracing捕获断言覆盖凭据标记、编码query参数名、无等号query、未知头、配置嵌套/数字值和数据库URL，确认实际日志输出不包含秘密标记。
+- 这里只提供统一工具，现有各服务日志接入及真实签发/同步/启动日志的回归仍需T65，不能据此声明全链日志泄露已修复。
+- 最终回归：`cargo test -p auth --lib --locked` 退出码0，32 passed、0 failed、0 ignored；`cargo test --test mod --locked -- --test-threads=4` 退出码0，51 passed、0 failed、0 ignored。
+- `cargo clippy -p auth --lib --tests --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 均退出码0。
+- T09、T10组件任务已完成（累计10/80）；端到端checklist继续保持未验证。

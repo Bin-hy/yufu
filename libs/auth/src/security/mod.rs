@@ -4,4 +4,6 @@ pub mod budget;
 pub mod credential;
 pub mod error;
 pub mod identity;
+pub mod message;
 pub mod policy;
+pub mod redaction;
