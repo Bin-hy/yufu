@@ -16,9 +16,11 @@ pub struct Model {
     pub description: Option<String>,
     /// Verb / capability, e.g. "read", "submit".
     pub action: String,
-    /// Object class, e.g. "device", "task". None = action only (no object).
+    /// Structured resource kind, e.g. "device", "task". Legacy NULL rules
+    /// require correction before use by the strict authorization adapter.
     pub resource_type: Option<String>,
-    /// Glob pattern matched against object id, e.g. "cobotlet-0:*". None = match anything.
+    /// Serialized auth::security::policy::ResourceSelector. Missing values and
+    /// legacy globs are never promoted to a wildcard by strict authorization.
     pub resource_pattern: Option<String>,
     pub create_time: DateTime,
     pub update_time: DateTime,

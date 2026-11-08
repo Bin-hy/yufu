@@ -3,11 +3,15 @@ use std::{future::Future, sync::Arc};
 
 use auth::security::{
     budget::{Clock, SecurityBudget},
-    credential::CredentialRef,
+    credential::{CredentialRef, SecurityAccessClaims},
     error::SecurityError,
     identity::{IdentityBinding, PrincipalKind, PrincipalRef, SecretToken, TokenUse},
     message::SignedDocument,
-    policy::{CredentialBounds, OperationId, ResourceRef, ResourceTarget, ScopedOperation},
+    policy::{
+        CredentialBounds, OperationContext, OperationId, PolicyRule, PolicySnapshot, PolicySubject,
+        ResourceConstraint, ResourceFacts, ResourceRef, ResourceScope, ResourceSelector,
+        ResourceTarget, RuleEffect, ScopedOperation,
+    },
 };
 use sea_orm::{
     AccessMode, ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbBackend,
@@ -17,9 +21,11 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::entity::{
+    application, authority, authority_role, permission, role, role_permission,
     security_binding::{self, device, gateway_key},
     security_credential as credential, security_grant as grant, security_permit as permit,
-    security_refresh_family as family, security_session as session,
+    security_refresh_family as family, security_session as session, user, user_authority,
+    user_permission,
 };
 
 pub fn refresh_digest(secret: &SecretToken) -> [u8; 32] {
@@ -147,6 +153,17 @@ pub trait SecurityRepository: Send + Sync {
 #[async_trait::async_trait]
 pub trait SecurityTransaction: Send {
     fn checked_at(&self) -> u64;
+    async fn application_policy(
+        &mut self,
+        claims: &SecurityAccessClaims,
+        operation: &OperationContext,
+    ) -> Result<PolicySnapshot, SecurityError>;
+    async fn uri_policy(
+        &mut self,
+        claims: &SecurityAccessClaims,
+        method: &str,
+        route: &str,
+    ) -> Result<(PolicySnapshot, OperationContext), SecurityError>;
     async fn credential(
         &mut self,
         reference: &CredentialRef,
@@ -239,6 +256,27 @@ impl SecurityRepository for PgSecurityRepository {
     }
 }
 impl PgSecurityTransaction {
+    async fn policy_user(
+        &self,
+        claims: &SecurityAccessClaims,
+    ) -> Result<Option<(user::Model, Option<role::Model>)>, SecurityError> {
+        if claims.principal_kind != PrincipalKind::User {
+            return Ok(None);
+        }
+        let id = claims
+            .sub
+            .parse::<crate::IdType>()
+            .map_err(|_| SecurityError::InvalidCredential)?;
+        if id <= 0 || id.to_string() != claims.sub {
+            return Err(SecurityError::InvalidCredential);
+        }
+        self.run(
+            user::Entity::find_by_id(id)
+                .find_also_related(role::Entity)
+                .one(&self.transaction),
+        )
+        .await
+    }
     async fn run<T>(
         &self,
         future: impl Future<Output = Result<T, DbErr>>,
@@ -327,6 +365,231 @@ impl PgSecurityTransaction {
 impl SecurityTransaction for PgSecurityTransaction {
     fn checked_at(&self) -> u64 {
         self.checked_at
+    }
+    async fn application_policy(
+        &mut self,
+        claims: &SecurityAccessClaims,
+        operation: &OperationContext,
+    ) -> Result<PolicySnapshot, SecurityError> {
+        use crate::service::permission::{registered_operation, resource_selector};
+        let principal = PrincipalRef::new(&claims.iss, claims.principal_kind, &claims.sub)?;
+        let mut snapshot = PolicySnapshot::new(
+            principal.clone(),
+            &claims.application,
+            claims.bounds.clone(),
+        )?;
+        if operation.operation.as_str() == "task:read" {
+            snapshot = snapshot.with_constraints(vec![ResourceConstraint::OwnerIsActor])?;
+        }
+        let Some(app) = self
+            .run(
+                application::Entity::find()
+                    .filter(application::Column::AppKey.eq(&claims.application))
+                    .one(&self.transaction),
+            )
+            .await?
+        else {
+            return Ok(snapshot);
+        };
+        let matching: Vec<_> = self
+            .run(
+                permission::Entity::find()
+                    .filter(permission::Column::ApplicationId.eq(app.id))
+                    .all(&self.transaction),
+            )
+            .await?
+            .into_iter()
+            .filter(|row| registered_operation(row).as_ref() == Some(&operation.operation))
+            .collect();
+        if matching.is_empty() {
+            return Ok(snapshot);
+        }
+        snapshot = snapshot.with_registered_operations(vec![operation.operation.clone()]);
+        if claims.principal_kind == PrincipalKind::Machine {
+            let Some(binding) = self
+                .service_binding(&ServiceBindingKey {
+                    principal: principal.clone(),
+                    token_use: claims.token_use,
+                    application: claims.application.clone(),
+                    audience: claims.aud.clone(),
+                })
+                .await?
+            else {
+                return Ok(snapshot);
+            };
+            let rules = binding
+                .bounds()
+                .grants()
+                .iter()
+                .map(|grant| {
+                    PolicyRule::new(
+                        PolicySubject::Principal(principal.clone()),
+                        RuleEffect::Allow,
+                        grant.clone(),
+                        vec![],
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(snapshot.with_rules(rules));
+        }
+        let Some((user, role)) = self.policy_user(claims).await? else {
+            return Ok(snapshot);
+        };
+        let ids: Vec<_> = matching.iter().map(|row| row.id).collect();
+        let overrides = self
+            .run(
+                user_permission::Entity::find()
+                    .filter(user_permission::Column::UserId.eq(user.id))
+                    .filter(user_permission::Column::PermissionId.is_in(ids.clone()))
+                    .all(&self.transaction),
+            )
+            .await?;
+        let role_grants = self
+            .run(
+                role_permission::Entity::find()
+                    .filter(role_permission::Column::RoleId.eq(user.role_id))
+                    .filter(role_permission::Column::PermissionId.is_in(ids))
+                    .all(&self.transaction),
+            )
+            .await?;
+        let is_super = role
+            .as_ref()
+            .is_some_and(|role| role.name == role::RoleEnum::Superadmin.get_name());
+        if let Some(role) = &role {
+            snapshot = snapshot.with_roles(vec![role.id.to_string()])?;
+        }
+        let mut rules = Vec::new();
+        for row in matching {
+            let explicit: Vec<_> = overrides
+                .iter()
+                .filter(|entry| entry.permission_id == row.id)
+                .collect();
+            let role_allowed = role.is_some()
+                && (is_super
+                    || role_grants
+                        .iter()
+                        .any(|entry| entry.permission_id == row.id));
+            if explicit.is_empty() && !role_allowed {
+                continue;
+            }
+            let grant = ScopedOperation::new(
+                operation.operation.clone(),
+                vec![resource_selector(&row, &claims.application)?],
+            )?;
+            for entry in explicit {
+                rules.push(PolicyRule::new(
+                    PolicySubject::Principal(principal.clone()),
+                    if entry.allow {
+                        RuleEffect::Allow
+                    } else {
+                        RuleEffect::Deny
+                    },
+                    grant.clone(),
+                    vec![],
+                )?);
+            }
+            if role_allowed {
+                rules.push(PolicyRule::new(
+                    PolicySubject::Role(user.role_id.to_string()),
+                    RuleEffect::Allow,
+                    grant,
+                    vec![],
+                )?);
+            }
+        }
+        Ok(snapshot.with_rules(rules))
+    }
+    async fn uri_policy(
+        &mut self,
+        claims: &SecurityAccessClaims,
+        method: &str,
+        route: &str,
+    ) -> Result<(PolicySnapshot, OperationContext), SecurityError> {
+        use crate::service::authority::{uri_operation, uri_resource};
+        let principal = PrincipalRef::new(&claims.iss, claims.principal_kind, &claims.sub)?;
+        let resource = uri_resource(&claims.application, method, route)?;
+        let mut snapshot = PolicySnapshot::new(
+            principal.clone(),
+            &claims.application,
+            claims.bounds.clone(),
+        )?;
+        let authority = self
+            .run(
+                authority::Entity::find()
+                    .filter(authority::Column::Method.eq(method.to_ascii_uppercase()))
+                    .filter(authority::Column::AuthorityUri.eq(route))
+                    .one(&self.transaction),
+            )
+            .await?;
+        let operation = match &authority {
+            Some(authority) => uri_operation(authority.id)?,
+            None => OperationId::new("idp.uri:unregistered")?,
+        };
+        let context = OperationContext {
+            operation: operation.clone(),
+            resource: resource.clone(),
+            facts: ResourceFacts::default(),
+        };
+        let Some(authority) = authority else {
+            return Ok((snapshot, context));
+        };
+        snapshot = snapshot.with_registered_operations(vec![operation.clone()]);
+        let Some((user, role)) = self.policy_user(claims).await? else {
+            return Ok((snapshot, context));
+        };
+        let grant = ScopedOperation::new(
+            operation,
+            vec![ResourceSelector::new(
+                &claims.application,
+                ResourceScope::Exact {
+                    target: resource.target().clone(),
+                },
+            )?],
+        )?;
+        let overrides = self
+            .run(
+                user_authority::Entity::find()
+                    .filter(user_authority::Column::UserId.eq(user.id))
+                    .filter(user_authority::Column::AuthorityId.eq(authority.id))
+                    .all(&self.transaction),
+            )
+            .await?;
+        let mut rules = Vec::new();
+        for entry in overrides {
+            rules.push(PolicyRule::new(
+                PolicySubject::Principal(principal.clone()),
+                if entry.allow {
+                    RuleEffect::Allow
+                } else {
+                    RuleEffect::Deny
+                },
+                grant.clone(),
+                vec![],
+            )?);
+        }
+        if let Some(role) = role {
+            let role_id = role.id.to_string();
+            snapshot = snapshot.with_roles(vec![role_id.clone()])?;
+            let role_granted = role.name == role::RoleEnum::Superadmin.get_name()
+                || self
+                    .run(
+                        authority_role::Entity::find()
+                            .filter(authority_role::Column::RoleId.eq(role.id))
+                            .filter(authority_role::Column::AuthorityId.eq(authority.id))
+                            .one(&self.transaction),
+                    )
+                    .await?
+                    .is_some();
+            if role_granted {
+                rules.push(PolicyRule::new(
+                    PolicySubject::Role(role_id),
+                    RuleEffect::Allow,
+                    grant,
+                    vec![],
+                )?);
+            }
+        }
+        Ok((snapshot.with_rules(rules), context))
     }
     async fn credential(
         &mut self,

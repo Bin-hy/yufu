@@ -56,6 +56,9 @@ impl MigratorTrait for Migrator {
         migrations.extend(seed::Migrator::migrations());
         migrations.push(Box::new(m20261107_000001_security_identity::Migration));
         migrations.push(Box::new(m20261107_000002_security_permit_audit::Migration));
+        migrations.push(Box::new(
+            seed::m20261107_000003_security_operations::Migration,
+        ));
         migrations
     }
 }

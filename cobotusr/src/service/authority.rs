@@ -10,6 +10,40 @@ use std::collections::HashSet;
 
 pub struct Service;
 
+/// URI operations are registered by the authority row, never inferred from an
+/// unregistered request. Resource binding also includes the exact HTTP method.
+pub fn uri_operation(
+    authority_id: IdType,
+) -> std::result::Result<auth::security::policy::OperationId, auth::security::error::SecurityError>
+{
+    if authority_id <= 0 {
+        return Err(auth::security::error::SecurityError::InvalidResource);
+    }
+    auth::security::policy::OperationId::new(format!("idp.uri:{authority_id}"))
+}
+pub fn uri_resource(
+    application: &str,
+    method: &str,
+    route: &str,
+) -> std::result::Result<auth::security::policy::ResourceRef, auth::security::error::SecurityError>
+{
+    use auth::security::{
+        error::SecurityError,
+        policy::{ResourceRef, ResourceTarget},
+    };
+    let method = method.to_ascii_uppercase();
+    http::Method::from_bytes(method.as_bytes()).map_err(|_| SecurityError::InvalidResource)?;
+    if !route.starts_with('/') || route.contains(['?', '#']) {
+        return Err(SecurityError::InvalidResource);
+    }
+    ResourceRef::new(
+        application,
+        ResourceTarget::IdpRoute {
+            route_id: format!("{method} {route}"),
+        },
+    )
+}
+
 impl Service {
     // 查找 authority_id 的 authority_vo
     pub async fn get_authority_vo(

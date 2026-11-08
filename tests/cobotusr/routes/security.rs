@@ -1551,3 +1551,1109 @@ async fn security_t18_device_access_requires_current_exact_device_binding() {
         Some(SecurityError::InvalidCredential)
     );
 }
+
+async fn authenticated_policy_user(
+    db: &DatabaseConnection,
+    application: &str,
+    bounds: auth::security::policy::CredentialBounds,
+    clock: std::sync::Arc<crate::cobotsrv::common::SecurityTestClock>,
+    role_id: i32,
+) -> auth::security::credential::AuthenticatedContext {
+    use auth::security::{
+        credential::{
+            CredentialExpectation, CredentialProfile, SecurityAccessClaims, StrictAccessState,
+        },
+        identity::{IdentityBinding, PrincipalKind, TokenUse},
+    };
+    use cobotusr::{
+        entity::security_credential as credential,
+        service::security::{lifecycle::CredentialLifecycle, repository::PgSecurityRepository},
+    };
+    use sea_orm::{ActiveModelTrait, Set};
+    use std::sync::Arc;
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+        "INSERT INTO \"user\" (id,username,role_id,create_time,update_time) VALUES (100,'policy-user',$1,NOW(),NOW())",[role_id.into()])).await.unwrap();
+    let grant_id = uuid::Uuid::new_v4();
+    let session_id = uuid::Uuid::new_v4();
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+        "INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at) VALUES ($1,'https://idp.test','user','100',$2,'session',1000)",
+        [grant_id.into(),application.into()])).await.unwrap();
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+        "INSERT INTO security_session (id,issuer,principal_kind,subject,created_at) VALUES ($1,'https://idp.test','user','100',1000)",[session_id.into()])).await.unwrap();
+    let claims = SecurityAccessClaims {
+        iss: "https://idp.test".into(),
+        sub: "100".into(),
+        aud: application.into(),
+        iat: 1,
+        exp: 30,
+        nbf: None,
+        jti: "policy-access".into(),
+        principal_kind: PrincipalKind::User,
+        token_use: TokenUse::UserSession,
+        application: application.into(),
+        grant_id: grant_id.to_string(),
+        bounds: bounds.clone(),
+        binding: IdentityBinding::None,
+        session_id: Some(session_id.to_string()),
+        family_id: None,
+    };
+    credential::ActiveModel {
+        issuer: Set(claims.iss.clone()),
+        jti: Set(claims.jti.clone()),
+        principal_kind: Set("user".into()),
+        subject: Set("100".into()),
+        credential_kind: Set("access".into()),
+        token_use: Set("user_session".into()),
+        audience: Set(application.into()),
+        application: Set(application.into()),
+        bounds: Set(serde_json::to_value(bounds).unwrap()),
+        binding: Set(serde_json::json!({"kind":"none"})),
+        grant_id: Set(grant_id),
+        session_id: Set(Some(session_id)),
+        family_id: Set(None),
+        revocation_parent_jti: Set(None),
+        minted_by: Set(None),
+        signing_key_id: Set(Some("key".into())),
+        secret_digest: Set(None),
+        issued_at: Set(1000),
+        not_before: Set(None),
+        expires_at: Set(30000),
+        revoked_at: Set(None),
+        consumed_at: Set(None),
+        replacement_jti: Set(None),
+    }
+    .insert(db)
+    .await
+    .unwrap();
+    let (jwks, _stop) = security_jwks().await;
+    let checker = Arc::new(CredentialLifecycle::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+    ));
+    let expected = CredentialExpectation::new(
+        "https://idp.test",
+        application,
+        application,
+        vec![CredentialProfile::new(PrincipalKind::User, TokenUse::UserSession).unwrap()],
+    )
+    .unwrap();
+    let state = StrictAccessState::new(jwks, expected, clock, checker);
+    let token = sign_security_claims(&claims, "key");
+    let headers = axum::http::HeaderMap::from_iter([(
+        axum::http::header::AUTHORIZATION,
+        format!("Bearer {}", token.expose_secret()).parse().unwrap(),
+    )]);
+    state.authenticate(&headers).await.unwrap()
+}
+async fn policy_authority(db: &DatabaseConnection, method: &str, path: &str) -> i32 {
+    use cobotusr::entity::authority;
+    use sea_orm::{ActiveModelTrait, Set};
+    let now = chrono::Utc::now().naive_utc();
+    authority::ActiveModel {
+        id: sea_orm::NotSet,
+        name: Set(format!("{method} {path}")),
+        authority_uri: Set(path.into()),
+        method: Set(method.into()),
+        create_time: Set(now),
+        update_time: Set(now),
+    }
+    .insert(db)
+    .await
+    .unwrap()
+    .id
+}
+
+#[tokio::test]
+async fn security_t19_uri_adapter_rejects_unknown_and_user_deny_beats_superadmin() {
+    use auth::security::policy::{
+        CredentialBounds, PolicyAllowReason, PolicyDenyReason, PolicyEffect, ResourceScope,
+        ResourceSelector, ScopedOperation,
+    };
+    use cobotusr::{
+        migration::{Migrator, MigratorTrait},
+        service::{
+            authority::{uri_operation, uri_resource},
+            security::{authorization::AuthorizationService, repository::PgSecurityRepository},
+        },
+    };
+    use std::sync::Arc;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let authority = policy_authority(&db, "GET", "/security-test").await;
+    let resource = uri_resource("cobotusr", "GET", "/security-test").unwrap();
+    let bounds = CredentialBounds::new(vec![
+        ScopedOperation::new(
+            uri_operation(authority).unwrap(),
+            vec![
+                ResourceSelector::new(
+                    "cobotusr",
+                    ResourceScope::Exact {
+                        target: resource.target().clone(),
+                    },
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+    ]);
+    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let context = authenticated_policy_user(&db, "cobotusr", bounds, clock.clone(), 3).await;
+    let service = AuthorizationService::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+        "cobotusr",
+        "cobotusr",
+    )
+    .unwrap();
+    assert_eq!(
+        service
+            .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::NoGrant)
+    );
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO user_authority (user_id,authority_id,allow,create_time,update_time) VALUES (100,$1,true,NOW(),NOW())",[authority.into()])).await.unwrap();
+    assert_eq!(
+        service
+            .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Allow(PolicyAllowReason::Principal)
+    );
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO authority_role (role_id,authority_id,create_time,update_time) VALUES (3,$1,NOW(),NOW())",[authority.into()])).await.unwrap();
+    execute(&db, "UPDATE user_authority SET allow=false")
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::ExplicitDeny)
+    );
+    execute(&db, "UPDATE \"user\" SET role_id=1 WHERE id=100")
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::ExplicitDeny)
+    );
+    execute(&db, "DELETE FROM user_authority").await.unwrap();
+    assert_eq!(
+        service
+            .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Allow(PolicyAllowReason::Role)
+    );
+    for (method, path) in [("POST", "/security-test"), ("GET", "/not-registered")] {
+        assert_eq!(
+            service
+                .authorize_uri(&context, method, path, &security_budget(&clock))
+                .await
+                .unwrap()
+                .effect,
+            PolicyEffect::Deny(PolicyDenyReason::UnknownOperation)
+        );
+    }
+    for (application, audience) in [("other", "cobotusr"), ("cobotusr", "business-audience")] {
+        let other = AuthorizationService::new(
+            Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+            clock.clone(),
+            application,
+            audience,
+        )
+        .unwrap();
+        assert_eq!(
+            other
+                .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+                .await
+                .err(),
+            Some(auth::security::error::SecurityError::Forbidden)
+        );
+    }
+}
+
+#[tokio::test]
+async fn security_t19_current_policy_cannot_extend_original_bounds_freshness_or_budget() {
+    use auth::security::{
+        error::SecurityError,
+        policy::{
+            CredentialBounds, PolicyDenyReason, PolicyEffect, ResourceScope, ResourceSelector,
+            ScopedOperation,
+        },
+    };
+    use cobotusr::{
+        migration::{Migrator, MigratorTrait},
+        service::{
+            authority::{uri_operation, uri_resource},
+            security::{authorization::AuthorizationService, repository::PgSecurityRepository},
+        },
+    };
+    use std::sync::Arc;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let authority = policy_authority(&db, "GET", "/security-test").await;
+    policy_authority(&db, "POST", "/new-security-test").await;
+    let resource = uri_resource("cobotusr", "GET", "/security-test").unwrap();
+    let bounds = CredentialBounds::new(vec![
+        ScopedOperation::new(
+            uri_operation(authority).unwrap(),
+            vec![
+                ResourceSelector::new(
+                    "cobotusr",
+                    ResourceScope::Exact {
+                        target: resource.target().clone(),
+                    },
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap(),
+    ]);
+    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let context = authenticated_policy_user(&db, "cobotusr", bounds, clock.clone(), 1).await;
+    let service = AuthorizationService::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+        "cobotusr",
+        "cobotusr",
+    )
+    .unwrap();
+    assert_eq!(
+        service
+            .authorize_uri(
+                &context,
+                "POST",
+                "/new-security-test",
+                &security_budget(&clock)
+            )
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::CredentialBounds)
+    );
+    let first = service
+        .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+        .await
+        .unwrap();
+    clock.advance(1100);
+    let second = service
+        .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+        .await
+        .unwrap();
+    assert_eq!(first.validity.valid_until(), second.validity.valid_until());
+    clock.advance(1000);
+    assert_eq!(
+        service
+            .authorize_uri(&context, "GET", "/security-test", &security_budget(&clock))
+            .await
+            .err(),
+        Some(SecurityError::DeadlineExceeded)
+    );
+}
+
+#[test]
+fn security_t19_api_prefix_only_strips_complete_path_segment() {
+    assert_eq!(
+        cobotusr::rbac::get_pure_uri("/api".into(), "/apiary/users?x=1".into()),
+        "/apiary/users"
+    );
+    assert_eq!(
+        cobotusr::rbac::get_pure_uri("/api".into(), "/api/users?x=1".into()),
+        "/users"
+    );
+    assert_eq!(
+        cobotusr::rbac::get_pure_uri("/api".into(), "/api?x=1".into()),
+        "/"
+    );
+}
+
+#[tokio::test]
+async fn security_t19_registration_repairs_missing_methods_without_granting_user_management() {
+    use cobotusr::{
+        entity::{authority, authority_role},
+        migration::{Migrator, MigratorTrait},
+    };
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    let migrations = Migrator::migrations();
+    assert_eq!(
+        migrations.last().unwrap().name(),
+        "m20261107_000003_security_operations"
+    );
+    Migrator::up(&db, Some(migrations.len() as u32 - 1))
+        .await
+        .unwrap();
+    // Simulate a pre-existing administrator-managed registration with no User
+    // grant. Backfilling other omitted methods must preserve this restriction.
+    let restricted = authority::Entity::find()
+        .filter(authority::Column::Method.eq("GET"))
+        .filter(authority::Column::AuthorityUri.eq("/user"))
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "DELETE FROM authority_role WHERE role_id=3 AND authority_id=$1",
+        [restricted.into()],
+    ))
+    .await
+    .unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    assert!(
+        authority_role::Entity::find_by_id((3, restricted))
+            .one(&db)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    for (method, path) in [
+        ("GET", "/authority"),
+        ("PATCH", "/authority"),
+        ("DELETE", "/authority"),
+        ("PATCH", "/user"),
+        ("PATCH", "/role"),
+        ("DELETE", "/application"),
+    ] {
+        let row = authority::Entity::find()
+            .filter(authority::Column::Method.eq(method))
+            .filter(authority::Column::AuthorityUri.eq(path))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            authority_role::Entity::find()
+                .filter(authority_role::Column::AuthorityId.eq(row.id))
+                .filter(authority_role::Column::RoleId.eq(3))
+                .one(&db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+#[tokio::test]
+async fn security_t19_live_legacy_routes_cannot_bypass_missing_registration() {
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url.clone()).await.unwrap();
+    let mut cfg = cobotusr::config::Config::default();
+    cfg.database.url = url;
+    let token = crate::cobotusr::common::get_test_token(&mut cfg);
+    let prefix = cfg.http.api_prefix.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}{}", listener.local_addr().unwrap(), prefix);
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(cobotusr::serve(cfg, listener, async {
+        let _ = stopped.await;
+    }));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let before = client
+        .get(format!("{base}/user"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert!(before.status().is_success());
+    let row = db
+        .query_one_raw(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT id FROM authority WHERE method='GET' AND authority_uri='/user'".to_owned(),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    let id: i32 = row.try_get("", "id").unwrap();
+    for sql in [
+        "DELETE FROM authority_role WHERE authority_id=$1",
+        "DELETE FROM user_authority WHERE authority_id=$1",
+        "DELETE FROM authority WHERE id=$1",
+    ] {
+        db.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            sql,
+            [id.into()],
+        ))
+        .await
+        .unwrap();
+    }
+    let after = client
+        .get(format!("{base}/user"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after.status(), reqwest::StatusCode::FORBIDDEN);
+    let unknown: serde_json::Value = client
+        .post(format!("{base}/rbac/abac"))
+        .json(&serde_json::json!({"method":"GET","req_path":"/unregistered"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unknown["allow"], false);
+    let legacy = client
+        .post(format!("{base}/enforce"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({"application":"cobotsrv","subject":1,"action":"read"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(legacy.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let _ = stop.send(());
+    server.await.unwrap();
+}
+
+fn policy_device(gateway: &str, device: &str) -> auth::security::policy::ResourceRef {
+    use auth::security::policy::{ResourceRef, ResourceTarget};
+    ResourceRef::new(
+        "cobotsrv",
+        ResourceTarget::Device {
+            gateway_id: gateway.into(),
+            device_id: device.into(),
+        },
+    )
+    .unwrap()
+}
+fn scoped_grant(
+    operation: &str,
+    scope: auth::security::policy::ResourceScope,
+) -> auth::security::policy::ScopedOperation {
+    use auth::security::policy::{OperationId, ResourceSelector, ScopedOperation};
+    ScopedOperation::new(
+        OperationId::new(operation).unwrap(),
+        vec![ResourceSelector::new("cobotsrv", scope).unwrap()],
+    )
+    .unwrap()
+}
+fn policy_context(
+    operation: &str,
+    resource: auth::security::policy::ResourceRef,
+) -> auth::security::policy::OperationContext {
+    auth::security::policy::OperationContext {
+        operation: auth::security::policy::OperationId::new(operation).unwrap(),
+        resource,
+        facts: Default::default(),
+    }
+}
+async fn application_permission(
+    db: &DatabaseConnection,
+    name: &str,
+    action: &str,
+    kind: &str,
+    scope: Option<auth::security::policy::ResourceScope>,
+) -> i32 {
+    use auth::security::policy::ResourceSelector;
+    use cobotusr::entity::{application, permission};
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+    let app = application::Entity::find()
+        .filter(application::Column::AppKey.eq("cobotsrv"))
+        .one(db)
+        .await
+        .unwrap()
+        .unwrap();
+    let now = chrono::Utc::now().naive_utc();
+    permission::ActiveModel {
+        id: sea_orm::NotSet,
+        application_id: Set(app.id),
+        name: Set(name.into()),
+        action: Set(action.into()),
+        resource_type: Set(Some(kind.into())),
+        resource_pattern: Set(scope.map(|scope| {
+            serde_json::to_string(&ResourceSelector::new("cobotsrv", scope).unwrap()).unwrap()
+        })),
+        description: Set(None),
+        create_time: Set(now),
+        update_time: Set(now),
+    }
+    .insert(db)
+    .await
+    .unwrap()
+    .id
+}
+async fn grant_role_permission(db: &DatabaseConnection, role: i32, permission: i32) {
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "INSERT INTO role_permission (role_id,permission_id,create_time) VALUES ($1,$2,NOW())",
+        [role.into(), permission.into()],
+    ))
+    .await
+    .unwrap();
+}
+async fn user_permission_override(db: &DatabaseConnection, permission: i32, allow: bool) {
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO user_permission (user_id,permission_id,allow,create_time,update_time) VALUES (100,$1,$2,NOW(),NOW()) ON CONFLICT (user_id,permission_id) DO UPDATE SET allow=$2",[permission.into(),allow.into()])).await.unwrap();
+}
+
+#[tokio::test]
+async fn security_t20_overlapping_permissions_scan_denies_before_any_allow() {
+    use auth::security::policy::{
+        CredentialBounds, PolicyAllowReason, PolicyDenyReason, PolicyEffect, ResourceKind,
+        ResourceScope,
+    };
+    use cobotusr::{
+        migration::{Migrator, MigratorTrait},
+        service::security::{
+            authorization::AuthorizationService, repository::PgSecurityRepository,
+        },
+    };
+    use std::sync::Arc;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let broad = ResourceScope::Application {
+        kind: ResourceKind::Device,
+    };
+    let target = policy_device("g1", "d");
+    let allow =
+        application_permission(&db, "broad-read", "read", "device", Some(broad.clone())).await;
+    let deny = application_permission(
+        &db,
+        "deny-one-device",
+        "read",
+        "device",
+        Some(ResourceScope::Exact {
+            target: target.target().clone(),
+        }),
+    )
+    .await;
+    grant_role_permission(&db, 3, allow).await;
+    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let context = authenticated_policy_user(
+        &db,
+        "cobotsrv",
+        CredentialBounds::new(vec![scoped_grant("device:read", broad)]),
+        clock.clone(),
+        3,
+    )
+    .await;
+    let service = AuthorizationService::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+        "cobotusr",
+        "cobotusr",
+    )
+    .unwrap();
+    user_permission_override(&db, deny, false).await;
+    assert_eq!(
+        service
+            .authorize_application(
+                &context,
+                &policy_context("device:read", target.clone()),
+                &security_budget(&clock)
+            )
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::ExplicitDeny)
+    );
+    assert_eq!(
+        service
+            .authorize_application(
+                &context,
+                &policy_context("device:read", policy_device("g2", "d")),
+                &security_budget(&clock)
+            )
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Allow(PolicyAllowReason::Role)
+    );
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "DELETE FROM role_permission WHERE role_id=3 AND permission_id=$1",
+        [allow.into()],
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        service
+            .authorize_application(
+                &context,
+                &policy_context("device:read", policy_device("g2", "d")),
+                &security_budget(&clock)
+            )
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::NoGrant)
+    );
+    grant_role_permission(&db, 3, allow).await;
+    user_permission_override(&db, allow, true).await;
+    assert_eq!(
+        service
+            .authorize_application(
+                &context,
+                &policy_context("device:read", target.clone()),
+                &security_budget(&clock)
+            )
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::ExplicitDeny)
+    );
+    execute(&db, "UPDATE \"user\" SET role_id=1 WHERE id=100")
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .authorize_application(
+                &context,
+                &policy_context("device:read", target),
+                &security_budget(&clock)
+            )
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::ExplicitDeny)
+    );
+}
+
+#[tokio::test]
+async fn security_t20_bounds_missing_scopes_and_unknown_operations_fail_closed() {
+    use auth::security::{
+        error::SecurityError,
+        policy::{CredentialBounds, PolicyDenyReason, PolicyEffect, ResourceKind, ResourceScope},
+    };
+    use cobotusr::{
+        migration::{Migrator, MigratorTrait},
+        service::security::{
+            authorization::AuthorizationService, repository::PgSecurityRepository,
+        },
+    };
+    use std::sync::Arc;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let target = policy_device("g1", "d");
+    let permission = application_permission(
+        &db,
+        "all-device-read",
+        "read",
+        "device",
+        Some(ResourceScope::Application {
+            kind: ResourceKind::Device,
+        }),
+    )
+    .await;
+    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let context = authenticated_policy_user(
+        &db,
+        "cobotsrv",
+        CredentialBounds::new(vec![scoped_grant(
+            "device:read",
+            ResourceScope::Exact {
+                target: target.target().clone(),
+            },
+        )]),
+        clock.clone(),
+        1,
+    )
+    .await;
+    let service = AuthorizationService::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+        "cobotusr",
+        "cobotusr",
+    )
+    .unwrap();
+    assert_eq!(
+        service
+            .authorize_application(
+                &context,
+                &policy_context("device:read", policy_device("g2", "d")),
+                &security_budget(&clock)
+            )
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::CredentialBounds)
+    );
+    assert_eq!(
+        service
+            .authorize_application(
+                &context,
+                &policy_context("device:write", target.clone()),
+                &security_budget(&clock)
+            )
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::UnknownOperation)
+    );
+    let requested = policy_context("device:read", target);
+    for pattern in [
+        None,
+        Some("*"),
+        Some("g1:*"),
+        Some(
+            "{\"application\":\"other\",\"scope\":{\"scope\":\"application\",\"kind\":\"device\"}}",
+        ),
+    ] {
+        db.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE permission SET resource_pattern=$1 WHERE id=$2",
+            [pattern.map(str::to_owned).into(), permission.into()],
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            service
+                .authorize_application(&context, &requested, &security_budget(&clock))
+                .await
+                .err(),
+            Some(SecurityError::DependencyUnavailable)
+        );
+    }
+    let legacy = cobotusr::service::permission::EnforceRequest {
+        application: "cobotsrv".into(),
+        subject: 100,
+        action: "read".into(),
+        resource_type: None,
+        resource_id: None,
+    };
+    assert!(matches!(
+        cobotusr::service::permission::enforce(&db, &legacy).await,
+        Err(cobotusr::error::AppError::Unauthorized(_))
+    ));
+}
+
+#[tokio::test]
+async fn security_t20_task_read_requires_owner_and_read_any_requires_separate_grant() {
+    use auth::security::{
+        identity::{PrincipalKind, PrincipalRef},
+        policy::{
+            CredentialBounds, PolicyAllowReason, PolicyDenyReason, PolicyEffect, ResourceKind,
+            ResourceRef, ResourceScope, ResourceTarget,
+        },
+    };
+    use cobotusr::{
+        migration::{Migrator, MigratorTrait},
+        service::security::{
+            authorization::AuthorizationService, repository::PgSecurityRepository,
+        },
+    };
+    use std::sync::Arc;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let scope = ResourceScope::Application {
+        kind: ResourceKind::Task,
+    };
+    let read =
+        application_permission(&db, "own-tasks", "task:read", "task", Some(scope.clone())).await;
+    let any = application_permission(
+        &db,
+        "manage-tasks",
+        "task:read-any",
+        "task",
+        Some(scope.clone()),
+    )
+    .await;
+    grant_role_permission(&db, 3, read).await;
+    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let context = authenticated_policy_user(
+        &db,
+        "cobotsrv",
+        CredentialBounds::new(vec![
+            scoped_grant("task:read", scope.clone()),
+            scoped_grant("task:read-any", scope),
+        ]),
+        clock.clone(),
+        3,
+    )
+    .await;
+    let service = AuthorizationService::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+        "cobotusr",
+        "cobotusr",
+    )
+    .unwrap();
+    let resource = ResourceRef::new(
+        "cobotsrv",
+        ResourceTarget::Task {
+            gateway_id: "g".into(),
+            device_id: "d".into(),
+            task_id: "task".into(),
+        },
+    )
+    .unwrap();
+    let mut request = policy_context("task:read", resource.clone());
+    assert_eq!(
+        service
+            .authorize_application(&context, &request, &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::MissingResourceFacts)
+    );
+    request.facts.owner = Some(context.principal().clone());
+    assert_eq!(
+        service
+            .authorize_application(&context, &request, &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Allow(PolicyAllowReason::Role)
+    );
+    request.facts.owner =
+        Some(PrincipalRef::new("https://idp.test", PrincipalKind::User, "101").unwrap());
+    assert_eq!(
+        service
+            .authorize_application(&context, &request, &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::ResourceConstraint)
+    );
+    let mut admin = policy_context("task:read-any", resource);
+    admin.facts = request.facts;
+    assert_eq!(
+        service
+            .authorize_application(&context, &admin, &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::NoGrant)
+    );
+    grant_role_permission(&db, 3, any).await;
+    assert_eq!(
+        service
+            .authorize_application(&context, &admin, &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Allow(PolicyAllowReason::Role)
+    );
+}
+
+#[tokio::test]
+async fn security_t20_long_structured_scopes_are_persisted_without_alias_concatenation() {
+    use auth::security::policy::ResourceScope;
+    use cobotusr::{
+        entity::permission,
+        migration::{Migrator, MigratorTrait},
+    };
+    use sea_orm::EntityTrait;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let target = policy_device(&"g:".repeat(100), &"d:".repeat(100));
+    let id = application_permission(
+        &db,
+        "long-target",
+        "read",
+        "device",
+        Some(ResourceScope::Exact {
+            target: target.target().clone(),
+        }),
+    )
+    .await;
+    let row = permission::Entity::find_by_id(id)
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    let raw = row.resource_pattern.unwrap();
+    assert!(raw.len() > 255);
+    let selector: auth::security::policy::ResourceSelector = serde_json::from_str(&raw).unwrap();
+    assert!(selector.matches(&target));
+    assert!(!selector.matches(&policy_device(
+        "g",
+        &format!("{}:{}", "g:".repeat(99), "d:".repeat(100))
+    )));
+}
+
+#[tokio::test]
+async fn security_t20_machine_uses_current_binding_without_falling_back_to_same_named_user() {
+    use auth::security::{
+        credential::{CredentialExpectation, CredentialProfile, StrictAccessState},
+        error::SecurityError,
+        identity::{PrincipalKind, TokenUse},
+        policy::{
+            CredentialBounds, PolicyAllowReason, PolicyDenyReason, PolicyEffect, ResourceKind,
+            ResourceScope,
+        },
+    };
+    use cobotusr::{
+        entity::{security_binding, security_credential as credential},
+        migration::{Migrator, MigratorTrait},
+        service::security::{
+            authorization::AuthorizationService, lifecycle::CredentialLifecycle,
+            repository::PgSecurityRepository,
+        },
+    };
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    use std::sync::Arc;
+    let (_container, url) = crate::cobotusr::common::get_postgres_container()
+        .await
+        .unwrap();
+    let db = Database::connect(url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
+    let broad = ResourceScope::Application {
+        kind: ResourceKind::Device,
+    };
+    application_permission(
+        &db,
+        "known-device-read",
+        "read",
+        "device",
+        Some(broad.clone()),
+    )
+    .await;
+    let clock = Arc::new(crate::cobotsrv::common::SecurityTestClock::new(2000));
+    let user = authenticated_policy_user(
+        &db,
+        "cobotsrv",
+        CredentialBounds::new(vec![scoped_grant("device:read", broad)]),
+        clock.clone(),
+        1,
+    )
+    .await;
+    let grant = uuid::Uuid::new_v4();
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO security_grant (id,issuer,principal_kind,subject,application,grant_kind,created_at) VALUES ($1,'https://idp.test','machine','100','cobotsrv','service',1000)",[grant.into()])).await.unwrap();
+    let mut row: credential::ActiveModel =
+        credential::Entity::find_by_id(("https://idp.test".to_owned(), "policy-access".to_owned()))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into();
+    row.jti = Set("machine-access".into());
+    row.principal_kind = Set("machine".into());
+    row.token_use = Set("security_service".into());
+    row.grant_id = Set(grant);
+    row.session_id = Set(None);
+    row.family_id = Set(None);
+    row.insert(&db).await.unwrap();
+    let current = scoped_grant(
+        "device:read",
+        ResourceScope::Exact {
+            target: policy_device("g1", "d").target().clone(),
+        },
+    );
+    security_binding::ActiveModel {
+        id: Set(uuid::Uuid::new_v4()),
+        issuer: Set("https://idp.test".into()),
+        client_id: Set("100".into()),
+        token_use: Set("security_service".into()),
+        application: Set("cobotsrv".into()),
+        audience: Set("cobotsrv".into()),
+        allowed_operations: Set(serde_json::to_value(vec![current]).unwrap()),
+        identity_binding: Set(serde_json::json!({"kind":"none"})),
+        enabled: Set(true),
+    }
+    .insert(&db)
+    .await
+    .unwrap();
+    let mut claims = user.verified().claims().clone();
+    claims.jti = "machine-access".into();
+    claims.principal_kind = PrincipalKind::Machine;
+    claims.token_use = TokenUse::SecurityService;
+    claims.grant_id = grant.to_string();
+    claims.session_id = None;
+    claims.family_id = None;
+    let (jwks, _stop) = security_jwks().await;
+    let checker = Arc::new(CredentialLifecycle::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+    ));
+    let expected = CredentialExpectation::new(
+        "https://idp.test",
+        "cobotsrv",
+        "cobotsrv",
+        vec![CredentialProfile::new(PrincipalKind::Machine, TokenUse::SecurityService).unwrap()],
+    )
+    .unwrap();
+    let state = StrictAccessState::new(jwks, expected, clock.clone(), checker);
+    let token = sign_security_claims(&claims, "key");
+    let headers = axum::http::HeaderMap::from_iter([(
+        axum::http::header::AUTHORIZATION,
+        format!("Bearer {}", token.expose_secret()).parse().unwrap(),
+    )]);
+    let machine = state.authenticate(&headers).await.unwrap();
+    let service = AuthorizationService::new(
+        Arc::new(PgSecurityRepository::new(db.clone(), clock.clone())),
+        clock.clone(),
+        "cobotusr",
+        "cobotusr",
+    )
+    .unwrap();
+    let g1 = policy_context("device:read", policy_device("g1", "d"));
+    let g2 = policy_context("device:read", policy_device("g2", "d"));
+    assert_eq!(
+        service
+            .authorize_application(&machine, &g1, &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Allow(PolicyAllowReason::Principal)
+    );
+    assert_eq!(
+        service
+            .authorize_application(&machine, &g2, &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::NoGrant)
+    );
+    execute(&db, "UPDATE security_binding SET allowed_operations='[]'")
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .authorize_application(&machine, &g1, &security_budget(&clock))
+            .await
+            .unwrap()
+            .effect,
+        PolicyEffect::Deny(PolicyDenyReason::NoGrant)
+    );
+    execute(&db, "UPDATE security_binding SET enabled=false")
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .authorize_application(&machine, &g1, &security_budget(&clock))
+            .await
+            .err(),
+        Some(SecurityError::CredentialRevoked)
+    );
+}

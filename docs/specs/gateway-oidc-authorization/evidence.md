@@ -130,3 +130,26 @@ checklist.md 全部条目保持未验证。只在取得对应实际证据后勾�
 - `cargo test --test mod --locked -- --test-threads=4`：退出码0，66 passed、0 failed、0 ignored。
 - T17、T18组件任务已完成（累计18/80）。URI/application权限适配、生命周期写入和业务入口接线仍未完成，checklist保持未验收；原有8项文档示例失败尚待T79修正。
 - `cargo test -p auth -p cobotusr --lib --locked`：退出码0，auth 42 passed、cobotusr 22 passed，均0 failed、0 ignored。`cargo clippy -p cobotusr --lib --locked -- -D warnings`、`cargo clippy --test mod --locked -- -D warnings`、`cargo fmt --all -- --check`及`git diff --check`均退出码0；未运行或宣称通过完整workspace/all-features门禁。
+
+## T19 URI 适配与默认拒绝（2026-11-08）
+
+- 先新增用例，首轮 `cargo test --test mod security_t19 --no-run --locked` 退出码101，URI操作映射及授权服务未实现。新增5项T19用例，涵盖用户允许、角色允许、普通用户/超级管理员显式拒绝、未知方法/路由、签名范围上界、管理受众隔离和预算/新鲜期不能重启。
+- 新AuthorizationService先复核真实AuthenticatedContext与主库登记及签名kid，再在同一主库事务加载URI权限、用户覆写和当前角色，由共享evaluate_policy统一判定。管理路径只接受配置的management application/audience及UserSession用户；URI操作按登记ID确定，资源同时绑定method与route模板。
+- AuthenticatedContext保留认证入口预算和原始有效期，授权调用只可缩短，不能创建新预算或新查询窗口延长原结论。修复API前缀只按完整路径段去除、query一致清理，以及旧公开checker角色查询漏method过滤的问题。
+- 删除旧受保护中间件和公开checker的“未登记即放行”。真实HTTP测试先成功访问已登记GET /user，删除其登记后同一超级管理员Bearer得到403；公开checker对未知规则返回allow=false。
+- 首轮登记修复用例实际发现旧种子只按URI去重，导致同一路径不同方法缺失。为使默认拒绝可落地，提前完成T34的一部分：增加版本化m20261107_000003_security_operations，补齐既有URI方法，保留已有记录及其管理员授权；只对新登记的个人服务行补标准角色授权，不向User授予管理或网关执行权限。down不删管理员配置，up幂等；新旧库、保留已撤角色权限及T13回滚/up测试通过。T34完整目录/路由覆盖和应用操作种子仍未完成。
+- `cargo test --test mod security_t19 --locked -- --test-threads=4`：退出码0，5 passed、0 failed、0 ignored；`cargo test --test mod security_t13_identity_schema_up_down_up --locked`：退出码0，1 passed、0 failed、0 ignored。
+- 旧JWT中间件的其余验证/生命周期接线仍在T24/T32；不能将新适配器完成理解为IdP全部入口已切换到严格凭据。
+
+## T20 应用权限、资源边界与旧入口关闭（2026-11-08）
+
+- 先新增应用授权用例，首轮 `cargo test --test mod security_t20 --no-run --locked` 退出码101，应用授权接口缺失；实现后新增5项用例全部通过。
+- 同一主库一致快照加载应用操作、全部相关用户覆写和当前角色，统一交给纯判定器；所有匹配拒绝先于任何允许。资源规则采用有限类型ResourceSelector JSON，要求application和kind一致；缺失、裸通配或旧分隔符glob不能补成全部设备，配置损坏以依赖错误失败关闭。长结构化选择器已在实际PostgreSQL往返验证，不做分隔符拼接。
+- 最终权限为活动凭据/根、签发上界、当前角色/用户规则、当前机器绑定及系统约束的交集。测试验证跨网关不能借用授权、角色撤销后立即失去当前许可、超级管理员不能盖过显式拒绝；task:read必须有可信owner并属于主体，读取他人任务使用独立task:read-any授权。
+- 机器身份只读取对应issuer/主体/用途/app/audience的当前服务绑定，不回退同名用户。测试创建同名超级管理员用户与机器，机器只获当前g1范围，g2拒绝；清空/禁用绑定后分别拒绝授权/拒绝凭据。
+- 旧/enforce仅提供自报subject，缺乏可信主体证据和凭据上界，现返回401，不再推断授权。新机器/主体证据协议将由T28/T29接入，云端调用方迁移在T38；部署前必须完成这些任务。旧字符串权限解析仅保留为迁移期间的元数据，不作为新PDP证明。
+- `cargo test --test mod security_t20 --locked -- --test-threads=4`：退出码0，5 passed、0 failed、0 ignored；随后补充角色撤销断言，由完整回归覆盖。
+- 最终完整集成：`cargo test --test mod --locked -- --test-threads=4` 退出码0，76 passed、0 failed、0 ignored。`cargo test -p auth -p cobotusr --lib --locked` 退出码0，auth 45 passed、cobotusr 22 passed，均0 failed、0 ignored。auth数量包含工作区另一组OIDC sub字符串修复的3项测试，该修复已独立提交为8b01876，未混入本网关权限实现。
+- `cargo clippy -p auth -p cobotusr --lib --tests --locked -- -D warnings`、`cargo clippy --test mod --locked -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check`均退出码0。
+- T19、T20组件任务完成（累计20/80）；全入口、生命周期写入和端到端撤权仍未验收。之前记录的8项原有文档示例失败尚待T79处理，checklist不提前勾选。
+- 最后增加真实HTTP兼容性断言：旧超级管理员Bearer携带自报subject的/enforce请求返回401。`cargo test --test mod security_t19_live_legacy_routes --locked` 退出码0，1 passed、0 failed、0 ignored；集成目标clippy重跑退出码0。

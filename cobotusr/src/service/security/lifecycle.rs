@@ -45,36 +45,43 @@ impl CredentialLifecycle {
             .credential(reference)
             .await?
             .ok_or(SecurityError::InvalidCredential)?;
-        let current_now = now(self.clock.as_ref())?;
-        let claims = active_claims(&snapshot.current, current_now)?;
-        let parent_exp = validate_parent(&snapshot, &claims, current_now)?;
-        let key = snapshot
-            .current
-            .credential
-            .signing_key_id
-            .clone()
-            .ok_or(SecurityError::InvalidCredential)?;
-        let validity = DecisionValidity::from_query_start(
-            snapshot.checked_at,
-            claims
-                .exp
-                .checked_mul(1000)
-                .ok_or(SecurityError::InvalidCredential)?,
-            parent_exp,
-            None,
-        )?;
+        let (status, key) = status_for_snapshot(&snapshot, now(self.clock.as_ref())?)?;
         transaction.commit().await?;
         budget.remaining()?;
-        validity.ensure_fresh(self.clock.as_ref())?;
-        Ok((
-            CurrentCredentialStatus {
-                claims,
-                active: true,
-                validity,
-            },
-            key,
-        ))
+        status.validity.ensure_fresh(self.clock.as_ref())?;
+        Ok((status, key))
     }
+}
+
+pub(super) fn status_for_snapshot(
+    snapshot: &CredentialSnapshot,
+    time: u64,
+) -> Result<(CurrentCredentialStatus, String), SecurityError> {
+    let claims = active_claims(&snapshot.current, time)?;
+    let parent_exp = validate_parent(snapshot, &claims, time)?;
+    let key = snapshot
+        .current
+        .credential
+        .signing_key_id
+        .clone()
+        .ok_or(SecurityError::InvalidCredential)?;
+    let validity = DecisionValidity::from_query_start(
+        snapshot.checked_at,
+        claims
+            .exp
+            .checked_mul(1000)
+            .ok_or(SecurityError::InvalidCredential)?,
+        parent_exp,
+        None,
+    )?;
+    Ok((
+        CurrentCredentialStatus {
+            claims,
+            active: true,
+            validity,
+        },
+        key,
+    ))
 }
 #[async_trait::async_trait]
 impl CurrentCredentialChecker for CredentialLifecycle {

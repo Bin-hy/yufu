@@ -151,6 +151,7 @@ pub struct AuthenticatedContext {
     verified: VerifiedCredential,
     evidence: Arc<SecretToken>,
     validity: ActiveValidity,
+    budget: super::budget::SecurityBudget,
 }
 impl std::fmt::Debug for AuthenticatedContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -161,6 +162,15 @@ impl std::fmt::Debug for AuthenticatedContext {
     }
 }
 impl AuthenticatedContext {
+    pub fn verified(&self) -> &VerifiedCredential {
+        &self.verified
+    }
+    pub fn budget(&self) -> &super::budget::SecurityBudget {
+        &self.budget
+    }
+    pub fn validity(&self) -> DecisionValidity {
+        self.validity.validity()
+    }
     pub fn principal(&self) -> &PrincipalRef {
         self.verified.principal()
     }
@@ -276,6 +286,7 @@ impl StrictAccessState {
             verified,
             evidence: Arc::new(token),
             validity,
+            budget,
         })
     }
 }

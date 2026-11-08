@@ -50,7 +50,7 @@ pub async fn authority_check_middleware_rbac_abac(
 
     let role_id = user.role_id;
 
-    // ABAC 优先：如果 authority 未登记，则不做权限管控，直接放行
+    // Protected methods/routes must be explicitly registered.
     let authority_opt = match authority::Entity::find()
         .filter(authority::Column::AuthorityUri.eq(&pure_uri))
         .filter(authority::Column::Method.eq(&method))
@@ -62,7 +62,7 @@ pub async fn authority_check_middleware_rbac_abac(
     };
 
     if authority_opt.is_none() {
-        return next.run(request).await;
+        return AppError::Forbidden("unregistered protected operation".into()).into_response();
     }
 
     // 存在该权限路径：先检查用户覆写（user_authority），有显式 allow/deny 则遵循覆写
@@ -147,16 +147,16 @@ pub async fn check_authority_abac(
 
     // 构造用于匹配 authority 的 uri（忽略前缀与 query）
     let prefix_api = state.config.http.api_prefix.clone();
-    let pure_uri = handler_prefix(prefix_api, path.clone());
+    let pure_uri = get_pure_uri(prefix_api, path.clone());
 
-    // 如果 authority 表不存在该记录，则不做权限管控，放行
+    // No rule is never an implicit authorization, including this legacy checker.
     let authority_opt = authority::Entity::find()
         .filter(authority::Column::AuthorityUri.eq(&pure_uri))
         .filter(authority::Column::Method.eq(&method))
         .one(db)
         .await?;
     if authority_opt.is_none() {
-        return Ok(Json(CheckResponse { allow: true }));
+        return Ok(Json(CheckResponse { allow: false }));
     }
 
     // 校验 token 并获取用户
@@ -197,6 +197,7 @@ pub async fn check_authority_abac(
         .filter(authority_role::Column::RoleId.eq(user.role_id))
         .find_also_related(authority::Entity)
         .filter(authority::Column::AuthorityUri.eq(&pure_uri))
+        .filter(authority::Column::Method.eq(&method))
         .one(db)
         .await;
 
@@ -216,10 +217,10 @@ pub async fn check_authority_abac(
 
 // 检查 uri 是否以 prefix 开头
 fn handler_prefix(prefix: String, uri: String) -> String {
-    if uri.starts_with(&prefix) {
-        uri[prefix.len()..].to_string()
-    } else {
-        uri
+    match uri.strip_prefix(prefix.trim_end_matches('/')) {
+        Some("") => "/".into(),
+        Some(suffix) if suffix.starts_with('/') => suffix.into(),
+        _ => uri,
     }
 }
 
@@ -230,6 +231,5 @@ pub fn handle_query_path(uri: String) -> String {
 
 // 获取纯净的 uri无前缀和query参数
 pub fn get_pure_uri(prefix: String, uri: String) -> String {
-    let uri_no_prefix = handler_prefix(prefix, uri);
-    handle_query_path(uri_no_prefix)
+    handler_prefix(prefix, handle_query_path(uri))
 }
