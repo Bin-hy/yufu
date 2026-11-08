@@ -1,13 +1,10 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use cobotusr::config::Config;
-use cobotusr::entity::role::RoleEnum;
-use cobotusr::entity::{application, permission, user};
 use cobotusr::error::AppError;
 use reqwest::Client;
-use sea_orm::ActiveValue::{NotSet, Set};
-use sea_orm::{ActiveModelTrait, Database};
+use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 use serde_json::{Value, json};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
 use super::super::common::*;
@@ -50,51 +47,98 @@ async fn start() -> Result<
     AppError,
 > {
     let (pg, db_url) = get_postgres_container().await?;
-    let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
-    let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let mut cfg = Config::default();
     cfg.database.url = db_url.clone();
-    let token = get_test_token(&mut cfg); // HS256 superadmin token (sub=1, aud=cobotusr)
-    let api_prefix = cfg.http.api_prefix.clone();
-    tokio::spawn(cobotusr::serve(cfg, listener, shutdown_signal()));
+    cfg.oidc.issuer = format!("http://{addr}");
+    cfg.auth.secret = "mcp-http-test-key".into();
+    cfg.auth.exp_seconds = 300;
+    cfg.auth.refresh_exp_seconds = 3600;
+    let (_legacy, _rsa) = super::oidc::rsa_test_token(&mut cfg);
+    let api = cfg.http.api_prefix.clone();
+    let clock = std::sync::Arc::new(auth::security::budget::SystemClock::new(
+        std::sync::Arc::new(|| true),
+    ));
+    tokio::spawn(cobotusr::serve_with_security_clock(
+        cfg,
+        listener,
+        shutdown_signal(),
+        clock,
+    ));
     wait_ready(&addr).await;
-    Ok((pg, addr, api_prefix, token, db_url))
+    let db = Database::connect(&db_url).await?;
+    let selector = serde_json::to_string(
+        &auth::security::policy::ResourceSelector::new(
+            "cobotsrv",
+            auth::security::policy::ResourceScope::Application {
+                kind: auth::security::policy::ResourceKind::Application,
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+        "UPDATE permission SET action='mcp:access',resource_type='application',resource_pattern=$1 WHERE name='mcp:access' AND application_id=(SELECT id FROM application WHERE app_key='cobotsrv')",[selector.into()])).await?;
+    db.execute_raw(Statement::from_string(DbBackend::Postgres,
+        r#"UPDATE "user" SET username='mcp-http-manager',password='$2y$04$FAiHSb5/5zp.oDR1GjBYSex5RVBJYW1BdEVBwqpdg4Phfk1i7YIPu' WHERE id=1"#.to_owned())).await?;
+    let token = login(&addr, &api).await;
+    Ok((pg, addr, api, token, db_url))
 }
-
-/// Insert a plain `User`-role account and mint an HS256 access token for it
-/// (same signing mode as `get_test_token`, which forces HS256 on the server).
-async fn create_user_and_token(db_url: &str, username: &str) -> (i32, String) {
-    let db = Database::connect(db_url).await.unwrap();
-    let now = chrono::Utc::now().naive_utc();
-    let user = user::ActiveModel {
-        id: NotSet,
-        username: Set(username.to_string()),
-        password: Set(None),
-        nickname: Set(None),
-        description: Set(None),
-        role_id: Set(RoleEnum::User.default_id()),
-        create_time: Set(now),
-        update_time: Set(now),
-    }
-    .insert(&db)
+async fn with_csrf(addr: &SocketAddr, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    let response = Client::new()
+        .get(format!("http://{addr}/api/v1/csrf"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let cookie = response.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let body: Value = response.json().await.unwrap();
+    request
+        .header("origin", format!("http://{addr}"))
+        .header("cookie", cookie)
+        .header("x-csrf-token", body["csrf_token"].as_str().unwrap())
+}
+async fn login(addr: &SocketAddr, api: &str) -> String {
+    let body: Value = with_csrf(
+        addr,
+        Client::new().post(format!("http://{addr}{api}/login")),
+    )
+    .await
+    .json(&json!({"username":"mcp-http-manager","password":"test password"}))
+    .send()
+    .await
+    .unwrap()
+    .error_for_status()
+    .unwrap()
+    .json()
     .await
     .unwrap();
-
-    let cfg = Config::default();
-    let signer = auth::token_manager::IdTokenSigner::from_hmac(&cfg.auth.secret, 3600);
-    let token = signer
-        .sign_access_token(
-            &user.id.to_string(),
-            "cobotusr-test",
-            "cobotusr",
-            "",
-            3600,
-            vec![],
-            vec![],
-        )
-        .unwrap();
-    (user.id, token)
+    body["access_token"].as_str().unwrap().into()
+}
+async fn create_user_and_token(addr: &SocketAddr, api: &str, username: &str) -> String {
+    let body: Value = with_csrf(
+        addr,
+        Client::new().post(format!("http://{addr}{api}/register")),
+    )
+    .await
+    .json(&json!({"username":username,"nickname":username,"password":"test password"}))
+    .send()
+    .await
+    .unwrap()
+    .error_for_status()
+    .unwrap()
+    .json()
+    .await
+    .unwrap();
+    body["access_token"].as_str().unwrap().into()
 }
 
 // 无 mcp:access（目标应用不存在 → 权限为空）→ 403
@@ -132,61 +176,35 @@ async fn mcp_token_unauthenticated_is_401() -> Result<(), AppError> {
     Ok(())
 }
 
-// 应用持有 mcp:access（超管自动获全部权限）→ 200，令牌含正确 aud/permissions，TTL 被夹到上限
+// 登记管理会话和目标应用结构化上界 → 200，TTL 被夹到上限
 #[tokio::test]
 async fn mcp_token_success_and_ttl_clamped() -> Result<(), AppError> {
-    let (_pg, addr, api, token, db_url) = start().await?;
-
-    // Seed an application carrying mcp:access for audience "mcp-test".
-    let db = Database::connect(&db_url).await?;
-    let now = chrono::Utc::now().naive_utc();
-    let app = application::ActiveModel {
-        id: NotSet,
-        app_key: Set("mcp-test".to_string()),
-        name: Set("MCP Test App".to_string()),
-        description: Set(None),
-        oidc_client_id: Set(None),
-        create_time: Set(now),
-        update_time: Set(now),
-    }
-    .insert(&db)
-    .await?;
-    permission::ActiveModel {
-        id: NotSet,
-        application_id: Set(app.id),
-        name: Set("mcp:access".to_string()),
-        description: Set(None),
-        action: Set("access".to_string()),
-        resource_type: Set(Some("mcp".to_string())),
-        resource_pattern: Set(Some("*".to_string())),
-        create_time: Set(now),
-        update_time: Set(now),
-    }
-    .insert(&db)
-    .await?;
+    let (_pg, addr, api, token, _db_url) = start().await?;
 
     // Request 9999 days — must be clamped to the default max (90).
     let resp = Client::new()
         .post(format!("http://{}{}/oidc/mcp-tokens", addr, api))
         .bearer_auth(&token)
-        .json(&json!({ "aud": "mcp-test", "ttl_days": 9999 }))
+        .json(&json!({ "aud": "cobotsrv", "ttl_days": 9999 }))
         .send()
         .await?;
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     let body: Value = resp.json().await?;
-    assert_eq!(body["aud"], "mcp-test");
+    assert_eq!(body["aud"], "cobotsrv");
     let access_token = body["access_token"].as_str().expect("access_token");
     let claims = decode_claims(access_token);
-    assert_eq!(claims["aud"], "mcp-test");
+    assert_eq!(claims["aud"], "cobotsrv");
+    assert_eq!(claims["token_use"], "mcp_access");
+    assert_eq!(claims["principal_kind"], "user");
     assert!(
-        claims["permissions"]
+        claims["bounds"]["grants"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|p| p == "mcp:access"),
-        "token must carry mcp:access: {claims}"
+            .any(|g| g["operation"] == "mcp:access")
     );
+    assert!(claims.get("permissions").is_none());
 
     // exp - iat clamped to 90 days.
     let exp = claims["exp"].as_i64().unwrap();
@@ -204,7 +222,7 @@ async fn mcp_token_success_and_ttl_clamped() -> Result<(), AppError> {
 
 /// Quick helper: seed app + mcp:access permission, then create an MCP token.
 async fn seed_and_mint(
-    db_url: &str,
+    _db_url: &str,
     addr: &SocketAddr,
     api: &str,
     token: &str,
@@ -212,35 +230,6 @@ async fn seed_and_mint(
     name: &str,
 ) -> (reqwest::Client, Value, String) {
     let client = Client::new();
-    let db = Database::connect(db_url).await.unwrap();
-    let now = chrono::Utc::now().naive_utc();
-    let app = application::ActiveModel {
-        id: NotSet,
-        app_key: Set(aud.to_string()),
-        name: Set(format!("App {aud}")),
-        description: Set(None),
-        oidc_client_id: Set(None),
-        create_time: Set(now),
-        update_time: Set(now),
-    }
-    .insert(&db)
-    .await
-    .unwrap();
-    permission::ActiveModel {
-        id: NotSet,
-        application_id: Set(app.id),
-        name: Set("mcp:access".to_string()),
-        description: Set(None),
-        action: Set("access".to_string()),
-        resource_type: Set(Some("mcp".to_string())),
-        resource_pattern: Set(Some("*".to_string())),
-        create_time: Set(now),
-        update_time: Set(now),
-    }
-    .insert(&db)
-    .await
-    .unwrap();
-
     let resp = client
         .post(format!("http://{}{}/oidc/mcp-tokens", addr, api))
         .bearer_auth(token)
@@ -263,7 +252,7 @@ async fn seed_and_mint(
 async fn mcp_token_list_active_by_owner() -> Result<(), AppError> {
     let (_pg, addr, api, token, db_url) = start().await?;
     let (client, _body, _jti) =
-        seed_and_mint(&db_url, &addr, &api, &token, "list-test", "我的令牌").await;
+        seed_and_mint(&db_url, &addr, &api, &token, "cobotsrv", "我的令牌").await;
 
     let resp = client
         .get(format!("http://{}{}/oidc/mcp-tokens", addr, api))
@@ -281,16 +270,16 @@ async fn mcp_token_list_active_by_owner() -> Result<(), AppError> {
 
 // ── cross-user isolation ──
 
-// 用户 B 不可见/不可操作用户 A 的令牌：list 不含、rename/refresh/delete 均 404，
+// 用户 B 不可见/不可操作用户 A 的令牌：list 不含，变更返回403/404，
 // 且 A 的令牌保持可用。
 #[tokio::test]
 async fn mcp_token_cross_user_isolation() -> Result<(), AppError> {
     let (_pg, addr, api, token_a, db_url) = start().await?;
     let (client, body, _jti) =
-        seed_and_mint(&db_url, &addr, &api, &token_a, "iso-test", "甲的令牌").await;
+        seed_and_mint(&db_url, &addr, &api, &token_a, "cobotsrv", "甲的令牌").await;
     let id_a = body["id"].as_i64().unwrap();
 
-    let (_user_b_id, token_b) = create_user_and_token(&db_url, "mcp-iso-user-b").await;
+    let token_b = create_user_and_token(&addr, &api, "mcp-iso-user-b").await;
 
     // B's list must not contain A's token.
     let resp = client
@@ -376,7 +365,7 @@ async fn mcp_token_cross_user_isolation() -> Result<(), AppError> {
 async fn mcp_token_rename_then_list() -> Result<(), AppError> {
     let (_pg, addr, api, token, db_url) = start().await?;
     let (client, body, _jti) =
-        seed_and_mint(&db_url, &addr, &api, &token, "rename-test", "原名").await;
+        seed_and_mint(&db_url, &addr, &api, &token, "cobotsrv", "原名").await;
 
     let id = body["id"].as_i64().unwrap();
     let resp = client
@@ -408,7 +397,7 @@ async fn mcp_token_rename_then_list() -> Result<(), AppError> {
 async fn mcp_token_refresh_rotates_and_revokes_old() -> Result<(), AppError> {
     let (_pg, addr, api, token, db_url) = start().await?;
     let (client, body, old_jti) =
-        seed_and_mint(&db_url, &addr, &api, &token, "rotate-test", "轮换令牌").await;
+        seed_and_mint(&db_url, &addr, &api, &token, "cobotsrv", "轮换令牌").await;
 
     let id = body["id"].as_i64().unwrap();
     let resp = client
@@ -459,7 +448,7 @@ async fn mcp_token_refresh_rotates_and_revokes_old() -> Result<(), AppError> {
 async fn mcp_token_delete_revokes_and_hides_from_list() -> Result<(), AppError> {
     let (_pg, addr, api, token, db_url) = start().await?;
     let (client, body, jti) =
-        seed_and_mint(&db_url, &addr, &api, &token, "delete-test", "待删除").await;
+        seed_and_mint(&db_url, &addr, &api, &token, "cobotsrv", "待删除").await;
 
     let id = body["id"].as_i64().unwrap();
     let resp = client
@@ -500,9 +489,8 @@ async fn mcp_token_delete_revokes_and_hides_from_list() -> Result<(), AppError> 
 
 #[tokio::test]
 async fn mcp_token_introspect_unknown_is_not_revoked() -> Result<(), AppError> {
-    // Deliberate fail-open semantics: an unknown jti is an ordinary OIDC session
-    // token (never tracked in the mcp_token denylist), so it MUST report
-    // `revoked: false` — only explicit revocations deny a jti. Do not "fix" this.
+    // Compatibility endpoint only. Full service authentication and registry
+    // introspection migrate in later tasks; this is not evidence of liveness.
     let (_pg, addr, api, token, _db_url) = start().await?;
     let r: Value = Client::new()
         .post(format!("http://{}{}/oidc/mcp-tokens/introspect", addr, api))
@@ -513,5 +501,200 @@ async fn mcp_token_introspect_unknown_is_not_revoked() -> Result<(), AppError> {
         .json()
         .await?;
     assert_eq!(r["revoked"], false);
+    Ok(())
+}
+
+#[tokio::test]
+async fn security_t26_http_management_rejects_legacy_unknown_business_and_mcp_bearers()
+-> Result<(), AppError> {
+    let (_pg, addr, api, manager, _db) = start().await?;
+    let client = Client::new();
+    let mut cfg = Config::default();
+    cfg.oidc.issuer = format!("http://{addr}");
+    let (legacy, _rsa) = super::oidc::rsa_test_token(&mut cfg);
+    let signer = auth::token_manager::IdTokenSigner::from_rsa_pem(
+        &std::fs::read(&cfg.oidc.rsa_private_key_path).unwrap(),
+        300,
+    )
+    .unwrap();
+    let original: auth::security::credential::SecurityAccessClaims =
+        serde_json::from_value(decode_claims(&manager)).unwrap();
+    let mut unknown = original.clone();
+    unknown.jti = uuid::Uuid::new_v4().to_string();
+    let mut business = original.clone();
+    business.aud = "cobotsrv".into();
+    business.application = "cobotsrv".into();
+    let mut expired = original;
+    expired.exp = 1;
+    let mut bad = vec![
+        legacy,
+        signer
+            .sign_security_access(&unknown)
+            .unwrap()
+            .expose_secret()
+            .to_owned(),
+        signer
+            .sign_security_access(&business)
+            .unwrap()
+            .expose_secret()
+            .to_owned(),
+        signer
+            .sign_security_access(&expired)
+            .unwrap()
+            .expose_secret()
+            .to_owned(),
+    ];
+    let (_, body, _) = seed_and_mint("", &addr, &api, &manager, "cobotsrv", "strict").await;
+    bad.push(body["access_token"].as_str().unwrap().into());
+    let id = body["id"].as_i64().unwrap();
+    for token in bad {
+        for (method, path, payload) in [
+            (
+                "POST",
+                "/oidc/mcp-tokens".to_string(),
+                json!({"aud":"cobotsrv"}),
+            ),
+            ("GET", "/oidc/mcp-tokens".to_string(), json!({})),
+            (
+                "PATCH",
+                format!("/oidc/mcp-tokens/{id}"),
+                json!({"name":"bad"}),
+            ),
+            ("DELETE", format!("/oidc/mcp-tokens/{id}"), json!({})),
+            ("POST", format!("/oidc/mcp-tokens/{id}/refresh"), json!({})),
+        ] {
+            let response = client
+                .request(method.parse().unwrap(), format!("http://{addr}{api}{path}"))
+                .bearer_auth(&token)
+                .json(&payload)
+                .send()
+                .await?;
+            assert_eq!(
+                response.status(),
+                401,
+                "{method} {path} must require a registered interactive manager"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn security_t26_http_cookie_mutations_require_real_csrf_and_origin() -> Result<(), AppError> {
+    let (_pg, addr, api, manager, _db) = start().await?;
+    let client = Client::new();
+    let url = format!("http://{addr}{api}/oidc/mcp-tokens");
+    let response = client
+        .post(&url)
+        .bearer_auth(&manager)
+        .header("cookie", "refresh_token=placeholder")
+        .json(&json!({"aud":"cobotsrv"}))
+        .send()
+        .await?;
+    assert_eq!(response.status(), 403);
+    let response = with_csrf(&addr, client.post(&url).bearer_auth(&manager))
+        .await
+        .header("origin", "https://other.test")
+        .json(&json!({"aud":"cobotsrv"}))
+        .send()
+        .await?;
+    assert_eq!(response.status(), 403);
+    let response = with_csrf(&addr, client.post(&url).bearer_auth(&manager))
+        .await
+        .json(&json!({"aud":"cobotsrv"}))
+        .send()
+        .await?;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let set: Value = response.json().await?;
+    let id = set["id"].as_i64().unwrap();
+    for (method, path, body) in [
+        (
+            "PATCH",
+            format!("/oidc/mcp-tokens/{id}"),
+            json!({"name":"renamed"}),
+        ),
+        ("POST", format!("/oidc/mcp-tokens/{id}/refresh"), json!({})),
+        ("DELETE", format!("/oidc/mcp-tokens/{id}"), json!({})),
+    ] {
+        let response = client
+            .request(method.parse().unwrap(), format!("http://{addr}{api}{path}"))
+            .bearer_auth(&manager)
+            .header("cookie", "other=value")
+            .json(&body)
+            .send()
+            .await?;
+        assert_eq!(response.status(), 403);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn security_t27_http_parallel_rotation_and_unknown_legacy_metadata_are_closed()
+-> Result<(), AppError> {
+    let (_pg, addr, api, manager, db_url) = start().await?;
+    let (client, old, _) =
+        seed_and_mint(&db_url, &addr, &api, &manager, "cobotsrv", "parallel").await;
+    let id = old["id"].as_i64().unwrap();
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(8));
+    let mut jobs = Vec::new();
+    for _ in 0..8 {
+        let (client, manager, barrier) = (client.clone(), manager.clone(), barrier.clone());
+        let url = format!("http://{addr}{api}/oidc/mcp-tokens/{id}/refresh");
+        jobs.push(tokio::spawn(async move {
+            barrier.wait().await;
+            client
+                .post(url)
+                .bearer_auth(manager)
+                .json(&json!({}))
+                .send()
+                .await
+                .unwrap()
+        }));
+    }
+    let mut success = 0;
+    for job in jobs {
+        let response = job.await.unwrap();
+        if response.status() == 200 {
+            success += 1;
+        } else {
+            assert_eq!(response.status(), 409);
+        }
+    }
+    assert_eq!(success, 1);
+    let db = Database::connect(db_url).await?;
+    db.execute_raw(Statement::from_string(DbBackend::Postgres,"INSERT INTO mcp_token (user_id,name,jti,aud,created_at,expires_at,revoked) VALUES (1,'legacy','not-registered','cobotsrv',NOW(),NOW()+INTERVAL '1 day',FALSE)".to_owned())).await?;
+    let row = db
+        .query_one_raw(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT id FROM mcp_token WHERE jti='not-registered'".to_owned(),
+        ))
+        .await?
+        .unwrap();
+    let legacy: i32 = row.try_get("", "id")?;
+    for (method, path) in [
+        ("POST", format!("/oidc/mcp-tokens/{legacy}/refresh")),
+        ("DELETE", format!("/oidc/mcp-tokens/{legacy}")),
+    ] {
+        let response = client
+            .request(method.parse().unwrap(), format!("http://{addr}{api}{path}"))
+            .bearer_auth(&manager)
+            .json(&json!({}))
+            .send()
+            .await?;
+        assert_eq!(response.status(), 403);
+    }
+    let list: Vec<Value> = client
+        .get(format!("http://{addr}{api}/oidc/mcp-tokens"))
+        .bearer_auth(&manager)
+        .send()
+        .await?
+        .json()
+        .await?;
+    assert_eq!(list.len(), 1);
+    assert!(
+        list.iter()
+            .all(|row| row.get("access_token").is_none() && row["name"] != "legacy")
+    );
     Ok(())
 }

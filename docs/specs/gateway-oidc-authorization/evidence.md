@@ -324,3 +324,65 @@ git diff --check
 - 前端尚未适配当前CSRF、刷新及退出确认协议，仍待T67及后续链路任务。生产clock monitor/startup仍待T70/T71，普通serve没有注入真实监控时失败关闭。全workspace/all-features（含OpenAPI）、历史auth文档8失败/1 ignored、故障矩阵、跨服务十秒撤权和完整checklist仍待T79/T80等任务，不勾选完整链路验收或宣称全部漏洞已修复。
 - 核心撤销、主库串行约束、严格本地认证、CSRF与事务测试提交为 `5b45bbca4d6406d9297b3f0943e979378bb4f618`（`feat(auth): add scoped registry revocation and CSRF evidence`）。为保持该提交可独立组装，旧revoke_session_refresh删除与其旧调用方清理放入第二组。实际路由、Cookie/用户服务迁移、HTTP测试及本轮文档作为第二组本地提交，身份以本分支git log为准。
 - 核心提交后宿主自动触发神医分析，12个文件回传均没有具体display/finds/vulnerability内容；该回传不证明安全或完整分析已结束，没有作为验收证据，也没有额外主动扫描或上传。
+
+## 2026-11-08：T26 MCP 新建与 T27 原子轮换
+
+四份设计已批准，沿用mew-spec和rust-dev-workflow继续，不重新审批。工作目录为 `/Users/xionghaoyi.binhy/BinhyPC/cobot-for`，分支 `codex/gateway-oidc-authorization`；开始时工作区干净，保留T21–T25本地提交，显式暂存本任务文件。当前完成27/80，下一项T28，T34仍部分完成。Cargo.toml/Cargo.lock没有修改，没有push、部署或真实设备操作。
+
+### 失败测试先行与修正过程
+
+- typed资源与权限上界交集先运行2项auth单元测试：`0 passed; 2 failed; 48 filtered out`（`/tmp/cobot-t26-bounds-red.log`）；实现后同2项通过（`/tmp/cobot-t26-bounds-green.log`）。覆盖Application/Gateway/Device/Exact更窄交集、应用/kind/网关不匹配、不同operation及空上界。
+- T26新建先运行4项事务/并发测试，桩返回Forbidden：`0 passed; 4 failed; 118 filtered out`（`/tmp/cobot-t26-red-corrected.log`）。覆盖合法管理新建/独立根、旧目标上界/deny/MCP管理身份拒绝、签名/提交/继承预算回滚及20根并发配额。早期夹具按不存在的英文角色名查询失败不作为行为失败证据；改用既有role_id=3后取得上述真实失败。
+- T27轮换先运行3项事务/并发测试，桩返回Forbidden：`0 passed; 3 failed; 122 filtered out`（`/tmp/cobot-t27-red.log`）。覆盖稳定根及旧上界、显式委托撤销、并发一次替代与签名/提交失败回滚。
+- 原9项MCP HTTP测试全部保留并适配健康时钟、真实RSA、登记UserSession及typed目标权限。Config::default本地TTL为0，夹具显式设access=300秒/refresh=3600秒；修正夹具后的旧入口仍出现新token缺token_use：`8 passed; 1 failed; 116 filtered out`（`/tmp/cobot-t26-http-red.log`），随后迁移实际管理入口。
+- 新增2项T26严格HTTP失败测试：旧RSA凭据新建返回200而预期401、Cookie无CSRF返回200而预期403，`0 passed; 2 failed; 126 filtered out`（`/tmp/cobot-t26-http-strict-red.log`）。新增T27并发HTTP失败测试：8路旧入口轮换全部200，success=8而预期1，`0 passed; 1 failed; 127 filtered out`（`/tmp/cobot-t27-http-red.log`）。接入统一生命周期后通过，另检查未知legacy metadata不参与列表或轮换。
+- 首轮MCP轮换实现试图写consumed_at/replacement_jti，触发现存schema只允许refresh使用这些历史字段的约束。改用access行条件设置revoked_at作为一次消费，不修改schema或放宽refresh重放历史规则。
+- 补充旧一致快照与应用撤销竞争、管理URI权限/当前目标权限变化、重叠deny及非法元数据边界。非法deny operation先真实失败：签发成功而预期Forbidden，`0 passed; 1 failed; 130 filtered out`（`/tmp/cobot-t26-deny-red.log`）；实现目标应用deny-all后通过。最后增强元数据引用的grant issuer/subject/application及无session/family/parent校验，随后重新运行全部专项、单元、集成和Clippy。
+
+### 实现及证明范围
+
+- `CredentialBounds::intersection`只保留同operation且typed资源相交的更窄范围。新cobotusr UserSession除管理URI上界外携带当前cobotsrv结构化权限上界，refresh继续保留签发旧上界。新建取管理旧上界∩当前目标权限；轮换再∩旧MCP上界，角色或资源扩权不扩大旧凭据。
+- 同一主库一致快照读取用户、角色、权限及显式deny。全部重叠deny优先；v1上界不能表示allow减deny，故剔除整个重叠allow selector，避免删deny后扩大既有凭据。deny selector非法时剔除对应operation所有allow；deny operation非法时目标应用deny-all。缺应用、旧glob、未登记操作或必要资源事实不成为授权。新建/轮换交集必须仍允许mcp:access作用于目标Application。
+- `service/security/mcp.rs`只接受当前登记的UserSession，管理aud/application固定cobotusr，目标固定已批准的cobotsrv。列表/新建/重命名/删除/轮换逐一检查具体管理URI、拒绝优先、管理旧上界及本人所有权；MCP或业务凭据不能充当管理凭据。没有超级管理员绕过deny。
+- 新MCP claims使用RS256、at+jwt、User/McpAccess及完整registry登记；创建独立grant_kind=mcp，没有session/family/revocation_parent。minted_by记录当前管理credential，仅审计。签名、grant、registry及mcp_token元数据同一REPEATABLE READ / READ WRITE事务，提交后才返回秘密；签名、预算或提交失败不留活动根、凭据或元数据。
+- 新根登记复用应用撤销/踢出的用户行写屏障；旧撤销前签发快照不能在撤销提交后创建活动MCP根。配额按活动registry的不同MCP grant计数，最多20根，兼容表不作为配额或安全活动事实。并发用例验证不超额，旧快照用例验证撤销后无新活动根。
+- 轮换锁定旧grant/credential，同事务以条件UPDATE旧access.revoked_at消费，撤销旧凭据及显式revocation_parent_jti后代，登记同grant新jti并提交。替代凭据没有旧jti撤销父，撤销旧凭据不连带撤销替代；当前会话退出保留独立MCP，应用根撤销仍终止对应MCP。并发事务及8路HTTP均只一个替代成功；回滚保留旧活动凭据且不留下替代。
+- 每个MCP生命周期方法从manager.budget().child(caller_budget.remaining())继承原SecurityBudget，签名等待及主库连接/语句/锁等待受同一原2秒预算约束，没有重新计时或副本/缓存回退；提交前仍检查管理身份新鲜期。
+- mcp_token只提供标签和时间。列表复核registry活动状态，重命名/删除核对本人及登记根；未知legacy行不会自动升级成可信credential。统一撤销事务同步兼容表revoked标记。访问令牌值不持久化，成功签发/轮换只在响应中返回一次。
+- `route/mcp.rs`从旧auth中间件组迁入get_revocation_routes中的独立管理组，使用browser::authenticate_manager本地严格RSA及主库登记，无自身JWKS HTTP递归。Cookie参与时校验精确受信Origin和真实签名CSRF；成功响应Cache-Control:no-store。保留默认aud=cobotsrv、名称/TTL及一次返回秘密的响应格式，移除AppState::mint_access_token和service/mcp_token旧CRUD/独立签发辅助。
+- 仅修正新插入mcp:access种子为action=mcp:access、typed Application selector；已有管理员或legacy权限条目未修改或升级。旧上界测试在登录前显式恢复legacy glob，验证不能借当前扩权创建MCP。T34完整操作目录、路由覆盖和应用种子/迁移仍未完成。
+
+### 最终验证记录
+
+以下命令均实际执行并取得退出0，最后两处生产修正后重新运行。新增13项integration（T26 8项、T27 5项）及2项auth单元；原9项MCP HTTP测试和历史集成用例没有删除或ignore：
+
+```text
+cargo test --test mod security_t26 --locked -- --test-threads=4
+8 passed; 0 failed; 0 ignored; 123 filtered out
+
+cargo test --test mod security_t27 --locked -- --test-threads=4
+5 passed; 0 failed; 0 ignored; 126 filtered out
+
+cargo test --test mod --locked -- --test-threads=4
+131 passed; 0 failed; 0 ignored; 0 filtered out
+
+cargo test -p auth -p cobotusr --lib --locked
+auth: 50 passed; 0 failed; 0 ignored
+cobotusr: 24 passed; 0 failed; 0 ignored
+
+cargo clippy -p auth -p cobotusr --lib --tests --locked -- -D warnings
+cargo clippy --test mod --locked -- -D warnings
+cargo fmt --all -- --check
+git diff --check
+```
+
+最终日志为 `/tmp/cobot-t26-targeted-final.log`、`/tmp/cobot-t27-targeted-final.log`、`/tmp/cobot-t26-t27-regression-final.log`、`/tmp/cobot-t26-t27-units-final.log`、`/tmp/cobot-t26-t27-clippy-libs-final.log`、`/tmp/cobot-t26-t27-clippy-mod-final.log`。本节持久记录命令/结果，临时日志不是唯一证据。沿用rustc/cargo 1.99.1及隔离Docker PostgreSQL 18-alpine；proc-macro-error2 future-incompat提示仍存在。
+
+另实际尝试 `cargo clippy -p auth -p cobotusr --lib --all-features --locked -- -D warnings`，退出101：utoipa-swagger-ui构建下载v5.17.14.zip后 `InvalidArchive("Could not find EOCD")`（`/tmp/cobot-t26-t27-clippy.log`）。该依赖下载阻塞不记为通过；本轮未修改Cargo依赖或扩展范围修旧OpenAPI。
+
+### 未完成边界与分组提交
+
+- 当前完成27/80，下一项T28机器认证与引导，T34仍部分完成。旧OIDC introspect及MCP服务introspect仍待迁移；后者目前只返回兼容denylist，未知jti的revoked=false不证明活动。普通API当前状态/管理组装仍待T32，本轮不证明所有业务入口已拒绝旧access。
+- 前端管理PKCE、CSRF/刷新/退出/MCP页面适配仍待T66–T68；生产clock monitor/startup仍待T70/T71。普通serve无真实监控时新的安全/MCP管理入口失败关闭。完整workspace/all-features、历史auth文档8失败/1 ignored、前端、故障矩阵、跨服务十秒撤权与checklist仍待后续T79/T80等任务，不能宣称完整链路或全部漏洞修复。
+- 核心typed交集、MCP生命周期/主库仓储、撤销镜像、新插入种子与事务测试提交为 `5eca8fba15ac247f768046333011e22c70697159`（`feat(auth): add registered MCP issuance and atomic rotation`）。实际MCP HTTP接线、旧签发/CRUD清理、HTTP回归及本节进度/交接作为第二组本地提交，身份以本分支git log为准；只显式暂存本任务文件，没有push、部署或真实设备操作。
+- 核心提交后宿主自动触发神医最近commit分析，12个文件回传均没有具体display/finds/vulnerability内容。该回传不证明安全或完整云端分析结束，不作为验收证据；本轮没有额外主动扫描或上传。

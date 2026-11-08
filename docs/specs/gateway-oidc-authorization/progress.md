@@ -2,7 +2,7 @@
 
 四份文档已获批准；当前按 task.md 执行。
 
-当前完成25/80；下一任务为T26，再推进T27。接续开发请先读[交接说明与开场提示词](./handoff.md)，验证记录见[evidence.md](./evidence.md)。
+当前完成27/80；下一任务为T28，T34仍部分完成。接续开发请先读[交接说明与开场提示词](./handoff.md)，验证记录见[evidence.md](./evidence.md)。
 
 | 任务 | 状态 | 证据 |
 |---|---|---|
@@ -31,15 +31,15 @@
 | T23 | 完成 | 已消费摘要重放撤销对应族及派生凭据；过期祖先、错误客户端、提交失败和双实例竞争验证，见 evidence.md 2026-11-08 |
 | T24 | 完成 | 本地登录/注册同事务登记cobotusr UserSession及稳定根，刷新共用原子轮换/重放保护；5组事务/预算/并发及3组真实HTTP测试，见 evidence.md 2026-11-08 T24 |
 | T25 | 完成 | 明确撤销作用域、提交后回执、退出/踢出/consent及OIDC撤销迁移、绑定当前refresh的Origin/CSRF校验；9组事务/并发与9组真实HTTP测试，见 evidence.md 2026-11-08 T25；完整链路尚未验收 |
-| T26 | 未开始 | 尚未执行 |
-| T27 | 未开始 | 尚未执行 |
+| T26 | 完成 | 登记UserSession个人管理、独立MCP根、管理旧上界与当前目标权限交集、拒绝优先及20根并发配额；8项事务/HTTP专项，见 evidence.md 2026-11-08 T26/T27 |
+| T27 | 完成 | 同主库事务锁旧根/凭据并条件撤销消费，仅一次替代、稳定grant及旧上界、显式委托撤销和失败回滚；5项事务/HTTP专项，见 evidence.md 2026-11-08 T26/T27 |
 | T28 | 未开始 | 尚未执行 |
 | T29 | 未开始 | 尚未执行 |
 | T30 | 未开始 | 尚未执行 |
 | T31 | 未开始 | 尚未执行 |
 | T32 | 未开始 | 尚未执行 |
 | T33 | 未开始 | 尚未执行 |
-| T34 | 进行中 | T19默认拒绝所需的既有URI登记修复已完成；完整操作目录、路由覆盖及应用种子仍待执行 |
+| T34 | 进行中 | T19既有URI登记修复及T26新插入mcp:access的typed Application种子已完成；既有legacy条目迁移、完整操作目录、路由覆盖及应用种子仍待执行 |
 | T35 | 未开始 | 尚未执行 |
 | T36 | 未开始 | 尚未执行 |
 | T37 | 未开始 | 尚未执行 |
@@ -97,4 +97,6 @@ T25已将本地logout/kickout、consent删除和OIDC revoke/logout接入主库�
 
 Cookie参与的登录/注册/刷新/退出与管理撤销需精确受信Origin和签名CSRF证据；GET /api/v1/csrf提供启动/当前refresh绑定的证据，成功轮换返回新证据。GET /oidc/logout仅确认，POST校验证据、登记会话及redirect后提交，再清Cookie和跳转。前端适配仍待T67等任务。
 
-生产宿主必须注入真实时钟健康监控并登记OIDC客户端绑定。普通serve入口没有时钟监控时，新OIDC兑换/刷新、本地签发/刷新及本轮撤销入口失败关闭；不存在默认同步或HMAC access签发回退。普通API当前状态检查的完整接线仍待T32，旧OIDC introspect尚未迁移；当前撤销测试不证明全部入口已拒绝旧access。跨服务十秒撤权、checklist和完整链路仍未验收。T26/T27继续实现MCP新建与轮换，须复用稳定根及新根登记的事务串行约束。
+T26/T27已将MCP新建、轮换、列表、重命名和删除接入本地严格RSA与主库登记的个人管理生命周期，仅接受cobotusr UserSession。新建固定cobotsrv、独立grant，权限取管理旧上界与当前目标权限交集；轮换再与旧MCP上界相交，沿显式委托撤销旧凭据后代，替代凭据保留原grant且无旧jti撤销父。MCP访问凭据以条件设置revoked_at原子消费，consumed_at/replacement_jti仍专用于refresh历史。新根复用用户行写屏障，按活动registry grant限制20根。兼容mcp_token只作元数据及撤销镜像，不升级未知旧记录；新插入的mcp:access种子采用typed Application selector，既有legacy条目未自动升级。
+
+生产宿主必须注入真实时钟健康监控并登记OIDC客户端绑定。普通serve入口没有时钟监控时，新OIDC兑换/刷新、本地签发/刷新、撤销及MCP管理入口失败关闭；不存在默认同步或HMAC access签发回退。普通API当前状态检查的完整接线仍待T32，旧OIDC introspect及MCP服务denylist adapter尚未迁移；当前测试不证明全部入口已拒绝旧access。跨服务十秒撤权、checklist和完整链路仍未验收。下一项从T28机器认证与引导继续。

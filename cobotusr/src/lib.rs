@@ -559,34 +559,6 @@ impl AppState {
         self.config.oidc.mcp_token_max_ttl_days
     }
 
-    /// Mint an access token with an explicit TTL, `jti`, and pre-resolved
-    /// roles/permissions. Used for long-lived MCP access tokens
-    /// (`POST /api/v1/oidc/mcp-tokens`); the caller persists a revocable record keyed
-    /// by the same `jti` so the token can later be revoked.
-    pub fn mint_access_token(
-        &self,
-        sub: IdType,
-        aud: &str,
-        ttl_seconds: i64,
-        roles: Vec<String>,
-        permissions: Vec<String>,
-        jti: &str,
-    ) -> result::Result<String> {
-        let iss = self.issuer();
-        self.id_token_signer
-            .sign_access_token_with_jti(
-                &sub.to_string(),
-                &iss,
-                aud,
-                "",
-                ttl_seconds,
-                roles,
-                permissions,
-                jti,
-            )
-            .map_err(|e| crate::error::AppError::InternalServerError(anyhow::anyhow!(e)))
-    }
-
     /// Sign an access token for client_credentials grant (sub = client_id, no user).
     pub fn sign_access_token_for_client(
         &self,

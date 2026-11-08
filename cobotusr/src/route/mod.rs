@@ -29,7 +29,6 @@ pub fn get_auth_routes() -> Router<AppState> {
         .merge(oidc::get_auth_routes())
         .merge(oidc_admin::get_auth_routes())
         .merge(enforce::get_auth_routes())
-        .merge(mcp::get_auth_routes())
         .merge(application::get_auth_routes())
         .merge(permission::get_auth_routes())
         .merge(role_permission::get_auth_routes())
@@ -50,6 +49,7 @@ pub fn get_revocation_routes() -> Router<AppState> {
     Router::new()
         .merge(auth::get_revocation_routes())
         .merge(oidc::get_revocation_routes())
+        .merge(mcp::get_management_routes())
 }
 
 /// Service-to-service routes: JWT-verified, but deliberately WITHOUT the
