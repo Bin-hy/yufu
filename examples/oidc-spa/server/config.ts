@@ -7,6 +7,10 @@
 export interface ApiConfig {
   port: number
   issuer: string
+  /** The application's registered access audience (for example `urn:app:production`). */
+  audience: string
+  /** The SPA's OAuth client id, used to reject tokens minted for another client. */
+  clientId: string
   readerClientId: string
   readerClientSecret: string
   allowedOrigin: string
@@ -66,6 +70,8 @@ export function loadApiConfig(
   return {
     port,
     issuer: issuerUrl.toString().replace(/\/$/, ''),
+    audience: required(env, 'API_AUDIENCE'),
+    clientId: required(env, 'SPA_CLIENT_ID'),
     readerClientId: required(env, 'READER_CLIENT_ID'),
     readerClientSecret: required(env, 'READER_CLIENT_SECRET'),
     allowedOrigin: allowedOriginUrl.origin,

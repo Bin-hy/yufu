@@ -17,6 +17,8 @@ const publicEnv = {
 
 const apiEnv = {
   ISSUER: 'https://id.example.com',
+  API_AUDIENCE: 'urn:app:production',
+  SPA_CLIENT_ID: 'cobotrix-spa-example',
   READER_CLIENT_ID: 'cobotrix-spa-reader',
   READER_CLIENT_SECRET: 'reader-secret',
   ALLOWED_ORIGIN: 'https://spa.example.com',
@@ -76,12 +78,19 @@ describe('spa protected API configuration', () => {
 
     expect(config.readerClientId).toBe('cobotrix-spa-reader')
     expect(config.readerClientSecret).toBe('reader-secret')
+    expect(config.audience).toBe('urn:app:production')
+    expect(config.clientId).toBe('cobotrix-spa-example')
     expect(config.allowedOrigin).toBe('https://spa.example.com')
     expect(config.port).toBe(3001)
   })
 
   it('requires the reader credentials', () => {
-    for (const name of ['READER_CLIENT_ID', 'READER_CLIENT_SECRET']) {
+    for (const name of [
+      'API_AUDIENCE',
+      'SPA_CLIENT_ID',
+      'READER_CLIENT_ID',
+      'READER_CLIENT_SECRET',
+    ]) {
       const env: Record<string, string> = { ...apiEnv }
       delete env[name]
       expect(() => loadApiConfig(env), name).toThrow(new RegExp(`${name} is required`))
