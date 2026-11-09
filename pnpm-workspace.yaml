@@ -1,5 +1,8 @@
 packages:
   - "cobotweb/apps/cobotusr"
+  - "examples/*"
 allowBuilds:
   esbuild: true
   playwright-webkit: false
+minimumReleaseAgeExclude:
+  - jose@6.2.16

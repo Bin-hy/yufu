@@ -1,0 +1,29 @@
+{
+  "name": "@cobotrix/oidc-spa",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "tsx watch server/server.ts",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "start:api": "tsx server/server.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "cookie": "^1.0.2",
+    "express": "^5.3.0",
+    "jose": "^6.2.16",
+    "oidc-client-ts": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.7.1",
+    "tsx": "^4.20.6",
+    "typescript": "~5.8.3",
+    "vite": "^7.1.7",
+    "vitest": "^5.1.0"
+  }
+}
