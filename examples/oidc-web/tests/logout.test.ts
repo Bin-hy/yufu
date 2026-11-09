@@ -269,7 +269,7 @@ describe('local write protection', () => {
         expectedClientId: CLIENT_ID,
         now: 1_000,
       }),
-    ).resolves.toBeUndefined()
+    ).resolves.toMatchObject({ allowed: true, subject: 'user-1' })
   })
 
   it('sends reader credentials only as Basic auth to the introspection endpoint', async () => {
@@ -375,7 +375,7 @@ describe('web example HTTP surface', () => {
     const second = await post('/oidc/backchannel-logout', { logout_token: token })
 
     expect(first.status).toBe(200)
-    expect(await first.json()).toEqual({ status: 'ok', removed: 1 })
+    expect(await first.json()).toEqual({ status: 'ok', removed: 1, cached: 0 })
     expect(second.status).toBe(200)
     expect(await second.json()).toEqual({ status: 'duplicate' })
   })

@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 import type { WebConfig } from './config.js'
 import type { SessionRecord } from './session.js'
@@ -63,6 +63,7 @@ export type OperationDenial =
   | 'wrong_subject'
   | 'expired_token'
   | 'introspection_unavailable'
+  | 'stale_authorization'
 
 export class OperationDenied extends Error {
   constructor(readonly reason: OperationDenial) {
@@ -76,6 +77,121 @@ export interface OperationAuthorizationInput {
   introspector: Introspector
   expectedClientId: string
   now: number
+  cache?: AuthorizationCache
+  forwarded?: CacheEntry
+}
+
+export interface CacheEntry {
+  allowed: boolean
+  subject: string
+  sid?: string
+  clientId?: string
+  /** Monotonic instant at which the introspection request started. */
+  verifiedAt: number
+  /** Wall-clock token expiry in epoch milliseconds. */
+  tokenExpiresAt: number
+}
+
+export interface AuthorizationCacheOptions {
+  /** Fresh window for locally cached positive results (default 2 s). */
+  positiveTtlMs?: number
+  /** Absolute age a result may reach, including forwarded results (default 5 s). */
+  maxAgeMs?: number
+  monotonic?: () => number
+  wallClock?: () => number
+}
+
+export class StaleAuthorization extends Error {
+  constructor(message = 'authorization is stale') {
+    super(message)
+    this.name = 'StaleAuthorization'
+  }
+}
+
+/**
+ * Positive-only authorization cache.
+ *
+ * Age is measured from the start of the introspection call on a monotonic
+ * clock, so a slow introspection cannot buy extra freshness. Results older
+ * than the hard cap are never stored, and a result forwarded from another
+ * layer keeps its original verification instant instead of restarting its TTL.
+ */
+export class AuthorizationCache {
+  #entries = new Map<string, CacheEntry>()
+  readonly #positiveTtlMs: number
+  readonly #maxAgeMs: number
+  readonly #monotonic: () => number
+  readonly #wallClock: () => number
+
+  constructor(options: AuthorizationCacheOptions = {}) {
+    this.#positiveTtlMs = options.positiveTtlMs ?? 2_000
+    this.#maxAgeMs = options.maxAgeMs ?? 5_000
+    this.#monotonic = options.monotonic ?? (() => performance.now())
+    this.#wallClock = options.wallClock ?? Date.now
+  }
+
+  static key(token: string): string {
+    return createHash('sha256').update(token).digest('base64url')
+  }
+
+  #usable(entry: CacheEntry, maxAgeMs: number): boolean {
+    const age = this.#monotonic() - entry.verifiedAt
+    if (!Number.isFinite(age) || age < 0 || age > maxAgeMs) return false
+    return entry.tokenExpiresAt > this.#wallClock()
+  }
+
+  /** A locally cached entry is only served inside the positive window. */
+  get(key: string): CacheEntry | undefined {
+    const entry = this.#entries.get(key)
+    if (!entry) return undefined
+    if (!this.#usable(entry, this.#positiveTtlMs)) {
+      this.#entries.delete(key)
+      return undefined
+    }
+    return entry
+  }
+
+  /** A result forwarded between layers may be used up to the hard cap. */
+  acceptForwarded(entry: CacheEntry): boolean {
+    return this.#usable(entry, this.#maxAgeMs)
+  }
+
+  /** Over-age or already-expired results are not cached. */
+  put(key: string, entry: CacheEntry): boolean {
+    if (!this.#usable(entry, this.#maxAgeMs)) return false
+    this.#entries.set(key, entry)
+    return true
+  }
+
+  /** Re-checked immediately before the protected side effect. */
+  assertFresh(entry: CacheEntry): void {
+    if (!this.#usable(entry, this.#maxAgeMs)) throw new StaleAuthorization()
+  }
+
+  clearForLogout(sid?: string, subject?: string): number {
+    let removed = 0
+    for (const [key, entry] of this.#entries) {
+      if ((sid && entry.sid === sid) || (subject && entry.subject === subject)) {
+        this.#entries.delete(key)
+        removed += 1
+      }
+    }
+    return removed
+  }
+
+  get size(): number {
+    return this.#entries.size
+  }
+
+  /** Monotonic instant used to age results. */
+  now(): number {
+    return this.#monotonic()
+  }
+
+  /** Wall-clock instant used to compare token expiry. */
+  wallNow(): number {
+    return this.#wallClock()
+  }
 }
 
 /**
@@ -85,12 +201,29 @@ export interface OperationAuthorizationInput {
  */
 export async function authorizeOnlineOperation(
   input: OperationAuthorizationInput,
-): Promise<void> {
+): Promise<CacheEntry> {
   if (!input.session) throw new OperationDenied('unauthenticated')
 
+  const token = input.session.tokens.accessToken
+  const cache = input.cache
+
+  if (cache) {
+    if (input.forwarded && cache.acceptForwarded(input.forwarded)) {
+      if (
+        input.forwarded.subject === input.session.profile.subject &&
+        input.forwarded.clientId === input.expectedClientId
+      ) {
+        return input.forwarded
+      }
+    }
+    const cached = cache.get(AuthorizationCache.key(token))
+    if (cached) return cached
+  }
+
+  const verifiedAt = cache ? cache.now() : input.now
   let result: IntrospectionResult
   try {
-    result = await input.introspector.introspect(input.session.tokens.accessToken)
+    result = await input.introspector.introspect(token)
   } catch {
     throw new OperationDenied('introspection_unavailable')
   }
@@ -101,6 +234,22 @@ export async function authorizeOnlineOperation(
   if (result.exp !== undefined && result.exp * 1000 <= input.now) {
     throw new OperationDenied('expired_token')
   }
+
+  const entry: CacheEntry = {
+    allowed: true,
+    subject: input.session.profile.subject,
+    sid: input.session.sid,
+    clientId: input.expectedClientId,
+    verifiedAt,
+    tokenExpiresAt: result.exp !== undefined ? result.exp * 1000 : input.session.tokens.expiresAt,
+  }
+  if (cache) {
+    if (!cache.put(AuthorizationCache.key(token), entry)) {
+      throw new OperationDenied('stale_authorization')
+    }
+    cache.assertFresh(entry)
+  }
+  return entry
 }
 
 /** HMAC token bound to the local session id (double-submit CSRF defence). */

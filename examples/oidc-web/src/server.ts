@@ -19,11 +19,13 @@ import {
   type OidcClient,
 } from './oidc.js'
 import {
+  AuthorizationCache,
   authorizeOnlineOperation,
   createIntrospector,
   csrfToken,
   OperationDenied,
   originAllowed,
+  StaleAuthorization,
   verifyCsrfToken,
   type Introspector,
 } from './protection.js'
@@ -47,6 +49,7 @@ export interface WebAppDependencies {
   profiles: ProfileDirectory
   pending: PendingStore
   introspector: Introspector
+  cache?: AuthorizationCache
   verifyLogoutToken: (token: string) => Promise<VerifiedLogoutToken>
   replayGuard: LogoutReplayGuard
   now?: () => number
@@ -87,6 +90,7 @@ function renderHome(session: SessionRecord | undefined, csrf: string): string {
 
 export function createApp(deps: WebAppDependencies): express.Express {
   const { config, oidc, sessions, profiles, pending, introspector, replayGuard } = deps
+  const cache = deps.cache ?? new AuthorizationCache()
   const now = deps.now ?? Date.now
   const secure = config.issuer.startsWith('https:')
 
@@ -216,7 +220,8 @@ export function createApp(deps: WebAppDependencies): express.Express {
         return
       }
       const removed = applyBackchannelLogout(sessions, verified)
-      response.status(200).json({ status: 'ok', removed })
+      const cached = cache.clearForLogout(verified.sid, verified.subject)
+      response.status(200).json({ status: 'ok', removed, cached })
     } catch {
       response.status(400).json({ error: 'invalid_logout_token' })
     }
@@ -242,10 +247,15 @@ export function createApp(deps: WebAppDependencies): express.Express {
         introspector,
         expectedClientId: config.clientId,
         now: now(),
+        cache,
       })
     } catch (error) {
       if (error instanceof OperationDenied) {
         response.status(403).json({ error: error.reason })
+        return
+      }
+      if (error instanceof StaleAuthorization) {
+        response.status(403).json({ error: 'stale_authorization' })
         return
       }
       throw error
@@ -277,6 +287,7 @@ function main(): void {
     profiles: new ProfileDirectory(),
     pending: new PendingStore(),
     introspector: createIntrospector(config),
+    cache: new AuthorizationCache(),
     verifyLogoutToken: createLogoutTokenVerifier({
       issuer: config.issuer,
       clientId: config.clientId,
