@@ -9,7 +9,10 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
 use rand::{RngCore, rngs::OsRng};
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set,
+};
 use sha2::{Digest, Sha256};
 
 pub struct OidcService;
@@ -25,11 +28,8 @@ use auth::security::{budget::SecurityBudget, error::SecurityError};
 use std::sync::Arc;
 
 impl OidcService {
-    fn session_lifecycle(
-        state: &AppState,
-    ) -> Result<(CredentialLifecycle, SecurityBudget, SessionTokenConfig)> {
+    fn session_lifecycle(state: &AppState) -> Result<(CredentialLifecycle, SessionTokenConfig)> {
         let clock = state.security_clock()?;
-        let budget = SecurityBudget::new(clock.clone())?;
         let lifecycle = CredentialLifecycle::new(
             Arc::new(PgSecurityRepository::new(
                 state.database.connection.clone(),
@@ -44,16 +44,25 @@ impl OidcService {
             refresh_ttl_seconds: u64::try_from(state.oidc_refresh_token_exp())
                 .map_err(|_| SecurityError::DependencyUnavailable)?,
         };
-        Ok((lifecycle, budget, config))
+        Ok((lifecycle, config))
     }
 
     pub async fn exchange_authorization_code(
         state: &AppState,
         request: CodeExchangeRequest<'_>,
     ) -> Result<SessionTokenSet> {
-        let (lifecycle, budget, config) = Self::session_lifecycle(state)?;
+        let budget = SecurityBudget::new(state.security_clock()?)?;
+        Self::exchange_authorization_code_with_budget(state, request, &budget).await
+    }
+
+    pub async fn exchange_authorization_code_with_budget(
+        state: &AppState,
+        request: CodeExchangeRequest<'_>,
+        budget: &SecurityBudget,
+    ) -> Result<SessionTokenSet> {
+        let (lifecycle, config) = Self::session_lifecycle(state)?;
         lifecycle
-            .consume_authorization_code(request, &config, state.id_token_signer().as_ref(), &budget)
+            .consume_authorization_code(request, &config, state.id_token_signer().as_ref(), budget)
             .await
             .map_err(|error| match error {
                 SecurityError::InvalidCredential => AppError::BadRequest(
@@ -67,9 +76,18 @@ impl OidcService {
         state: &AppState,
         request: RefreshRequest<'_>,
     ) -> Result<SessionTokenSet> {
-        let (lifecycle, budget, config) = Self::session_lifecycle(state)?;
+        let budget = SecurityBudget::new(state.security_clock()?)?;
+        Self::rotate_session_refresh_with_budget(state, request, &budget).await
+    }
+
+    pub async fn rotate_session_refresh_with_budget(
+        state: &AppState,
+        request: RefreshRequest<'_>,
+        budget: &SecurityBudget,
+    ) -> Result<SessionTokenSet> {
+        let (lifecycle, config) = Self::session_lifecycle(state)?;
         Ok(lifecycle
-            .rotate_refresh(request, &config, state.id_token_signer().as_ref(), &budget)
+            .rotate_refresh(request, &config, state.id_token_signer().as_ref(), budget)
             .await?)
     }
 }
@@ -191,6 +209,7 @@ impl OidcService {
             grant_types: Set(grant_types.join(",")),
             create_time: Set(now),
             update_time: Set(now),
+            ..Default::default()
         };
         let inserted = am.insert(db).await.map_err(AppError::from)?;
         Ok((inserted, client_secret))
@@ -209,7 +228,7 @@ impl OidcService {
     }
 
     pub async fn get_client_by_id_for_owner(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         id: i32,
         user_id: IdType,
     ) -> Result<oauth_client::Model> {
@@ -220,11 +239,15 @@ impl OidcService {
 
     /// Regenerate client_secret. Returns (updated Model, plaintext_secret).
     pub async fn regenerate_client_secret(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         id: i32,
         user_id: IdType,
     ) -> Result<(oauth_client::Model, String)> {
         let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
+        if client.management_state != "legacy_unmanaged" {
+            return Err(AppError::BadRequest("请使用受控应用治理接口".into()));
+        }
+
         if client.public_client {
             return Err(AppError::BadRequest(
                 "public clients do not have a client_secret to regenerate".to_string(),
@@ -240,14 +263,22 @@ impl OidcService {
         let mut am: oauth_client::ActiveModel = client.into();
         am.client_secret_hash = Set(secret_hash);
         am.update_time = Set(Utc::now().naive_utc());
-        let updated = am.update(db).await?;
+        let updated = oauth_client::Entity::update_many()
+            .set(am)
+            .filter(oauth_client::Column::Id.eq(id))
+            .filter(oauth_client::Column::UserId.eq(user_id))
+            .filter(oauth_client::Column::ManagementState.eq("legacy_unmanaged"))
+            .exec_with_returning(db)
+            .await?
+            .pop()
+            .ok_or_else(|| AppError::BadRequest("请使用受控应用治理接口".into()))?;
         Ok((updated, new_secret))
     }
 
     /// Update an existing OAuth client's mutable fields.
     #[allow(clippy::too_many_arguments)]
     pub async fn update_client(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         id: i32,
         user_id: IdType,
         name: Option<String>,
@@ -257,6 +288,10 @@ impl OidcService {
         public_client: Option<bool>,
     ) -> Result<oauth_client::Model> {
         let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
+        if client.management_state != "legacy_unmanaged" {
+            return Err(AppError::BadRequest("请使用受控应用治理接口".into()));
+        }
+
         let was_public = client.public_client;
         if public_client == Some(false) && was_public {
             return Err(AppError::BadRequest(
@@ -301,15 +336,34 @@ impl OidcService {
             am.client_secret_hash = Set(String::new());
         }
         am.update_time = Set(Utc::now().naive_utc());
-        let updated = am.update(db).await?;
+        let updated = oauth_client::Entity::update_many()
+            .set(am)
+            .filter(oauth_client::Column::Id.eq(id))
+            .filter(oauth_client::Column::UserId.eq(user_id))
+            .filter(oauth_client::Column::ManagementState.eq("legacy_unmanaged"))
+            .exec_with_returning(db)
+            .await?
+            .pop()
+            .ok_or_else(|| AppError::BadRequest("请使用受控应用治理接口".into()))?;
         Ok(updated)
     }
 
     /// Delete an OAuth client by id (owner only).
-    pub async fn delete_client(db: &DatabaseConnection, id: i32, user_id: IdType) -> Result<()> {
-        let client = Self::get_client_by_id_for_owner(db, id, user_id).await?;
-        let am: oauth_client::ActiveModel = client.into();
-        am.delete(db).await?;
+    pub async fn delete_client(
+        db: &impl sea_orm::ConnectionTrait,
+        id: i32,
+        user_id: IdType,
+    ) -> Result<()> {
+        Self::get_client_by_id_for_owner(db, id, user_id).await?;
+        let deleted = oauth_client::Entity::delete_many()
+            .filter(oauth_client::Column::Id.eq(id))
+            .filter(oauth_client::Column::UserId.eq(user_id))
+            .filter(oauth_client::Column::ManagementState.eq("legacy_unmanaged"))
+            .exec(db)
+            .await?;
+        if deleted.rows_affected != 1 {
+            return Err(AppError::BadRequest("请使用受控应用治理接口".into()));
+        }
         Ok(())
     }
 }
@@ -319,7 +373,7 @@ impl OidcService {
 // ---------------------------------------------------------------------------
 impl OidcService {
     pub async fn add_scope(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         name: String,
         description: Option<String>,
     ) -> Result<oauth_scope::Model> {
@@ -387,9 +441,10 @@ pub struct CreateAuthCodeParams {
 }
 
 impl OidcService {
-    /// Generate and persist an authorization code (5 min TTL).
-    pub async fn create_authorization_code(
-        db: &DatabaseConnection,
+    /// New legacy codes store only a digest and expire within 60 seconds.
+    /// Managed codes also have the typed digest and full flow/RP association.
+    pub async fn create_authorization_code<C: ConnectionTrait>(
+        db: &C,
         params: CreateAuthCodeParams,
     ) -> Result<String> {
         let mut buf = [0u8; 32];
@@ -399,7 +454,10 @@ impl OidcService {
         let now = Utc::now().naive_utc();
         let am = oauth_authorization_code::ActiveModel {
             id: sea_orm::ActiveValue::NotSet,
-            code: Set(code.clone()),
+            code: Set(format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(code.as_bytes()))
+            )),
             user_id: Set(params.user_id),
             client_id: Set(params.client_id),
             redirect_uri: Set(params.redirect_uri),
@@ -409,8 +467,9 @@ impl OidcService {
             state: Set(params.state),
             nonce: Set(params.nonce),
             used: Set(false),
-            expires_at: Set(now + Duration::minutes(5)),
+            expires_at: Set(now + Duration::seconds(60)),
             create_time: Set(now),
+            ..Default::default()
         };
         am.insert(db).await?;
         Ok(code)
@@ -476,8 +535,8 @@ impl OidcService {
     }
 
     /// Save or update user consent for a client + scopes.
-    pub async fn save_consent(
-        db: &DatabaseConnection,
+    pub async fn save_consent<C: ConnectionTrait>(
+        db: &C,
         user_id: IdType,
         client_id: &str,
         scope: &str,
@@ -511,6 +570,7 @@ impl OidcService {
                 scope: Set(scope.to_string()),
                 create_time: Set(now),
                 update_time: Set(now),
+                ..Default::default()
             };
             let inserted = am.insert(db).await?;
             Ok(inserted)

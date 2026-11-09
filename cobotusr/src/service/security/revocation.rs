@@ -217,10 +217,23 @@ impl CredentialLifecycle {
                 .await?;
             }
             Action::Managed { context, scope } => {
+                txn.prepare_management_mutation(context.principal(), None)
+                    .await?;
                 self.check_manager(txn.as_mut(), context).await?;
                 let claims = context.verified().claims();
                 let target = match scope {
                     RevocationScope::Credential(reference) => {
+                        let discovered = txn
+                            .credential(reference)
+                            .await?
+                            .ok_or(SecurityError::Forbidden)?;
+                        let row = &discovered.current.credential;
+                        if row.issuer != context.principal().issuer()
+                            || row.principal_kind != "user"
+                            || row.subject != context.principal().subject()
+                        {
+                            return Err(SecurityError::Forbidden);
+                        }
                         let snapshot = txn
                             .lock_credential(reference)
                             .await?
@@ -255,11 +268,13 @@ impl CredentialLifecycle {
                     .await?;
             }
             Action::Kickout { context, subject } => {
+                let principal =
+                    PrincipalRef::new(context.principal().issuer(), PrincipalKind::User, *subject)?;
+                txn.prepare_management_mutation(context.principal(), Some(&principal))
+                    .await?;
                 self.check_manager(txn.as_mut(), context).await?;
                 self.authorize_revocation_uri(txn.as_mut(), context, "POST", "/kickout")
                     .await?;
-                let principal =
-                    PrincipalRef::new(context.principal().issuer(), PrincipalKind::User, *subject)?;
                 txn.revoke_scope(
                     &principal,
                     &StoredRevocationScope::UserSessions,
@@ -268,6 +283,8 @@ impl CredentialLifecycle {
                 .await?;
             }
             Action::Consent { context, id } => {
+                txn.prepare_management_mutation(context.principal(), None)
+                    .await?;
                 self.check_manager(txn.as_mut(), context).await?;
                 self.authorize_revocation_uri(
                     txn.as_mut(),

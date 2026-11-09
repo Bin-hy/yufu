@@ -2,8 +2,7 @@ use crate::IdType;
 use crate::entity::{permission, role};
 use sea_orm::entity::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DeleteResult, EntityTrait, QueryFilter, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, QueryFilter, Set, TransactionSession,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +24,7 @@ pub struct Model {
 
 impl Entity {
     pub async fn list_permission_ids_by_role(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
     ) -> Result<Vec<IdType>, DbErr> {
         Ok(Self::find()
@@ -38,7 +37,7 @@ impl Entity {
     }
 
     pub async fn add_one(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
         permission_id: IdType,
     ) -> Result<Model, DbErr> {
@@ -52,7 +51,7 @@ impl Entity {
     }
 
     pub async fn add_batch_tx(
-        db: &DatabaseConnection,
+        db: &(impl sea_orm::ConnectionTrait + sea_orm::TransactionTrait),
         role_id: IdType,
         permission_ids: Vec<IdType>,
     ) -> Result<Vec<Model>, DbErr> {
@@ -73,7 +72,7 @@ impl Entity {
     }
 
     pub async fn delete_pair(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
         permission_id: IdType,
     ) -> Result<DeleteResult, DbErr> {
@@ -85,7 +84,7 @@ impl Entity {
     }
 
     pub async fn delete_batch(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
         permission_ids: Vec<IdType>,
     ) -> Result<DeleteResult, DbErr> {
@@ -97,7 +96,7 @@ impl Entity {
     }
 
     pub async fn paginate_permissions_by_role(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
         page_size: u64,
         page_number: u64,

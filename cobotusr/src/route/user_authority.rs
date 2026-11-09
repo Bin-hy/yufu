@@ -5,6 +5,7 @@ use crate::entity::user_authority::{
 use crate::entity::{PageSelectQuery, PageSelectQueryResult, user_authority};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
+use crate::service::identity::legacy_governance::{MutationScope, mutate};
 use axum::extract::{Query, State};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
@@ -34,32 +35,48 @@ pub fn get_auth_routes() -> Router<AppState> {
 ))]
 pub async fn add_user_authority(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(payload): Json<UseAuthorityAddReq>,
 ) -> Result<Json<UserAuthorityVO>> {
-    let db = &state.database.connection;
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/user_authority_override",
+        MutationScope::User(payload.user_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                // 校验用户与权限是否存在
+                let user_vo =
+                    crate::service::user::UserService::get_user_by_id(db, payload.user_id).await?;
+                let authority_vo =
+                    crate::service::authority::Service::get_authority_vo(db, payload.authority_id)
+                        .await?;
 
-    // 校验用户与权限是否存在
-    let user_vo = crate::service::user::UserService::get_user_by_id(db, payload.user_id).await?;
-    let authority_vo =
-        crate::service::authority::Service::get_authority_vo(db, payload.authority_id).await?;
+                let inserted = user_authority::Entity::insert_override(
+                    db,
+                    payload.user_id,
+                    payload.authority_id,
+                    payload.allow,
+                )
+                .await
+                .into_app_with_conflict_msg("覆写条目已存在！")?;
 
-    let inserted = user_authority::Entity::insert_override(
-        db,
-        payload.user_id,
-        payload.authority_id,
-        payload.allow,
+                let vo = UserAuthorityVO {
+                    allow: inserted.allow,
+                    user_vo: Some(user_vo),
+                    authority_vo: Some(authority_vo),
+                    create_time: inserted.create_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+                    update_time: inserted.update_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                Ok(Json(vo))
+            })
+        },
     )
     .await
-    .into_app_with_conflict_msg("覆写条目已存在！")?;
-
-    let vo = UserAuthorityVO {
-        allow: inserted.allow,
-        user_vo: Some(user_vo),
-        authority_vo: Some(authority_vo),
-        create_time: inserted.create_time.format("%Y-%m-%d %H:%M:%S").to_string(),
-        update_time: inserted.update_time.format("%Y-%m-%d %H:%M:%S").to_string(),
-    };
-    Ok(Json(vo))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -78,23 +95,37 @@ pub async fn add_user_authority(
 ))]
 pub async fn delete_user_authority(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(payload): Json<UseAuthorityDeleteReq>,
 ) -> Result<Json<String>> {
-    let db = &state.database.connection;
+    mutate(
+        &state,
+        &context,
+        "DELETE",
+        "/user_authority_override",
+        MutationScope::User(payload.user_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                // 删除 user_id + authority_id 对应的记录
+                let res: DeleteResult =
+                    user_authority::Entity::delete_pair(db, payload.user_id, payload.authority_id)
+                        .await
+                        .map_err(AppError::from)?;
 
-    // 删除 user_id + authority_id 对应的记录
-    let res: DeleteResult =
-        user_authority::Entity::delete_pair(db, payload.user_id, payload.authority_id)
-            .await
-            .map_err(AppError::from)?;
-
-    if res.rows_affected == 0 {
-        Err(AppError::NotFound(
-            "删除失败,数据库中不存在或者已删除！".to_string(),
-        ))
-    } else {
-        Ok(Json("删除成功".to_string()))
-    }
+                if res.rows_affected == 0 {
+                    Err(AppError::NotFound(
+                        "删除失败,数据库中不存在或者已删除！".to_string(),
+                    ))
+                } else {
+                    Ok(Json("删除成功".to_string()))
+                }
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -113,32 +144,49 @@ pub async fn delete_user_authority(
 ))]
 pub async fn patch_user_authority(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(payload): Json<UseAuthorityPatchReq>,
 ) -> Result<Json<UserAuthorityVO>> {
-    let db = &state.database.connection;
+    mutate(
+        &state,
+        &context,
+        "PATCH",
+        "/user_authority_override",
+        MutationScope::User(payload.user_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                // 查找现有记录
+                let existing =
+                    user_authority::Entity::find_pair(db, payload.user_id, payload.authority_id)
+                        .await?
+                        .ok_or_else(|| AppError::NotFound("找不到该 用户 | 权限".to_string()))?;
 
-    // 查找现有记录
-    let existing = user_authority::Entity::find_pair(db, payload.user_id, payload.authority_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("找不到该 用户 | 权限".to_string()))?;
+                // 更新 allow 与时间戳
+                let mut am: user_authority::ActiveModel = existing.into();
+                am.allow = Set(payload.allow);
+                am.update_time = Set(Utc::now().naive_utc());
+                let updated = am.update(db).await?;
 
-    // 更新 allow 与时间戳
-    let mut am: user_authority::ActiveModel = existing.into();
-    am.allow = Set(payload.allow);
-    am.update_time = Set(Utc::now().naive_utc());
-    let updated = am.update(db).await?;
-
-    let user_vo = crate::service::user::UserService::get_user_by_id(db, updated.user_id).await?;
-    let authority_vo =
-        crate::service::authority::Service::get_authority_vo(db, updated.authority_id).await?;
-    let vo = UserAuthorityVO {
-        allow: updated.allow,
-        user_vo: Some(user_vo),
-        authority_vo: Some(authority_vo),
-        create_time: updated.create_time.format("%Y-%m-%d %H:%M:%S").to_string(),
-        update_time: updated.update_time.format("%Y-%m-%d %H:%M:%S").to_string(),
-    };
-    Ok(Json(vo))
+                let user_vo =
+                    crate::service::user::UserService::get_user_by_id(db, updated.user_id).await?;
+                let authority_vo =
+                    crate::service::authority::Service::get_authority_vo(db, updated.authority_id)
+                        .await?;
+                let vo = UserAuthorityVO {
+                    allow: updated.allow,
+                    user_vo: Some(user_vo),
+                    authority_vo: Some(authority_vo),
+                    create_time: updated.create_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+                    update_time: updated.update_time.format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                Ok(Json(vo))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -151,8 +199,13 @@ pub async fn patch_user_authority(
 ))]
 pub async fn get_user_authorities_page(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<UserAuthorityVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     let db = &state.database.connection;
 
     let page_size = page.page_size;

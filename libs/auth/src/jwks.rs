@@ -161,11 +161,11 @@ mod security_tests {
         credential::{CredentialExpectation, CredentialProfile},
         identity::{PrincipalKind, SecretToken, TokenUse},
     };
+    use getrandom::SysRng;
     use jsonwebtoken::{EncodingKey, Header, encode};
     use rsa::{
-        RsaPrivateKey,
+        PrivateKey,
         pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding},
-        rand_core::OsRng,
     };
     use serde_json::{Value, json};
     use std::sync::OnceLock;
@@ -173,7 +173,7 @@ mod security_tests {
     fn keys() -> &'static (EncodingKey, DecodingKey) {
         static KEYS: OnceLock<(EncodingKey, DecodingKey)> = OnceLock::new();
         KEYS.get_or_init(|| {
-            let private = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
+            let private = PrivateKey::new(&mut SysRng, 2048).unwrap();
             let private_pem = private.to_pkcs8_pem(LineEnding::LF).unwrap();
             let public_pem = private
                 .to_public_key()

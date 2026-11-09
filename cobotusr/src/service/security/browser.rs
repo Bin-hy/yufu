@@ -117,7 +117,11 @@ fn reject(reason: BrowserRejection) -> AppError {
     AppError::BrowserRejected(reason)
 }
 
-fn origin_allowed(config: &crate::config::Config, issuer: &str, requested: &str) -> bool {
+pub(crate) fn origin_allowed(
+    config: &crate::config::Config,
+    issuer: &str,
+    requested: &str,
+) -> bool {
     let Ok(requested_url) = url::Url::parse(requested) else {
         return false;
     };
@@ -151,6 +155,19 @@ fn origin_allowed(config: &crate::config::Config, issuer: &str, requested: &str)
         && requested_url.port_or_known_default() == issuer_url.port_or_known_default()
 }
 
+/// A plain-HTTP request against an HTTPS issuer can never carry the Secure CSRF
+/// cookie. Report that actionable cause instead of a generic origin rejection.
+pub(crate) fn origin_requires_https(issuer: &str, requested: &str) -> bool {
+    let (Ok(issuer_url), Ok(requested_url)) = (url::Url::parse(issuer), url::Url::parse(requested))
+    else {
+        return false;
+    };
+    issuer_url.scheme() == "https"
+        && requested_url.scheme() == "http"
+        && issuer_url.host_str() == requested_url.host_str()
+        && issuer_url.port_or_known_default() == requested_url.port_or_known_default()
+}
+
 pub fn validate_csrf(
     state: &AppState,
     headers: &HeaderMap,
@@ -167,6 +184,11 @@ pub fn validate_csrf(
     }
     let issuer = origin(&state.issuer())?;
     if !origin_allowed(&state.config, &issuer, &canonical) {
+        if !state.config.auth.allow_insecure_loopback_cookies
+            && origin_requires_https(&issuer, &canonical)
+        {
+            return Err(reject(BrowserRejection::CookieRequiresHttps));
+        }
         tracing::warn!(request_origin = %canonical, issuer_origin = %issuer, "browser origin is not authorized");
         return Err(reject(BrowserRejection::OriginNotAllowed));
     }

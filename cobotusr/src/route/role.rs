@@ -7,6 +7,7 @@ use crate::entity::role::{RoleAddReq, RoleDeleteReq, RolePatchReq, RoleVO};
 use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority_role, role};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
+use crate::service::identity::legacy_governance::{MutationScope, mutate};
 use crate::{AppState, IdType};
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
@@ -55,14 +56,30 @@ pub fn get_auth_routes() -> Router<AppState> {
 ))]
 pub async fn add_role(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(insert_payload): Json<RoleAddReq>,
 ) -> Result<Json<RoleVO>> {
-    // check role
-    let db = &state.database.connection;
-    let role_db = role::Entity::insert_one(db, insert_payload)
-        .await
-        .into_app_with_conflict_msg("角色名称已存在！")?;
-    Ok(Json(role_db.into()))
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/role",
+        MutationScope::Registry,
+        move |db| {
+            let insert_payload = insert_payload.clone();
+            Box::pin(async move {
+                // check role
+
+                let role_db = role::Entity::insert_one(db, insert_payload)
+                    .await
+                    .into_app_with_conflict_msg("角色名称已存在！")?;
+                Ok(Json(role_db.into()))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -75,8 +92,13 @@ pub async fn add_role(
 ))]
 pub async fn get_page_role(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<RoleVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;
@@ -101,8 +123,13 @@ pub async fn get_page_role(
 ))]
 pub async fn get_modifiable_page_role(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<RoleVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;
@@ -139,13 +166,28 @@ pub async fn get_modifiable_page_role(
 ))]
 pub async fn patch_role(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(patch_payload): Json<RolePatchReq>,
 ) -> Result<Json<RoleVO>> {
-    let db = &state.database.connection;
-    // // 校验id 和 更新冲突
-    let db_role = role::Entity::update_name(db, patch_payload).await?;
+    mutate(
+        &state,
+        &context,
+        "PATCH",
+        "/role",
+        MutationScope::Role(patch_payload.id),
+        move |db| {
+            let patch_payload = patch_payload.clone();
+            Box::pin(async move {
+                // // 校验id 和 更新冲突
+                let db_role = role::Entity::update_name(db, patch_payload).await?;
 
-    Ok(Json(db_role.into()))
+                Ok(Json(db_role.into()))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -164,17 +206,32 @@ pub async fn patch_role(
 ))]
 pub async fn delete_role(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(delete_payload): Json<RoleDeleteReq>,
 ) -> Result<Json<String>> {
-    let db = &state.database.connection;
-    let ok = role::Entity::delete_checked(db, delete_payload.id).await?;
-    if ok {
-        Ok(Json("删除成功".to_string()))
-    } else {
-        Err(AppError::NotFound(
-            "删除失败,数据库中不存在或者已删除！".to_string(),
-        ))
-    }
+    mutate(
+        &state,
+        &context,
+        "DELETE",
+        "/role",
+        MutationScope::Role(delete_payload.id),
+        move |db| {
+            let delete_payload = delete_payload.clone();
+            Box::pin(async move {
+                let ok = role::Entity::delete_checked(db, delete_payload.id).await?;
+                if ok {
+                    Ok(Json("删除成功".to_string()))
+                } else {
+                    Err(AppError::NotFound(
+                        "删除失败,数据库中不存在或者已删除！".to_string(),
+                    ))
+                }
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -193,38 +250,60 @@ pub async fn delete_role(
 ))]
 pub async fn add_role_authority(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(payload): Json<AuthRoleAddReq>,
 ) -> Result<Json<AuthorityRoleVO>> {
-    let db = &state.database.connection;
-    // 检查 role_id, authority_id 合法性
-    let authority_vo =
-        crate::service::authority::Service::get_authority_vo(db, payload.clone().authority_id)
-            .await?;
-    let role_vo = crate::service::role::Service::get_role_vo(db, payload.clone().role_id).await?;
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/role_authority",
+        MutationScope::Role(payload.role_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                // 检查 role_id, authority_id 合法性
+                let authority_vo = crate::service::authority::Service::get_authority_vo(
+                    db,
+                    payload.clone().authority_id,
+                )
+                .await?;
+                let role_vo =
+                    crate::service::role::Service::get_role_vo(db, payload.clone().role_id).await?;
 
-    match authority_role::Entity::add_one(db, payload.role_id, payload.authority_id).await {
-        Ok(model) => {
-            let mut auth_role_vo = AuthorityRoleVO::from(model);
-            auth_role_vo = auth_role_vo.set_role_authority(role_vo, authority_vo);
-            Ok(Json(auth_role_vo))
-        }
-        Err(e) => {
-            if let Some(sql_err) = e.sql_err() {
-                match sql_err {
-                    SqlErr::UniqueConstraintViolation(_) => {
-                        return Err(AppError::AlreadyExists("权限已存在！".to_string()));
+                match authority_role::Entity::add_one(db, payload.role_id, payload.authority_id)
+                    .await
+                {
+                    Ok(model) => {
+                        let mut auth_role_vo = AuthorityRoleVO::from(model);
+                        auth_role_vo = auth_role_vo.set_role_authority(role_vo, authority_vo);
+                        Ok(Json(auth_role_vo))
                     }
-                    SqlErr::ForeignKeyConstraintViolation(_) => {
-                        return Err(AppError::BadRequest("外键约束失败".to_string()));
+                    Err(e) => {
+                        if let Some(sql_err) = e.sql_err() {
+                            match sql_err {
+                                SqlErr::UniqueConstraintViolation(_) => {
+                                    return Err(AppError::AlreadyExists(
+                                        "权限已存在！".to_string(),
+                                    ));
+                                }
+                                SqlErr::ForeignKeyConstraintViolation(_) => {
+                                    return Err(AppError::BadRequest("外键约束失败".to_string()));
+                                }
+                                // 可根据需要添加更多 SqlErr 分支
+                                _ => {}
+                            }
+                        }
+                        // 其他未知错误，统一返回或转换为你的通用错误类型
+                        Err(AppError::from(e))
                     }
-                    // 可根据需要添加更多 SqlErr 分支
-                    _ => {}
                 }
-            }
-            // 其他未知错误，统一返回或转换为你的通用错误类型
-            Err(AppError::from(e))
-        }
-    }
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -243,52 +322,70 @@ pub async fn add_role_authority(
 ))]
 pub async fn add_role_authorities(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(payload): Json<AuthRoleBatchAddReq>,
 ) -> Result<Json<Vec<AuthorityRoleVO>>> {
-    let db = &state.database.connection;
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/role_authority/batch",
+        MutationScope::Role(payload.role_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                // 校验 role 是否存在
+                let role_vo =
+                    crate::service::role::Service::get_role_vo(db, payload.role_id).await?;
 
-    // 校验 role 是否存在
-    let role_vo = crate::service::role::Service::get_role_vo(db, payload.role_id).await?;
-
-    // 校验每个 authority 是否存在，并收集对象
-    let mut authorities = Vec::new();
-    for aid in &payload.authority_ids {
-        let auth_vo = crate::service::authority::Service::get_authority_vo(db, *aid).await?;
-        authorities.push(auth_vo);
-    }
-
-    // 开启事务，确保全部插入成功或全部回滚
-    let inserted = authority_role::Entity::add_batch_tx(
-        db,
-        payload.role_id,
-        authorities.iter().map(|a| a.id).collect(),
-    )
-    .await;
-    match inserted {
-        Ok(models) => {
-            let mut inserted_vos = Vec::new();
-            for (i, model) in models.into_iter().enumerate() {
-                let mut vo = AuthorityRoleVO::from(model);
-                vo = vo.set_role_authority(role_vo.clone(), authorities[i].clone());
-                inserted_vos.push(vo);
-            }
-            Ok(Json(inserted_vos))
-        }
-        Err(e) => {
-            if let Some(sql_err) = e.sql_err() {
-                match sql_err {
-                    SqlErr::UniqueConstraintViolation(_) => {
-                        return Err(AppError::AlreadyExists("权限已存在！".to_string()));
-                    }
-                    SqlErr::ForeignKeyConstraintViolation(_) => {
-                        return Err(AppError::BadRequest("外键约束失败".to_string()));
-                    }
-                    _ => {}
+                // 校验每个 authority 是否存在，并收集对象
+                let mut authorities = Vec::new();
+                for aid in &payload.authority_ids {
+                    let auth_vo =
+                        crate::service::authority::Service::get_authority_vo(db, *aid).await?;
+                    authorities.push(auth_vo);
                 }
-            }
-            Err(AppError::from(e))
-        }
-    }
+
+                // 开启事务，确保全部插入成功或全部回滚
+                let inserted = authority_role::Entity::add_batch_tx(
+                    db,
+                    payload.role_id,
+                    authorities.iter().map(|a| a.id).collect(),
+                )
+                .await;
+                match inserted {
+                    Ok(models) => {
+                        let mut inserted_vos = Vec::new();
+                        for (i, model) in models.into_iter().enumerate() {
+                            let mut vo = AuthorityRoleVO::from(model);
+                            vo = vo.set_role_authority(role_vo.clone(), authorities[i].clone());
+                            inserted_vos.push(vo);
+                        }
+                        Ok(Json(inserted_vos))
+                    }
+                    Err(e) => {
+                        if let Some(sql_err) = e.sql_err() {
+                            match sql_err {
+                                SqlErr::UniqueConstraintViolation(_) => {
+                                    return Err(AppError::AlreadyExists(
+                                        "权限已存在！".to_string(),
+                                    ));
+                                }
+                                SqlErr::ForeignKeyConstraintViolation(_) => {
+                                    return Err(AppError::BadRequest("外键约束失败".to_string()));
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(AppError::from(e))
+                    }
+                }
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -307,24 +404,38 @@ pub async fn add_role_authorities(
 ))]
 pub async fn delete_role_authority(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(payload): Json<AuthRoleDeleteReq>,
 ) -> Result<Json<String>> {
-    let db = &state.database.connection;
+    mutate(
+        &state,
+        &context,
+        "DELETE",
+        "/role_authority",
+        MutationScope::Role(payload.role_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                // 删除 role_id + authority_id 对应的记录
+                let delete_result: DeleteResult =
+                    authority_role::Entity::delete_pair(db, payload.role_id, payload.authority_id)
+                        .await
+                        .map_err(AppError::from)?;
 
-    // 删除 role_id + authority_id 对应的记录
-    let delete_result: DeleteResult =
-        authority_role::Entity::delete_pair(db, payload.role_id, payload.authority_id)
-            .await
-            .map_err(AppError::from)?;
+                if delete_result.rows_affected == 0 {
+                    return Err(AppError::NotFound(format!(
+                        "未找到角色 {} 对应的权限 {}",
+                        payload.role_id, payload.authority_id
+                    )));
+                }
 
-    if delete_result.rows_affected == 0 {
-        return Err(AppError::NotFound(format!(
-            "未找到角色 {} 对应的权限 {}",
-            payload.role_id, payload.authority_id
-        )));
-    }
-
-    Ok(Json("删除成功".to_string()))
+                Ok(Json("删除成功".to_string()))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -343,27 +454,44 @@ pub async fn delete_role_authority(
 ))]
 pub async fn delete_role_authorities(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(payload): Json<AuthRoleBatchDeleteReq>,
 ) -> Result<Json<String>> {
-    let db = &state.database.connection;
+    mutate(
+        &state,
+        &context,
+        "DELETE",
+        "/role_authority/batch",
+        MutationScope::Role(payload.role_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                // 执行批量删除
+                let delete_result: DeleteResult = authority_role::Entity::delete_batch(
+                    db,
+                    payload.role_id,
+                    payload.authority_ids.clone(),
+                )
+                .await
+                .map_err(AppError::from)?;
 
-    // 执行批量删除
-    let delete_result: DeleteResult =
-        authority_role::Entity::delete_batch(db, payload.role_id, payload.authority_ids.clone())
-            .await
-            .map_err(AppError::from)?;
+                if delete_result.rows_affected == 0 {
+                    return Err(AppError::NotFound(format!(
+                        "未找到角色 {} 对应的权限记录",
+                        payload.role_id
+                    )));
+                }
 
-    if delete_result.rows_affected == 0 {
-        return Err(AppError::NotFound(format!(
-            "未找到角色 {} 对应的权限记录",
-            payload.role_id
-        )));
-    }
-
-    Ok(Json(format!(
-        "成功删除 {} 条记录",
-        delete_result.rows_affected
-    )))
+                Ok(Json(format!(
+                    "成功删除 {} 条记录",
+                    delete_result.rows_affected
+                )))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -377,9 +505,14 @@ pub async fn delete_role_authorities(
 ))]
 pub async fn get_role_authority_by_role_id(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Path(role_id): Path<IdType>,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<AuthorityVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;

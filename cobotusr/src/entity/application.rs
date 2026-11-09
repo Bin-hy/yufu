@@ -17,13 +17,21 @@ pub struct Model {
     /// Optional link to the OIDC client that represents this application's
     /// browser/SDK identity. NULL for M2M-only or backend-only apps.
     pub oidc_client_id: Option<IdType>,
+    pub management_state: String,
+    pub application_kind: String,
+    pub management_mode: String,
+    pub lifecycle: String,
+    pub identity_revision: i64,
+    pub owner_revision: i64,
+    pub access_revision: i64,
+    pub security_revision: i64,
     pub create_time: DateTime,
     pub update_time: DateTime,
 }
 
 impl Entity {
     pub async fn get_by_app_key(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         app_key: &str,
     ) -> Result<Option<Model>, DbErr> {
         Self::find()
@@ -33,7 +41,7 @@ impl Entity {
     }
 
     pub async fn get_by_oidc_client_id(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         oidc_client_id: IdType,
     ) -> Result<Option<Model>, DbErr> {
         Self::find()
@@ -43,7 +51,7 @@ impl Entity {
     }
 
     pub async fn insert_one(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         insert: ApplicationInsertReq,
     ) -> Result<Model, DbErr> {
         let now = chrono::Utc::now().naive_utc();
@@ -55,12 +63,13 @@ impl Entity {
             oidc_client_id: Set(insert.oidc_client_id),
             create_time: Set(now),
             update_time: Set(now),
+            ..Default::default()
         };
         am.insert(db).await
     }
 
     pub async fn paginate(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         page_size: u64,
         page_number: u64,
     ) -> Result<(u64, Vec<Model>), DbErr> {
@@ -71,7 +80,7 @@ impl Entity {
     }
 
     pub async fn update_partial(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         patch: ApplicationPatchReq,
     ) -> Result<Model, DbErr> {
         let dbm = Self::find_by_id(patch.id)
@@ -86,7 +95,10 @@ impl Entity {
         am.update(db).await
     }
 
-    pub async fn delete_checked(db: &DatabaseConnection, id: IdType) -> Result<bool, DbErr> {
+    pub async fn delete_checked(
+        db: &impl sea_orm::ConnectionTrait,
+        id: IdType,
+    ) -> Result<bool, DbErr> {
         let res = Self::delete_by_id(id).exec(db).await?;
         Ok(res.rows_affected == 1)
     }

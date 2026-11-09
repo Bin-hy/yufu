@@ -1,27 +1,13 @@
 use super::super::common::*;
-use cobotusr::config::Config;
 use cobotusr::entity::PageSelectQueryResult;
 use cobotusr::entity::role::{RoleAddReq, RolePatchReq, RoleVO};
 use cobotusr::error::AppError;
 use reqwest::Client;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn test_add_role() -> Result<(), AppError> {
-    // 运行一个docker镜像
-    let (_pg, db_url) = get_postgres_container().await?;
-
-    let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
-    let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
-    let addr = listener.local_addr()?;
-
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
-    let token = get_test_token(&mut cfg);
-    tokio::spawn(cobotusr::serve(cfg.clone(), listener, shutdown_signal()));
-
-    let api_prefix = cfg.http.api_prefix;
+    let fixture = IdentityFixture::start().await;
+    let token = super::identity_support::management_access(&fixture).await;
     let uri = "/role";
 
     let client = Client::new();
@@ -30,7 +16,7 @@ async fn test_add_role() -> Result<(), AppError> {
     let role_req = RoleAddReq { name: role_name };
 
     let resp = client
-        .post(format!("http://{}{}{}", addr, api_prefix, uri))
+        .post(format!("{}/api/v1{}", fixture.base_url, uri))
         .json(&role_req)
         .header("Authorization", format!("Bearer {}", token))
         .send()
@@ -38,29 +24,19 @@ async fn test_add_role() -> Result<(), AppError> {
         .error_for_status()?;
 
     assert!(resp.status().is_success());
+    fixture.close().await;
     Ok(())
 }
 
 #[tokio::test]
 async fn test_get_page_role() -> Result<(), AppError> {
-    // 运行一个docker镜像
-    let (_pg, db_url) = get_postgres_container().await?;
-
-    let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
-    let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
-    let addr = listener.local_addr()?;
-
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
-    let token = get_test_token(&mut cfg);
-    tokio::spawn(cobotusr::serve(cfg.clone(), listener, shutdown_signal()));
-
-    let api_prefix = cfg.http.api_prefix;
+    let fixture = IdentityFixture::start().await;
+    let token = super::identity_support::management_access(&fixture).await;
     let uri = "/role?page_number=1&page_size=10";
 
     let client = Client::new();
     let resp = client
-        .get(format!("http://{}{}{}", addr, api_prefix, uri))
+        .get(format!("{}/api/v1{}", fixture.base_url, uri))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await?
@@ -71,24 +47,14 @@ async fn test_get_page_role() -> Result<(), AppError> {
     assert_eq!(result.page_number, 1);
     assert_eq!(result.page_size, 10);
 
+    fixture.close().await;
     Ok(())
 }
 
 #[tokio::test]
 async fn test_patch_role() -> Result<(), AppError> {
-    // 运行一个docker镜像
-    let (_pg, db_url) = get_postgres_container().await?;
-
-    let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
-    let listener = TcpListener::bind(SocketAddr::new(ip, 0)).await?;
-    let addr = listener.local_addr()?;
-
-    let mut cfg = Config::default();
-    cfg.database.url = db_url.clone();
-    let token = get_test_token(&mut cfg);
-    tokio::spawn(cobotusr::serve(cfg.clone(), listener, shutdown_signal()));
-
-    let api_prefix = cfg.http.api_prefix;
+    let fixture = IdentityFixture::start().await;
+    let token = super::identity_support::management_access(&fixture).await;
     let uri = "/role";
 
     let client = Client::new();
@@ -98,7 +64,7 @@ async fn test_patch_role() -> Result<(), AppError> {
     let role_req = RoleAddReq { name: role_name };
 
     let resp = client
-        .post(format!("http://{}{}{}", addr, api_prefix, uri))
+        .post(format!("{}/api/v1{}", fixture.base_url, uri))
         .header("Authorization", format!("Bearer {}", token))
         .json(&role_req)
         .send()
@@ -115,7 +81,7 @@ async fn test_patch_role() -> Result<(), AppError> {
     };
 
     let resp = client
-        .patch(format!("http://{}{}{}", addr, api_prefix, uri))
+        .patch(format!("{}/api/v1{}", fixture.base_url, uri))
         .header("Authorization", format!("Bearer {}", token))
         .json(&patch_req)
         .send()
@@ -126,5 +92,6 @@ async fn test_patch_role() -> Result<(), AppError> {
     let updated_role: RoleVO = resp.json().await?;
     assert_eq!(updated_role.name, new_name.to_string());
 
+    fixture.close().await;
     Ok(())
 }

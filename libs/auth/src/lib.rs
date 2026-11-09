@@ -61,7 +61,8 @@ pub async fn strict_access_middleware(
                 SecurityError::Conflict => StatusCode::CONFLICT,
                 SecurityError::DependencyUnavailable
                 | SecurityError::DeadlineExceeded
-                | SecurityError::CapacityExceeded => StatusCode::SERVICE_UNAVAILABLE,
+                | SecurityError::CapacityExceeded
+                | SecurityError::CommitUncertain => StatusCode::SERVICE_UNAVAILABLE,
             };
             (status, error.to_string()).into_response()
         }

@@ -20,6 +20,7 @@ pub async fn recording_operation_middleware(
     // 获取到用户的操作 get user operations.
     // 查找权限表记录该操作 find the authority in the table.
     let request_method = request.method().to_string().to_uppercase();
+    // Identity endpoint queries are removed entirely, including proofs/state.
     let request_full_uri = redact_access_token(request.uri());
 
     // ignore query_path

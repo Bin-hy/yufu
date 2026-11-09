@@ -11,6 +11,7 @@ pub enum SecurityError {
     DependencyUnavailable,
     DeadlineExceeded,
     CapacityExceeded,
+    CommitUncertain,
 }
 
 impl fmt::Display for SecurityError {
@@ -24,6 +25,7 @@ impl fmt::Display for SecurityError {
             Self::DependencyUnavailable => "security dependency unavailable",
             Self::DeadlineExceeded => "security deadline exceeded",
             Self::CapacityExceeded => "security capacity exceeded",
+            Self::CommitUncertain => "security commit uncertain",
         })
     }
 }

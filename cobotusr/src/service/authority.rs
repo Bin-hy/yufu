@@ -5,7 +5,7 @@ use crate::entity::{authority, authority_role, role};
 use crate::error::AppError;
 use crate::result::Result;
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::collections::HashSet;
 
 pub struct Service;
@@ -47,7 +47,7 @@ pub fn uri_resource(
 impl Service {
     // 查找 authority_id 的 authority_vo
     pub async fn get_authority_vo(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         authority_id: IdType,
     ) -> Result<AuthorityVO> {
         if let Some(db_authority) = authority::Entity::find_by_id(authority_id).one(db).await? {
@@ -58,7 +58,7 @@ impl Service {
     }
 
     // 给超级管理员添加权限
-    pub async fn ensure_sadmin_authorities(db: &DatabaseConnection) -> Result<()> {
+    pub async fn ensure_sadmin_authorities(db: &impl sea_orm::ConnectionTrait) -> Result<()> {
         // 1. 获取 超级管理员 角色 role
         let super_admin_name = RoleEnum::Superadmin.get_name();
         let role_db = match role::Entity::find()

@@ -1,4 +1,5 @@
 use crate::result::Result;
+use crate::service::identity::legacy_governance::{MutationScope, mutate};
 use crate::{AppState, IdType, parse_user_id};
 use anyhow::anyhow;
 
@@ -63,8 +64,13 @@ pub async fn get_user_by_id(
 ))]
 pub async fn get_page_user(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<UserVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;
@@ -74,9 +80,9 @@ pub async fn get_page_user(
     let result = users_db
         .into_iter()
         .map(|(user_db, role_db_opt)| {
-            let role = role_db_opt.as_ref().unwrap();
+            let role = role_db_opt.as_ref();
             let mut user_vo = UserVO::from(user_db.clone());
-            user_vo.role = Some(RoleVO::from(role.clone()));
+            user_vo.role = role.cloned().map(RoleVO::from);
             user_vo
         })
         .filter(|item| item.id != Superadmin.default_id())
@@ -107,19 +113,10 @@ pub async fn add_user_with_role(
     State(state): State<AppState>,
     Json(payload): Json<UserAddWithRoleReq>,
 ) -> Result<Json<UserVO>> {
-    let username = payload.username;
-    let nickname = payload.nickname.unwrap_or(username.clone().to_string());
-
-    let user_vo = UserService::add_user_with_role(
-        &state,
-        username.as_str(),
-        payload.password.as_str(),
-        nickname.as_str(),
-        payload.role_id,
-    )
-    .await?;
-
-    Ok(Json(user_vo))
+    let _ = (state, payload);
+    Err(AppError::BadRequest(
+        "请使用管理员邀请流程创建企业账户".into(),
+    ))
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -137,17 +134,33 @@ pub async fn add_user_with_role(
 ))]
 pub async fn patch_user_role(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(payload): Json<UserRolePatchReq>,
 ) -> Result<Json<UserVO>> {
-    let db = &state.database.connection;
-    // 校验 role_id != 超级管理员的id
-    if payload.new_role_id == Superadmin.default_id() {
-        return Err(AppError::Forbidden("禁止设置为SuperAdmin".to_string()));
-    }
-    let updated_user = user::Entity::update_role(db, payload.user_id, payload.new_role_id).await?;
-    let db_user = UserService::get_user_by_id(db, updated_user.id).await?;
+    mutate(
+        &state,
+        &context,
+        "PATCH",
+        "/user/role",
+        MutationScope::User(payload.user_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                // 校验 role_id != 超级管理员的id
+                if payload.new_role_id == Superadmin.default_id() {
+                    return Err(AppError::Forbidden("禁止设置为SuperAdmin".to_string()));
+                }
+                let updated_user =
+                    user::Entity::update_role(db, payload.user_id, payload.new_role_id).await?;
+                let db_user = UserService::get_user_by_id(db, updated_user.id).await?;
 
-    Ok(Json(db_user))
+                Ok(Json(db_user))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -165,19 +178,32 @@ pub async fn patch_user_role(
 ))]
 pub async fn patch_user_basic_data(
     State(state): State<AppState>,
-    Json(mut payload): Json<UserPatchReq>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
+    Json(payload): Json<UserPatchReq>,
 ) -> Result<Json<UserVO>> {
-    // 如果包含新密码，先做 bcrypt 哈希再存库
-    if let Some(ref plain) = payload.password {
-        let hashed = bcrypt::hash(plain, bcrypt::DEFAULT_COST).map_err(|e| {
-            AppError::InternalServerError(anyhow::anyhow!("Password hash failed: {}", e))
-        })?;
-        payload.password = Some(hashed);
-    }
-    let db = &state.database.connection;
-    let updated_user = user::Entity::update_basic(db, payload).await?;
+    mutate(
+        &state,
+        &context,
+        "PATCH",
+        "/user",
+        MutationScope::User(payload.user_id),
+        move |db| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                if payload.password.is_some() {
+                    return Err(AppError::BadRequest(
+                        "请使用账户密码修改或管理员密码重置流程".into(),
+                    ));
+                }
+                let updated_user = user::Entity::update_basic(db, payload).await?;
 
-    Ok(Json(updated_user.into()))
+                Ok(Json(updated_user.into()))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -191,15 +217,32 @@ pub async fn patch_user_basic_data(
 ))]
 pub async fn delete_user_by_id(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Path(user_id): Path<IdType>,
 ) -> Result<String> {
-    let db = &state.database.connection;
-    let ok = user::Entity::delete_checked(db, user_id).await?;
-    if ok {
-        Ok("删除成功".to_string())
-    } else {
-        Err(AppError::NotFound("用户不存在或删除失败".to_string()))
-    }
+    mutate(
+        &state,
+        &context,
+        "DELETE",
+        "/user/{user_id}",
+        MutationScope::User(user_id),
+        move |db| {
+            Box::pin(async move {
+                use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+                let current = user::Entity::find_by_id(user_id)
+                    .one(db)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound("账户不存在".into()))?;
+                let mut change: user::ActiveModel = current.into();
+                change.enabled = Set(false);
+                change.update(db).await?;
+                Ok("账户已停用".into())
+            })
+        },
+    )
+    .await
 }
 
 use crate::entity::role::RoleEnum::Superadmin;

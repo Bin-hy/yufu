@@ -55,6 +55,8 @@ impl CredentialLifecycle {
         validate_name(name)?;
         let budget = manager.budget().child(budget.remaining()?)?;
         let mut txn = self.repository.begin(&budget).await?;
+        txn.prepare_management_mutation(manager.principal(), None)
+            .await?;
         self.check_manager(txn.as_mut(), manager).await?;
         self.authorize_revocation_uri(txn.as_mut(), manager, "PATCH", "/oidc/mcp-tokens/{id}")
             .await?;
@@ -71,6 +73,8 @@ impl CredentialLifecycle {
     ) -> Result<(), SecurityError> {
         let budget = manager.budget().child(budget.remaining()?)?;
         let mut txn = self.repository.begin(&budget).await?;
+        txn.prepare_management_mutation(manager.principal(), None)
+            .await?;
         self.check_manager(txn.as_mut(), manager).await?;
         self.authorize_revocation_uri(txn.as_mut(), manager, "DELETE", "/oidc/mcp-tokens/{id}")
             .await?;
@@ -132,6 +136,8 @@ impl CredentialLifecycle {
         validate_target(manager, request.application, config)?;
         validate_name(request.name)?;
         let mut txn = self.repository.begin(&budget).await?;
+        txn.prepare_management_mutation(manager.principal(), None)
+            .await?;
         self.check_manager(txn.as_mut(), manager).await?;
         self.authorize_revocation_uri(txn.as_mut(), manager, "POST", "/oidc/mcp-tokens")
             .await?;
@@ -176,6 +182,8 @@ impl CredentialLifecycle {
     ) -> Result<McpTokenSet, SecurityError> {
         let budget = manager.budget().child(budget.remaining()?)?;
         let mut txn = self.repository.begin(&budget).await?;
+        txn.prepare_management_mutation(manager.principal(), None)
+            .await?;
         self.check_manager(txn.as_mut(), manager).await?;
         self.authorize_revocation_uri(
             txn.as_mut(),

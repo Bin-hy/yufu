@@ -25,8 +25,13 @@ pub fn get_auth_routes() -> Router<AppState> {
 ))]
 pub async fn get_recording_by_page(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<RecordingVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;
@@ -52,9 +57,14 @@ pub async fn get_recording_by_page(
 ))]
 pub async fn get_recording_by_user_id(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Path(user_id): Path<IdType>,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<RecordingVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     let db = &state.database.connection;
     let page_size = page.page_size;
     let page_number = page.page_number;

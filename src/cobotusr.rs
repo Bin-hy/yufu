@@ -81,6 +81,8 @@ async fn main() -> Result<()> {
         );
         return Ok(());
     }
+    cfg.validate_identity_policy()?;
+    cfg.load_identity_signer().await?;
     let listener = tokio::net::TcpListener::bind(cfg.http.listen).await?;
     let addr = listener.local_addr()?;
     info!("Server listening on {}", addr);

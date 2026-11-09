@@ -21,6 +21,17 @@ pub struct Model {
     pub used: bool,
     pub expires_at: DateTime,
     pub create_time: DateTime,
+    #[serde(skip_serializing)]
+    pub code_digest: Option<Vec<u8>>,
+    pub flow_id: Option<Uuid>,
+    pub sso_session_id: Option<Uuid>,
+    pub oidc_rp_session_id: Option<Uuid>,
+    pub environment_id: Option<Uuid>,
+    pub config_version_id: Option<Uuid>,
+    pub auth_time: Option<i64>,
+    pub auth_epoch: Option<i64>,
+    pub lifecycle_epoch: Option<i64>,
+    pub access_generation: Option<i64>,
 }
 
 impl Entity {
@@ -30,8 +41,20 @@ impl Entity {
         code: &str,
     ) -> Result<Option<Model>, DbErr> {
         use sea_orm::{ColumnTrait, QueryFilter};
+        use sha2::{Digest, Sha256};
         Self::find()
-            .filter(Column::Code.eq(code))
+            .filter(
+                sea_orm::Condition::any()
+                    .add(Column::Code.eq(format!(
+                        "sha256:{}",
+                        hex::encode(Sha256::digest(code.as_bytes()))
+                    )))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(Column::Code.not_like("sha256:%"))
+                            .add(Column::Code.eq(code)),
+                    ),
+            )
             .filter(Column::Used.eq(false))
             .one(db)
             .await

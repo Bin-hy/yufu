@@ -51,7 +51,10 @@ async fn auth_center_upgrades_legacy_audience_catalog_without_erasing_data() {
         .await
         .unwrap();
     let db = Database::connect(url).await.unwrap();
-    let old_count = Migrator::migrations().len() - 1;
+    let old_count = Migrator::migrations()
+        .iter()
+        .position(|m| m.name() == "m20261108_000002_auth_center")
+        .unwrap();
     Migrator::up(&db, Some(old_count as u32)).await.unwrap();
     db.execute_unprepared("INSERT INTO oauth_client (client_id,user_id,name,redirect_uris,allowed_scopes,client_secret_hash,public_client,grant_types,create_time,update_time) SELECT cid,1,cid,'http://localhost/callback','openid','',TRUE,'authorization_code',NOW(),NOW() FROM (VALUES ('legacy-client'),('new-client'),('invalid')) AS clients(cid);").await.unwrap();
     db.execute_unprepared("ALTER TABLE security_session_client DROP CONSTRAINT security_session_client_audience_check; ALTER TABLE security_session_client ADD CONSTRAINT security_session_client_audience_check CHECK (audience IN ('cobotusr','legacy-app')); CREATE TABLE conversation (id INTEGER PRIMARY KEY); INSERT INTO conversation VALUES (42); INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ('https://idp.test','legacy-client','legacy-app','legacy-app',TRUE);").await.unwrap();

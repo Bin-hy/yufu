@@ -52,3 +52,27 @@ impl Default for PageSelectQuery {
         }
     }
 }
+pub mod identity_access_generation;
+pub mod identity_action_flow;
+pub mod identity_admin_activation;
+pub mod identity_app_approval;
+pub mod identity_app_assignment;
+pub mod identity_app_config_version;
+pub mod identity_app_environment;
+pub mod identity_app_member;
+pub mod identity_app_test_user;
+pub mod identity_audit_event;
+pub mod identity_authorization_flow;
+pub mod identity_collaboration_candidate;
+pub mod identity_group_member;
+pub mod identity_introspection_reader;
+pub mod identity_invitation;
+pub mod identity_logout_delivery;
+pub mod identity_migration_conflict;
+pub mod identity_oidc_rp_session;
+pub mod identity_password_reset;
+pub mod identity_provider;
+pub mod identity_request_operation;
+pub mod identity_sso_session;
+pub mod identity_subject;
+pub mod identity_user_group;

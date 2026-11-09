@@ -64,7 +64,7 @@ async fn oidc_pair(fixture: &LocalHttpFixture, client_id: &str) -> serde_json::V
     )
     .await
     .unwrap();
-    fixture.db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ($1,$2,'resource-app','resource-app',TRUE)",[fixture.root.clone().into(),client_id.into()])).await.unwrap();
+    fixture.db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO security_session_client (issuer,client_id,audience,application,enabled) VALUES ($1,$2,'resource-app','resource-app',TRUE)",[fixture.issuer.clone().into(),client_id.into()])).await.unwrap();
     let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     let challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".to_owned();
     let code = OidcService::create_authorization_code(
@@ -132,7 +132,7 @@ async fn security_t25_http_csrf_missing_untrusted_duplicate_and_wrong_binding_ha
         let proof = auth::security::csrf::CsrfProtector::new("t24-local-test-key".into())
             .unwrap()
             .issue(
-                &fixture.root,
+                &fixture.issuer,
                 if mode == "wrong-binding" {
                     None
                 } else {
@@ -152,12 +152,12 @@ async fn security_t25_http_csrf_missing_untrusted_duplicate_and_wrong_binding_ha
                 match mode {
                     "untrusted-origin" => "http://attacker.invalid",
                     "null-origin" => "null",
-                    _ => &fixture.root,
+                    _ => &fixture.issuer,
                 },
             );
         }
         if mode == "duplicate-origin" {
-            request = request.header("origin", &fixture.root);
+            request = request.header("origin", &fixture.issuer);
         }
         if mode != "missing-proof" {
             request = request.header("x-csrf-token", proof.expose_secret());
@@ -427,7 +427,7 @@ async fn security_t25_http_oidc_get_logout_is_confirmation_and_post_revokes_befo
     let invalid_redirect = fixture
         .client
         .post(format!("{}/oidc/logout", fixture.root))
-        .header("origin", &fixture.root)
+        .header("origin", &fixture.issuer)
         .header(
             "cookie",
             format!("{}; {proof_cookie}", session.refresh_cookie),
@@ -453,7 +453,7 @@ async fn security_t25_http_oidc_get_logout_is_confirmation_and_post_revokes_befo
     let response = fixture
         .client
         .post(format!("{}/oidc/logout", fixture.root))
-        .header("origin", &fixture.root)
+        .header("origin", &fixture.issuer)
         .header(
             "cookie",
             format!("{}; {proof_cookie}", session.refresh_cookie),
@@ -653,7 +653,7 @@ async fn security_t25_http_bootstrap_and_rotated_proof_bind_to_current_cookie() 
     let registered = fixture
         .client
         .post(format!("{}/register", fixture.api))
-        .header("origin", &fixture.root)
+        .header("origin", &fixture.issuer)
         .header("cookie", cookie.split(';').next().unwrap())
         .header("x-csrf-token", body["csrf_token"].as_str().unwrap())
         .json(&RegistryData {
@@ -671,7 +671,7 @@ async fn security_t25_http_bootstrap_and_rotated_proof_bind_to_current_cookie() 
     let refreshed = fixture
         .client
         .post(format!("{}/refresh", fixture.api))
-        .header("origin", &fixture.root)
+        .header("origin", &fixture.issuer)
         .header("cookie", format!("{refresh}; __Host-cobotusr-csrf={proof}"))
         .header("x-csrf-token", proof)
         .send()
@@ -683,7 +683,7 @@ async fn security_t25_http_bootstrap_and_rotated_proof_bind_to_current_cookie() 
     let stale = fixture
         .client
         .post(format!("{}/logout", fixture.api))
-        .header("origin", &fixture.root)
+        .header("origin", &fixture.issuer)
         .header("cookie", format!("{rotated}; __Host-cobotusr-csrf={proof}"))
         .header("x-csrf-token", proof)
         .send()
@@ -694,7 +694,7 @@ async fn security_t25_http_bootstrap_and_rotated_proof_bind_to_current_cookie() 
     let logout = fixture
         .client
         .post(format!("{}/logout", fixture.api))
-        .header("origin", &fixture.root)
+        .header("origin", &fixture.issuer)
         .header("cookie", format!("{rotated}; __Host-cobotusr-csrf={proof}"))
         .header("x-csrf-token", proof)
         .send()

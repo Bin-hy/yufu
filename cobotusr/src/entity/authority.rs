@@ -27,7 +27,7 @@ pub struct Model {
 
 impl Entity {
     pub async fn insert_one(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         insert: AuthorityInsertReq,
     ) -> Result<Model, DbErr> {
         let now = chrono::Utc::now().naive_utc();
@@ -43,7 +43,7 @@ impl Entity {
     }
 
     pub async fn paginate(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         page_size: u64,
         page_number: u64,
     ) -> Result<(u64, Vec<Model>), DbErr> {
@@ -54,7 +54,7 @@ impl Entity {
     }
 
     pub async fn update_partial(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         patch: AuthorityPatchReq,
     ) -> Result<Model, DbErr> {
         let dbm = Self::find_by_id(patch.id)
@@ -69,7 +69,10 @@ impl Entity {
         am.update(db).await
     }
 
-    pub async fn delete_checked(db: &DatabaseConnection, id: IdType) -> Result<bool, DbErr> {
+    pub async fn delete_checked(
+        db: &impl sea_orm::ConnectionTrait,
+        id: IdType,
+    ) -> Result<bool, DbErr> {
         let res = Self::delete_by_id(id).exec(db).await?;
         Ok(res.rows_affected == 1)
     }

@@ -1,4 +1,4 @@
-//! Signed CSRF evidence is scoped to the issuer and the current refresh value.
+//! Signed CSRF evidence is scoped to the issuer and a distinct browser context.
 use super::{
     budget::{Clock, healthy_reading},
     error::SecurityError,
@@ -21,6 +21,12 @@ struct CsrfClaims {
 }
 
 pub struct CsrfProtector(String);
+#[derive(Clone, Copy)]
+pub enum CsrfBinding<'a> {
+    LegacyRefresh(Option<&'a str>),
+    CenterRootDigest(&'a [u8; 32]),
+    AnonymousBrowserDigest(&'a [u8; 32]),
+}
 impl CsrfProtector {
     pub fn new(key: String) -> Result<Self, SecurityError> {
         if key.is_empty() {
@@ -34,6 +40,14 @@ impl CsrfProtector {
         refresh: Option<&str>,
         clock: &dyn Clock,
     ) -> Result<SecretToken, SecurityError> {
+        self.issue_bound(issuer, CsrfBinding::LegacyRefresh(refresh), clock)
+    }
+    pub fn issue_bound(
+        &self,
+        issuer: &str,
+        context: CsrfBinding<'_>,
+        clock: &dyn Clock,
+    ) -> Result<SecretToken, SecurityError> {
         PrincipalRef::new(issuer, PrincipalKind::Machine, "csrf")?;
         let iat = healthy_reading(clock)?.unix_millis / 1000;
         let claims = CsrfClaims {
@@ -44,7 +58,7 @@ impl CsrfProtector {
                 .checked_add(900)
                 .ok_or(SecurityError::DependencyUnavailable)?,
             nonce: uuid::Uuid::new_v4().to_string(),
-            binding: binding(refresh),
+            binding: binding(context),
         };
         let mut header = Header::new(Algorithm::HS256);
         header.typ = Some("csrf+jwt".into());
@@ -62,6 +76,15 @@ impl CsrfProtector {
         token: &SecretToken,
         issuer: &str,
         refresh: Option<&str>,
+        clock: &dyn Clock,
+    ) -> Result<(), SecurityError> {
+        self.verify_bound(token, issuer, CsrfBinding::LegacyRefresh(refresh), clock)
+    }
+    pub fn verify_bound(
+        &self,
+        token: &SecretToken,
+        issuer: &str,
+        context: CsrfBinding<'_>,
         clock: &dyn Clock,
     ) -> Result<(), SecurityError> {
         let now = healthy_reading(clock)?.unix_millis;
@@ -84,7 +107,7 @@ impl CsrfProtector {
         )
         .map_err(|_| SecurityError::Forbidden)?
         .claims;
-        if claims.binding != binding(refresh)
+        if claims.binding != binding(context)
             || claims.exp <= claims.iat
             || claims.exp.saturating_mul(1000) <= now.saturating_add(1000)
             || claims.iat.saturating_mul(1000) > now.saturating_add(1000)
@@ -96,16 +119,28 @@ impl CsrfProtector {
     }
 }
 
-fn binding(refresh: Option<&str>) -> String {
+fn binding(context: CsrfBinding<'_>) -> String {
     let mut hash = Sha256::new();
-    hash.update(b"cobotusr-csrf-v1\0");
-    hash.update(if refresh.is_some() {
-        b"session\0".as_slice()
-    } else {
-        b"bootstrap\0".as_slice()
-    });
-    if let Some(refresh) = refresh {
-        hash.update(refresh.as_bytes());
+    match context {
+        CsrfBinding::LegacyRefresh(refresh) => {
+            hash.update(b"cobotusr-csrf-v1\0");
+            hash.update(if refresh.is_some() {
+                b"session\0".as_slice()
+            } else {
+                b"bootstrap\0".as_slice()
+            });
+            if let Some(refresh) = refresh {
+                hash.update(refresh.as_bytes());
+            }
+        }
+        CsrfBinding::CenterRootDigest(digest) => {
+            hash.update(b"cobotusr-csrf-v2\0center\0");
+            hash.update(digest);
+        }
+        CsrfBinding::AnonymousBrowserDigest(digest) => {
+            hash.update(b"cobotusr-csrf-v2\0anonymous\0");
+            hash.update(digest);
+        }
     }
     format!("{:x}", hash.finalize())
 }
@@ -114,6 +149,53 @@ fn binding(refresh: Option<&str>) -> String {
 mod tests {
     use super::*;
     use crate::security::budget::tests::ManualClock;
+    #[test]
+    fn identity_csrf_contexts_cannot_be_exchanged_and_reads_reuse_evidence() {
+        let clock = ManualClock::new();
+        let signer = CsrfProtector::new("context-key".into()).unwrap();
+        let digest = [3; 32];
+        let other = [4; 32];
+        let contexts = [
+            CsrfBinding::LegacyRefresh(None),
+            CsrfBinding::LegacyRefresh(Some("legacy")),
+            CsrfBinding::CenterRootDigest(&digest),
+            CsrfBinding::AnonymousBrowserDigest(&digest),
+        ];
+        for (index, context) in contexts.iter().enumerate() {
+            let token = signer
+                .issue_bound("https://id.example", *context, &clock)
+                .unwrap();
+            for (candidate, binding) in contexts.iter().enumerate() {
+                assert_eq!(
+                    signer
+                        .verify_bound(&token, "https://id.example", *binding, &clock)
+                        .is_ok(),
+                    index == candidate
+                );
+            }
+            for _ in 0..4 {
+                signer
+                    .verify_bound(&token, "https://id.example", *context, &clock)
+                    .unwrap();
+            }
+        }
+        let token = signer
+            .issue_bound(
+                "https://id.example",
+                CsrfBinding::CenterRootDigest(&digest),
+                &clock,
+            )
+            .unwrap();
+        assert_eq!(
+            signer.verify_bound(
+                &token,
+                "https://id.example",
+                CsrfBinding::CenterRootDigest(&other),
+                &clock
+            ),
+            Err(SecurityError::Forbidden)
+        );
+    }
     #[test]
     fn security_t25_csrf_is_signed_and_bound_to_issuer_and_refresh() {
         let clock = ManualClock::new();

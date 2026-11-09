@@ -5,6 +5,7 @@ use crate::entity::authority::{
 use crate::entity::{PageSelectQuery, PageSelectQueryResult, authority};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
+use crate::service::identity::legacy_governance::{MutationScope, mutate};
 use axum::extract::{Query, State};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -39,15 +40,39 @@ pub fn get_auth_routes() -> Router<AppState> {
 ))]
 pub async fn add_authority(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(insert_payload): Json<AuthorityInsertReq>,
 ) -> Result<Json<AuthorityVO>> {
-    let db = &state.database.connection;
-    let new_authority = authority::Entity::insert_one(db, insert_payload)
-        .await
-        .into_app_with_conflict_msg("权限名称或路径已存在")?;
-    //
-    crate::service::authority::Service::ensure_sadmin_authorities(db).await?;
-    Ok(Json(new_authority.into()))
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/authority",
+        MutationScope::Policy,
+        move |db| {
+            let mut insert_payload = insert_payload.clone();
+            Box::pin(async move {
+                insert_payload.method = insert_payload.method.to_ascii_uppercase();
+                crate::service::authority::uri_resource(
+                    "cobotusr",
+                    &insert_payload.method,
+                    &insert_payload.authority_uri,
+                )
+                .map_err(|_| {
+                    AppError::BadRequest("权限必须使用有效 HTTP 方法与绝对路由模板".into())
+                })?;
+                let new_authority = authority::Entity::insert_one(db, insert_payload)
+                    .await
+                    .into_app_with_conflict_msg("权限名称或路径已存在")?;
+                //
+                crate::service::authority::Service::ensure_sadmin_authorities(db).await?;
+                Ok(Json(new_authority.into()))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -60,8 +85,13 @@ pub async fn add_authority(
 ))]
 pub async fn get_page_authorities(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Query(page): Query<PageSelectQuery>,
 ) -> Result<Json<PageSelectQueryResult<AuthorityVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     let db = &state.database.connection;
     let (total_pages, authorities_db) =
         authority::Entity::paginate(db, page.page_size, page.page_number).await?;
@@ -88,13 +118,47 @@ pub async fn get_page_authorities(
 ))]
 pub async fn patch_authority(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(patch_payload): Json<AuthorityPatchReq>,
 ) -> Result<Json<AuthorityVO>> {
-    let db = &state.database.connection;
-    // // 校验id 和 更新冲突
-    let db_authority = authority::Entity::update_partial(db, patch_payload).await?;
+    mutate(
+        &state,
+        &context,
+        "PATCH",
+        "/authority",
+        MutationScope::Policy,
+        move |db| {
+            let mut patch_payload = patch_payload.clone();
+            Box::pin(async move {
+                patch_payload.method = patch_payload
+                    .method
+                    .map(|method| method.to_ascii_uppercase());
 
-    Ok(Json(db_authority.into()))
+                use sea_orm::EntityTrait;
+                let current = authority::Entity::find_by_id(patch_payload.id)
+                    .one(db)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound("权限不存在".into()))?;
+                crate::service::authority::uri_resource(
+                    "cobotusr",
+                    patch_payload.method.as_deref().unwrap_or(&current.method),
+                    patch_payload
+                        .authority_uri
+                        .as_deref()
+                        .unwrap_or(&current.authority_uri),
+                )
+                .map_err(|_| {
+                    AppError::BadRequest("权限必须使用有效 HTTP 方法与绝对路由模板".into())
+                })?;
+                let db_authority = authority::Entity::update_partial(db, patch_payload).await?;
+
+                Ok(Json(db_authority.into()))
+            })
+        },
+    )
+    .await
 }
 
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -113,17 +177,32 @@ pub async fn patch_authority(
 ))]
 pub async fn delete_authority(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(delete_payload): Json<AuthorityDeleteReq>,
 ) -> Result<Json<String>> {
-    let db = &state.database.connection;
-    let ok = authority::Entity::delete_checked(db, delete_payload.id).await?;
-    if ok {
-        Ok(Json("删除成功".to_string()))
-    } else {
-        Err(AppError::NotFound(
-            "删除失败,数据库中不存在或者已删除！".to_string(),
-        ))
-    }
+    mutate(
+        &state,
+        &context,
+        "DELETE",
+        "/authority",
+        MutationScope::Policy,
+        move |db| {
+            let delete_payload = delete_payload.clone();
+            Box::pin(async move {
+                let ok = authority::Entity::delete_checked(db, delete_payload.id).await?;
+                if ok {
+                    Ok(Json("删除成功".to_string()))
+                } else {
+                    Err(AppError::NotFound(
+                        "删除失败,数据库中不存在或者已删除！".to_string(),
+                    ))
+                }
+            })
+        },
+    )
+    .await
 }
 
 #[cfg(feature = "openapi")]

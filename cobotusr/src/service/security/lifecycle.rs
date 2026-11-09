@@ -2,6 +2,9 @@
 //! separate required steps; looking up an arbitrary reference is not authentication.
 use std::sync::Arc;
 
+#[path = "lifecycle_identity.rs"]
+mod identity;
+
 use super::repository::{
     CredentialSnapshot, RegisteredState, SecurityRepository, SecurityTransaction,
     SessionRegistration, decode, now, refresh_digest,
@@ -92,6 +95,15 @@ pub trait SessionTokenSigner: Send + Sync {
         nonce: Option<&str>,
         access: &SecretToken,
     ) -> Result<SecretToken, SecurityError>;
+    async fn sign_identity_id(
+        &self,
+        _claims: &SecurityAccessClaims,
+        _context: &crate::domain::identity::session::IdentityTokenContext,
+        _profile: &auth::claims::IdentityProfile,
+        _access: &SecretToken,
+    ) -> Result<SecretToken, SecurityError> {
+        Err(SecurityError::DependencyUnavailable)
+    }
 }
 
 #[derive(Debug)]
@@ -110,6 +122,77 @@ impl CredentialLifecycle {
     pub fn new(repository: Arc<dyn SecurityRepository>, clock: Arc<dyn Clock>) -> Self {
         Self { repository, clock }
     }
+    /// Mint a managed identity pair inside the caller's shared transaction.
+    /// The caller attaches the new session to its current admission/RP before
+    /// committing; an unbound managed-client session never passes validation.
+    pub async fn issue_identity_session_in_transaction(
+        &self,
+        txn: &mut dyn SecurityTransaction,
+        context: &crate::domain::identity::session::IdentityTokenContext,
+        profile: &auth::claims::IdentityProfile,
+        access_ttl_seconds: u64,
+        signer: &dyn SessionTokenSigner,
+        budget: &SecurityBudget,
+    ) -> Result<SessionTokenSet, SecurityError> {
+        use rand::RngCore;
+        let client = txn
+            .oidc_client(&context.client_id)
+            .await?
+            .ok_or(SecurityError::InvalidCredential)?;
+        if client.management_state != "managed"
+            || client.environment_id != Some(context.admission.environment_id())
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let binding = txn
+            .session_client(context.admission.principal().issuer(), &context.client_id)
+            .await?
+            .ok_or(SecurityError::InvalidCredential)?;
+        let config = SessionTokenConfig {
+            issuer: context.admission.principal().issuer().into(),
+            access_ttl_seconds,
+            refresh_ttl_seconds: crate::domain::identity::session::DEFAULT_SSO_TTL_SECONDS,
+        };
+        let at = now(self.clock.as_ref())?;
+        let mut claims = session_claims(
+            &config,
+            context
+                .admission
+                .principal()
+                .subject()
+                .parse()
+                .map_err(|_| SecurityError::InvalidCredential)?,
+            binding.audience,
+            binding.application,
+            at,
+        )?;
+        claims.exp = context.expiry_seconds(claims.iat, config.access_ttl_seconds)?;
+        let mut random = [0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut random);
+        let refresh_token = SecretToken::new(hex::encode(random))?;
+        let access_token = budget.run(signer.sign_access(&claims)).await??;
+        let id_token = budget
+            .run(signer.sign_identity_id(&claims, context, profile, &access_token))
+            .await??;
+        txn.register_session_pair(SessionRegistration {
+            client_id: Some(context.client_id.clone()),
+            claims: claims.clone(),
+            key_id: signer.key_id().into(),
+            refresh_jti: uuid::Uuid::new_v4().to_string(),
+            refresh_digest: refresh_digest(&refresh_token),
+            refresh_expires_at: context.root_expires_at / 1_000 * 1_000,
+            minted_by: None,
+            new_roots: true,
+        })
+        .await?;
+        budget.remaining()?;
+        Ok(SessionTokenSet {
+            access_token,
+            id_token: Some(id_token),
+            refresh_token,
+            claims,
+        })
+    }
     pub async fn login_local(
         &self,
         request: LocalLoginRequest<'_>,
@@ -119,10 +202,30 @@ impl CredentialLifecycle {
     ) -> Result<LocalSession, SecurityError> {
         validate_local_username(request.username)?;
         let mut txn = self.repository.begin(budget).await?;
+        let session = self
+            .login_local_in_transaction(txn.as_mut(), request, config, signer, budget)
+            .await?;
+        txn.commit().await?;
+        Ok(session)
+    }
+    /// Identity orchestration owns the commit when a browser root and the
+    /// existing management credential pair must be created atomically.
+    pub async fn login_local_in_transaction(
+        &self,
+        txn: &mut dyn SecurityTransaction,
+        request: LocalLoginRequest<'_>,
+        config: &SessionTokenConfig,
+        signer: &dyn SessionTokenSigner,
+        budget: &SecurityBudget,
+    ) -> Result<LocalSession, SecurityError> {
+        validate_local_username(request.username)?;
         let user = txn
             .local_user(request.username)
             .await?
             .ok_or(SecurityError::InvalidCredential)?;
+        if !user.enabled {
+            return Err(SecurityError::InvalidCredential);
+        }
         let password_hash = user
             .password
             .clone()
@@ -139,9 +242,8 @@ impl CredentialLifecycle {
             return Err(SecurityError::InvalidCredential);
         }
         let tokens = self
-            .mint_local_session(txn.as_mut(), user.id, config, signer, budget)
+            .mint_local_session(txn, user.id, config, signer, budget)
             .await?;
-        txn.commit().await?;
         Ok(LocalSession {
             tokens,
             user: user.into(),
@@ -203,6 +305,7 @@ impl CredentialLifecycle {
                 nonce: None,
                 minted_by: None,
                 new_roots: true,
+                root_expires_at: None,
             },
             config,
             signer,
@@ -281,7 +384,7 @@ impl CredentialLifecycle {
                 client_secret,
             } => {
                 let client = txn
-                    .oidc_client(client_id)
+                    .legacy_oidc_client(client_id)
                     .await?
                     .ok_or(SecurityError::InvalidCredential)?;
                 authenticate_session_client(&client, client_secret, "refresh_token", budget)
@@ -302,6 +405,14 @@ impl CredentialLifecycle {
             .await?
             .ok_or(SecurityError::InvalidCredential)?;
         let row = &snapshot.current.credential;
+        if snapshot
+            .current
+            .identity
+            .as_ref()
+            .is_some_and(|state| state.managed.is_some())
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
         if row.audience != audience
             || row.application != application
             || row.oidc_client_id != client_id
@@ -341,6 +452,9 @@ impl CredentialLifecycle {
         claims.jti = uuid::Uuid::new_v4().to_string();
         claims.iat = at / 1000;
         claims.exp = expiry(claims.iat, config.access_ttl_seconds)?;
+        if let Some(state) = &snapshot.current.identity {
+            claims.exp = claims.exp.min(state.root_expires_at / 1000);
+        }
         claims.nbf = None;
         // A replacement retains the original upper bound, independently of any
         // roles added since issuance. Current policy is still checked on access.
@@ -351,6 +465,11 @@ impl CredentialLifecycle {
                 nonce: None,
                 minted_by: Some(snapshot.reference().clone()),
                 new_roots: false,
+                root_expires_at: snapshot
+                    .current
+                    .identity
+                    .as_ref()
+                    .map(|state| state.root_expires_at),
             },
             config,
             signer,
@@ -375,9 +494,12 @@ impl CredentialLifecycle {
     ) -> Result<SessionTokenSet, SecurityError> {
         let mut txn = self.repository.begin(budget).await?;
         let client = txn
-            .oidc_client(request.client_id)
+            .legacy_oidc_client(request.client_id)
             .await?
             .ok_or(SecurityError::InvalidCredential)?;
+        if client.management_state != "legacy_unmanaged" {
+            return Err(SecurityError::InvalidCredential);
+        }
         authenticate_session_client(&client, request.client_secret, "authorization_code", budget)
             .await?;
         let binding = txn
@@ -440,6 +562,7 @@ impl CredentialLifecycle {
                 nonce: code.nonce.as_deref(),
                 minted_by: None,
                 new_roots: true,
+                root_expires_at: None,
             },
             config,
             signer,
@@ -542,12 +665,19 @@ pub(super) fn validate_refresh_roots(state: &RegisteredState) -> Result<(), Secu
     Ok(())
 }
 
-pub(super) fn status_for_snapshot(
+pub(crate) fn status_for_snapshot(
     snapshot: &CredentialSnapshot,
     time: u64,
 ) -> Result<(CurrentCredentialStatus, String), SecurityError> {
     let claims = active_claims(&snapshot.current, time)?;
-    let parent_exp = validate_parent(snapshot, &claims, time)?;
+    let parent_exp = match (
+        validate_parent(snapshot, &claims, time)?,
+        snapshot.current.identity.as_ref(),
+    ) {
+        (Some(parent), Some(identity)) => Some(parent.min(identity.root_expires_at)),
+        (None, Some(identity)) => Some(identity.root_expires_at),
+        (parent, None) => parent,
+    };
     let key = snapshot
         .current
         .credential
@@ -640,6 +770,15 @@ fn active_claims(
         session_id: row.session_id.map(|v| v.to_string()),
         family_id: row.family_id.map(|v| v.to_string()),
     };
+    if let Some(identity) = &state.identity
+        && (claims
+            .exp
+            .checked_mul(1000)
+            .is_none_or(|expiry| expiry > identity.root_expires_at)
+            || identity.managed.is_some() && !claims.bounds.grants().is_empty())
+    {
+        return Err(SecurityError::InvalidCredential);
+    }
     if row.revoked_at.is_some()
         || row.consumed_at.is_some()
         || row.replacement_jti.is_some()
@@ -760,7 +899,7 @@ fn validate_parent(
     Ok(None)
 }
 
-pub(super) async fn authenticate_session_client(
+pub(crate) async fn authenticate_session_client(
     client: &crate::entity::oauth_client::Model,
     secret: Option<&SecretToken>,
     grant: &str,
@@ -768,6 +907,9 @@ pub(super) async fn authenticate_session_client(
 ) -> Result<(), SecurityError> {
     use crate::service::oidc::OidcService;
     if !grant.is_empty() && !OidcService::client_allows_grant_type(client, grant) {
+        return Err(SecurityError::InvalidCredential);
+    }
+    if secret.is_some_and(|secret| secret.expose_secret().len() > 72) {
         return Err(SecurityError::InvalidCredential);
     }
     if client.public_client {
@@ -845,6 +987,7 @@ struct SessionMint<'a> {
     nonce: Option<&'a str>,
     minted_by: Option<CredentialRef>,
     new_roots: bool,
+    root_expires_at: Option<u64>,
 }
 async fn mint_session_pair(
     mint: SessionMint<'_>,
@@ -859,8 +1002,10 @@ async fn mint_session_pair(
         nonce,
         minted_by,
         new_roots,
+        root_expires_at,
     } = mint;
-    let refresh_exp = expiry(claims.iat, config.refresh_ttl_seconds)?;
+    let refresh_exp = expiry(claims.iat, config.refresh_ttl_seconds)?
+        .min(root_expires_at.map(|at| at / 1000).unwrap_or(u64::MAX));
     if claims.exp > refresh_exp || signer.key_id().is_empty() {
         return Err(SecurityError::InvalidCredential);
     }
@@ -945,5 +1090,64 @@ impl SessionTokenSigner for auth::token_manager::IdTokenSigner {
         })
         .await
         .map_err(|_| SecurityError::DependencyUnavailable)?
+    }
+    async fn sign_identity_id(
+        &self,
+        claims: &SecurityAccessClaims,
+        context: &crate::domain::identity::session::IdentityTokenContext,
+        profile: &auth::claims::IdentityProfile,
+        access: &SecretToken,
+    ) -> Result<SecretToken, SecurityError> {
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        use sha2::{Digest, Sha256};
+        if context.admission.principal().issuer() != claims.iss
+            || context.admission.principal().subject() != claims.sub
+            || !claims.bounds.grants().is_empty()
+            || claims
+                .exp
+                .checked_mul(1000)
+                .is_none_or(|expiry| expiry > context.root_expires_at)
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let scopes = context.admission.scopes();
+        let email = if scopes.contains("email") {
+            profile.email.clone()
+        } else {
+            None
+        };
+        let claims = auth::claims::IdTokenClaims {
+            iss: claims.iss.clone(),
+            sub: claims.sub.clone(),
+            aud: Some(context.client_id.clone()),
+            iat: claims.iat,
+            exp: claims.exp,
+            auth_time: Some(context.admission.auth_time()),
+            sid: Some(context.protocol_sid.to_string()),
+            nonce: context.nonce.clone(),
+            at_hash: Some(
+                URL_SAFE_NO_PAD.encode(&Sha256::digest(access.expose_secret().as_bytes())[..16]),
+            ),
+            name: if scopes.contains("profile") {
+                profile.name.clone()
+            } else {
+                None
+            },
+            preferred_username: if scopes.contains("profile") {
+                profile.preferred_username.clone()
+            } else {
+                None
+            },
+            email_verified: if email.is_some() {
+                profile.email_verified
+            } else {
+                None
+            },
+            email,
+        };
+        let signer = self.clone();
+        tokio::task::spawn_blocking(move || signer.sign_identity_id_token(&claims))
+            .await
+            .map_err(|_| SecurityError::DependencyUnavailable)?
     }
 }

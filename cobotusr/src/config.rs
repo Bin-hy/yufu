@@ -2,6 +2,8 @@ use std::{env, net::SocketAddr, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::config_identity::Identity;
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default)]
@@ -10,6 +12,8 @@ pub struct Config {
     pub auth: Auth,
     #[serde(default)]
     pub oidc: Oidc,
+    #[serde(default)]
+    pub identity: Identity,
     #[serde(default)]
     pub log: Log,
     #[serde(default)]
@@ -75,7 +79,7 @@ pub struct Auth {
     #[serde(default = "default_super_admin")]
     pub super_admin: Account,
     /// Path to RSA private key PEM file for OIDC ID Token signing.
-    /// Defaults to `conf/oidc_rsa_private.pem`. If the file does not exist, auto-generates.
+    /// Production requires an existing persistent key. Explicit loopback development may generate one.
     #[serde(default = "default_rsa_private_key_path")]
     pub rsa_private_key_path: String,
 }
@@ -239,13 +243,13 @@ fn default_rsa_private_key_path() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Oidc {
     /// Public-facing issuer URL for OIDC discovery document.
-    /// If empty, derived from `http.listen` with wildcard addresses replaced by localhost.
+    /// Production requires this or http.public to be explicit; local development may use http.listen.
     /// Example: "https://auth.example.com"
     #[serde(default)]
     pub issuer: String,
 
     /// Path to RSA private key PEM file for ID Token signing (RS256).
-    /// If the file does not exist, a 2048-bit key pair will be auto-generated.
+    /// Missing keys fail production startup; only explicit loopback development generates a key.
     #[serde(default = "default_rsa_private_key_path")]
     pub rsa_private_key_path: String,
 

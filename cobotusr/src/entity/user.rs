@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
     pub id: IdType,
+    #[serde(skip_serializing)]
     pub password: Option<String>,
     #[sea_orm(unique)]
     pub username: String,
@@ -24,6 +25,13 @@ pub struct Model {
     pub nickname: Option<String>,
     pub role_id: IdType,
     pub description: Option<String>,
+    pub enabled: bool,
+    pub person_kind: String,
+    pub developer_enabled: bool,
+    pub auth_epoch: i64,
+    pub identity_revision: i64,
+    pub email: Option<String>,
+    pub email_verified_at: Option<i64>,
 
     #[sea_orm(belongs_to, from = "role_id", to = "id")]
     pub role: HasOne<super::role::Entity>,
@@ -37,7 +45,7 @@ pub struct Model {
 
 impl Entity {
     pub async fn find_with_role_by_id(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         id: IdType,
     ) -> Result<Option<(Model, Option<role::Model>)>, DbErr> {
         Self::find_by_id(id)
@@ -47,7 +55,7 @@ impl Entity {
     }
 
     pub async fn paginate_with_role(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         page_size: u64,
         page_number: u64,
     ) -> Result<(u64, Vec<(Model, Option<role::Model>)>), DbErr> {
@@ -62,7 +70,7 @@ impl Entity {
     }
 
     pub async fn update_role(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         user_id: IdType,
         new_role_id: IdType,
     ) -> Result<Model, DbErr> {
@@ -80,7 +88,7 @@ impl Entity {
     }
 
     pub async fn update_basic(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         payload: UserPatchReq,
     ) -> Result<Model, DbErr> {
         let user_db = Self::find_by_id(payload.user_id)
@@ -93,7 +101,10 @@ impl Entity {
         am.update(db).await
     }
 
-    pub async fn delete_checked(db: &DatabaseConnection, id: IdType) -> Result<bool, DbErr> {
+    pub async fn delete_checked(
+        db: &impl sea_orm::ConnectionTrait,
+        id: IdType,
+    ) -> Result<bool, DbErr> {
         let res = Self::delete_by_id(id).exec(db).await?;
         Ok(res.rows_affected == 1)
     }
@@ -148,14 +159,14 @@ impl ActiveModelBehavior for ActiveModel {}
 
 // req
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct UserRolePatchReq {
     pub user_id: IdType,
     pub new_role_id: IdType,
 }
 
 // 用户可更新数据
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct UserPatchReq {
     pub user_id: IdType,
     pub password: Option<String>,

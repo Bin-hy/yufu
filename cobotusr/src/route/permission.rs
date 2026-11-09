@@ -4,6 +4,7 @@ use crate::entity::permission::{
 use crate::entity::{PageSelectQuery, PageSelectQueryResult, application};
 use crate::error::{AppError, SeaResultExt};
 use crate::result::Result;
+use crate::service::identity::legacy_governance::{MutationScope, mutate};
 use crate::{AppState, IdType};
 use axum::Json;
 use axum::Router;
@@ -30,28 +31,48 @@ pub fn get_auth_routes() -> Router<AppState> {
 
 pub async fn add_permission(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(insert_payload): Json<PermissionInsertReq>,
 ) -> Result<Json<PermissionVO>> {
-    let db = &state.database.connection;
-    // validate application exists
-    if application::Entity::find_by_id(insert_payload.application_id)
-        .one(db)
-        .await?
-        .is_none()
-    {
-        return Err(AppError::NotFound("应用不存在".to_string()));
-    }
-    let new_perm = permission::Entity::insert_one(db, insert_payload)
-        .await
-        .into_app_with_conflict_msg("权限名称已存在")?;
-    Ok(Json(new_perm.into()))
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/permission",
+        MutationScope::Registry,
+        move |db| {
+            let insert_payload = insert_payload.clone();
+            Box::pin(async move {
+                // validate application exists
+                if application::Entity::find_by_id(insert_payload.application_id)
+                    .one(db)
+                    .await?
+                    .is_none()
+                {
+                    return Err(AppError::NotFound("应用不存在".to_string()));
+                }
+                let new_perm = permission::Entity::insert_one(db, insert_payload)
+                    .await
+                    .into_app_with_conflict_msg("权限名称已存在")?;
+                Ok(Json(new_perm.into()))
+            })
+        },
+    )
+    .await
 }
 
 pub async fn get_page_permissions(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Query(page): Query<PageSelectQuery>,
     Query(filter): Query<PermissionFilter>,
 ) -> Result<Json<PageSelectQueryResult<PermissionVO>>> {
+    crate::service::identity::legacy_governance::require_directory_administrator(&state, &context)
+        .await?;
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
     let db = &state.database.connection;
     let (total_pages, records) = if let Some(app_id) = filter.application_id {
@@ -74,24 +95,54 @@ pub async fn get_page_permissions(
 
 pub async fn patch_permission(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(patch_payload): Json<PermissionPatchReq>,
 ) -> Result<Json<PermissionVO>> {
-    let db = &state.database.connection;
-    let db_perm = permission::Entity::update_partial(db, patch_payload).await?;
-    Ok(Json(db_perm.into()))
+    mutate(
+        &state,
+        &context,
+        "PATCH",
+        "/permission",
+        MutationScope::Permission(patch_payload.id),
+        move |db| {
+            let patch_payload = patch_payload.clone();
+            Box::pin(async move {
+                let db_perm = permission::Entity::update_partial(db, patch_payload).await?;
+                Ok(Json(db_perm.into()))
+            })
+        },
+    )
+    .await
 }
 
 pub async fn delete_permission(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     Json(delete_payload): Json<PermissionDeleteReq>,
 ) -> Result<Json<String>> {
-    let db = &state.database.connection;
-    let ok = permission::Entity::delete_checked(db, delete_payload.id).await?;
-    if ok {
-        Ok(Json("删除成功".to_string()))
-    } else {
-        Err(AppError::NotFound(
-            "删除失败,数据库中不存在或者已删除！".to_string(),
-        ))
-    }
+    mutate(
+        &state,
+        &context,
+        "DELETE",
+        "/permission",
+        MutationScope::Permission(delete_payload.id),
+        move |db| {
+            let delete_payload = delete_payload.clone();
+            Box::pin(async move {
+                let ok = permission::Entity::delete_checked(db, delete_payload.id).await?;
+                if ok {
+                    Ok(Json("删除成功".to_string()))
+                } else {
+                    Err(AppError::NotFound(
+                        "删除失败,数据库中不存在或者已删除！".to_string(),
+                    ))
+                }
+            })
+        },
+    )
+    .await
 }

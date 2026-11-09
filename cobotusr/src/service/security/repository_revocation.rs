@@ -18,17 +18,13 @@ impl PgSecurityTransaction {
         }
         // A write barrier makes a stale REPEATABLE READ mint fail with 40001
         // after a concurrent application revocation or administrative logout.
-        let result = self
-            .run(self.transaction.execute_raw(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "UPDATE \"user\" SET update_time=update_time WHERE id=$1",
-                [id.into()],
-            )))
-            .await?;
-        if result.rows_affected() != 1 {
-            return Err(SecurityError::InvalidResource);
-        }
-        Ok(())
+        self.acquire_identity_scope(
+            &crate::service::identity::repository::IdentityLockScope::new(vec![
+                crate::service::identity::repository::IdentityLockKey::User(id),
+            ])?,
+        )
+        .await
+        .map_err(Into::into)
     }
     pub(super) async fn lock_revocation_credential(
         &mut self,
@@ -38,32 +34,7 @@ impl PgSecurityTransaction {
             return Ok(None);
         };
         let row = &snapshot.current.credential;
-        for (table, id) in [
-            ("security_grant", Some(row.grant_id)),
-            ("security_session", row.session_id),
-            ("security_refresh_family", row.family_id),
-        ] {
-            if let Some(id) = id {
-                self.run(
-                    self.transaction
-                        .query_one_raw(Statement::from_sql_and_values(
-                            DbBackend::Postgres,
-                            format!("SELECT id FROM {table} WHERE id=$1 FOR UPDATE"),
-                            [id.into()],
-                        )),
-                )
-                .await?;
-            }
-        }
-        self.run(
-            self.transaction
-                .query_one_raw(Statement::from_sql_and_values(
-                    DbBackend::Postgres,
-                    "SELECT jti FROM security_credential WHERE issuer=$1 AND jti=$2 FOR UPDATE",
-                    [reference.issuer().into(), reference.jti().into()],
-                )),
-        )
-        .await?;
+        self.lock_identity_credential(row).await?;
         self.credential(reference).await
     }
     pub(super) async fn resolve_consent_application(

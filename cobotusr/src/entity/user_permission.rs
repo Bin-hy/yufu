@@ -1,9 +1,7 @@
 use crate::IdType;
 use crate::entity::{permission, user};
 use sea_orm::entity::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DeleteResult, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
 
 #[sea_orm::model]
@@ -29,7 +27,7 @@ pub struct Model {
 impl Entity {
     /// All explicit overrides for this user — caller resolves precedence vs RBAC.
     pub async fn list_by_user(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         user_id: IdType,
     ) -> Result<Vec<Model>, DbErr> {
         Self::find()
@@ -39,7 +37,7 @@ impl Entity {
     }
 
     pub async fn upsert_override(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         user_id: IdType,
         permission_id: IdType,
         allow: bool,
@@ -66,7 +64,7 @@ impl Entity {
     }
 
     pub async fn delete_pair(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         user_id: IdType,
         permission_id: IdType,
     ) -> Result<DeleteResult, DbErr> {
@@ -78,7 +76,7 @@ impl Entity {
     }
 
     pub async fn find_pair(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         user_id: IdType,
         permission_id: IdType,
     ) -> Result<Option<Model>, DbErr> {
@@ -90,7 +88,7 @@ impl Entity {
     }
 
     pub async fn paginate(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         page_size: u64,
         page_number: u64,
     ) -> Result<(u64, Vec<Model>), DbErr> {

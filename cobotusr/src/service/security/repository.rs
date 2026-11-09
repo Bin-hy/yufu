@@ -1,6 +1,8 @@
 //! Primary-only, deadline-bounded security transactions. No replica or cache fallback.
 #[path = "repository_bounds.rs"]
 mod bounds;
+#[path = "repository_identity.rs"]
+mod identity;
 #[path = "repository_mcp.rs"]
 mod mcp;
 #[path = "repository_revocation.rs"]
@@ -36,7 +38,7 @@ use crate::entity::{
 pub fn refresh_digest(secret: &SecretToken) -> [u8; 32] {
     Sha256::digest(secret.expose_secret().as_bytes()).into()
 }
-fn unavailable(error: DbErr) -> SecurityError {
+pub(crate) fn unavailable(error: DbErr) -> SecurityError {
     if let DbErr::Exec(sea_orm::RuntimeErr::SqlxError(e))
     | DbErr::Query(sea_orm::RuntimeErr::SqlxError(e)) = &error
         && e.as_database_error()
@@ -52,7 +54,7 @@ pub(super) fn decode<T: serde::de::DeserializeOwned>(
 ) -> Result<T, SecurityError> {
     serde_json::from_value(value).map_err(|_| SecurityError::DependencyUnavailable)
 }
-pub(super) fn now(clock: &dyn Clock) -> Result<u64, SecurityError> {
+pub(crate) fn now(clock: &dyn Clock) -> Result<u64, SecurityError> {
     let reading = clock.now()?;
     if !reading.synchronized {
         return Err(SecurityError::DependencyUnavailable);
@@ -109,6 +111,12 @@ pub(super) struct RegisteredState {
     pub session: Option<session::Model>,
     pub family: Option<family::Model>,
     pub service_binding: Option<ServiceBinding>,
+    pub identity: Option<IdentitySessionState>,
+}
+#[derive(Clone)]
+pub(super) struct IdentitySessionState {
+    pub root_expires_at: u64,
+    pub managed: Option<crate::domain::identity::session::IdentityTokenContext>,
 }
 /// Trusted storage facts only, not an authentication or policy decision.
 pub struct CredentialSnapshot {
@@ -150,6 +158,13 @@ pub trait SecurityRepository: Send + Sync {
 #[allow(clippy::double_must_use)]
 pub trait SecurityTransaction: Send {
     fn checked_at(&self) -> u64;
+    /// Plan acting and target account resources before any management lock.
+    /// This does not widen the eventual mutation or replace authorization.
+    async fn prepare_management_mutation(
+        &mut self,
+        principal: &PrincipalRef,
+        target: Option<&PrincipalRef>,
+    ) -> Result<(), SecurityError>;
     async fn lock_credential(
         &mut self,
         reference: &CredentialRef,
@@ -176,6 +191,13 @@ pub trait SecurityTransaction: Send {
         &mut self,
         client_id: &str,
     ) -> Result<Option<oauth_client::Model>, SecurityError>;
+    /// Compatibility issuance must serialize with explicit client adoption.
+    async fn legacy_oidc_client(
+        &mut self,
+        client_id: &str,
+    ) -> Result<Option<oauth_client::Model>, SecurityError> {
+        self.oidc_client(client_id).await
+    }
     async fn authorization_code(
         &mut self,
         secret: &SecretToken,
@@ -304,11 +326,14 @@ impl PgSecurityRepository {
         Self { primary, clock }
     }
 }
-struct PgSecurityTransaction {
-    transaction: DatabaseTransaction,
-    budget: SecurityBudget,
-    clock: Arc<dyn Clock>,
-    checked_at: u64,
+pub(crate) struct PgSecurityTransaction {
+    pub(crate) transaction: DatabaseTransaction,
+    pub(crate) budget: SecurityBudget,
+    pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) checked_at: u64,
+    pub(crate) identity_locks: std::sync::Mutex<
+        std::collections::BTreeSet<crate::service::identity::repository::IdentityLockKey>,
+    >,
 }
 #[async_trait::async_trait]
 impl SecurityRepository for PgSecurityRepository {
@@ -316,6 +341,16 @@ impl SecurityRepository for PgSecurityRepository {
         &self,
         budget: &SecurityBudget,
     ) -> Result<Box<dyn SecurityTransaction>, SecurityError> {
+        Ok(Box::new(self.begin_shared(budget).await?))
+    }
+}
+impl PgSecurityRepository {
+    /// The identity adapter extends this concrete transaction. There is one
+    /// primary snapshot, one inherited deadline and one commit for both domains.
+    pub(crate) async fn begin_shared(
+        &self,
+        budget: &SecurityBudget,
+    ) -> Result<PgSecurityTransaction, SecurityError> {
         let checked_at = now(self.clock.as_ref())?;
         if self.primary.get_database_backend() != DbBackend::Postgres {
             return Err(SecurityError::DependencyUnavailable);
@@ -344,12 +379,13 @@ impl SecurityRepository for PgSecurityRepository {
             )))
             .await?
             .map_err(unavailable)?;
-        Ok(Box::new(PgSecurityTransaction {
+        Ok(PgSecurityTransaction {
             transaction: txn,
             budget: budget.clone(),
             clock: self.clock.clone(),
             checked_at,
-        }))
+            identity_locks: Default::default(),
+        })
     }
 }
 impl PgSecurityTransaction {
@@ -369,12 +405,13 @@ impl PgSecurityTransaction {
         }
         self.run(
             user::Entity::find_by_id(id)
+                .filter(user::Column::Enabled.eq(true))
                 .find_also_related(role::Entity)
                 .one(&self.transaction),
         )
         .await
     }
-    async fn run<T>(
+    pub(crate) async fn run<T>(
         &self,
         future: impl Future<Output = Result<T, DbErr>>,
     ) -> Result<T, SecurityError> {
@@ -417,12 +454,18 @@ impl PgSecurityTransaction {
             } else {
                 None
             };
+        let identity = if let Some(session) = &session {
+            self.identity_session_state(session, &row).await?
+        } else {
+            None
+        };
         Ok(RegisteredState {
             credential: row,
             grant,
             session,
             family,
             service_binding,
+            identity,
         })
     }
     async fn snapshot(
@@ -454,6 +497,47 @@ impl PgSecurityTransaction {
 }
 #[async_trait::async_trait]
 impl SecurityTransaction for PgSecurityTransaction {
+    async fn prepare_management_mutation(
+        &mut self,
+        principal: &PrincipalRef,
+        target: Option<&PrincipalRef>,
+    ) -> Result<(), SecurityError> {
+        if self
+            .run(crate::entity::identity_provider::Entity::find().one(&self.transaction))
+            .await?
+            .is_none()
+        {
+            return Ok(());
+        }
+        let mut keys = Vec::new();
+        for account in std::iter::once(principal).chain(target) {
+            if account.kind() != PrincipalKind::User || account.issuer() != principal.issuer() {
+                return Err(SecurityError::Forbidden);
+            }
+            let user_id = account
+                .subject()
+                .parse::<i32>()
+                .map_err(|_| SecurityError::InvalidCredential)?;
+            if user_id <= 0 || user_id.to_string() != account.subject() {
+                return Err(SecurityError::InvalidCredential);
+            }
+            keys.extend(
+                self.plan_identity_revocation(
+                    &crate::domain::identity::session::IdentityRevocationScope::UserAll { user_id },
+                )
+                .await?
+                .locks
+                .keys()
+                .iter()
+                .cloned(),
+            );
+        }
+        self.acquire_identity_scope(
+            &crate::service::identity::repository::IdentityLockScope::new(keys)?,
+        )
+        .await
+        .map_err(Into::into)
+    }
     async fn lock_credential(
         &mut self,
         reference: &CredentialRef,
@@ -512,6 +596,7 @@ impl SecurityTransaction for PgSecurityTransaction {
             create_time: Set(time),
             update_time: Set(time),
             description: Set(None),
+            ..Default::default()
         };
         self.budget
             .run(insert.insert(&self.transaction))
@@ -554,13 +639,66 @@ impl SecurityTransaction for PgSecurityTransaction {
         )
         .await
     }
+    async fn legacy_oidc_client(
+        &mut self,
+        client_id: &str,
+    ) -> Result<Option<oauth_client::Model>, SecurityError> {
+        let Some(initial) = self.oidc_client(client_id).await? else {
+            return Ok(None);
+        };
+        self.acquire_identity_scope(
+            &crate::service::identity::repository::IdentityLockScope::new(vec![
+                crate::service::identity::repository::IdentityLockKey::OAuthClient(initial.id),
+            ])?,
+        )
+        .await
+        .map_err(SecurityError::from)?;
+        let current = self.oidc_client(client_id).await?;
+        if current
+            .as_ref()
+            .is_none_or(|c| c.management_state != "legacy_unmanaged")
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
+        Ok(current)
+    }
     async fn authorization_code(
         &mut self,
         secret: &SecretToken,
     ) -> Result<Option<oauth_authorization_code::Model>, SecurityError> {
         self.run(
             oauth_authorization_code::Entity::find()
-                .filter(oauth_authorization_code::Column::Code.eq(secret.expose_secret()))
+                .filter(
+                    sea_orm::Condition::any()
+                        .add(
+                            oauth_authorization_code::Column::CodeDigest
+                                .eq(Sha256::digest(secret.expose_secret().as_bytes()).to_vec()),
+                        )
+                        .add(
+                            sea_orm::Condition::all()
+                                .add(oauth_authorization_code::Column::CodeDigest.is_null())
+                                .add(
+                                    sea_orm::Condition::any()
+                                        .add(oauth_authorization_code::Column::Code.eq(format!(
+                                            "sha256:{}",
+                                            hex::encode(Sha256::digest(
+                                                secret.expose_secret().as_bytes()
+                                            ))
+                                        )))
+                                        .add(
+                                            sea_orm::Condition::all()
+                                                .add(
+                                                    oauth_authorization_code::Column::Code
+                                                        .not_like("sha256:%"),
+                                                )
+                                                .add(
+                                                    oauth_authorization_code::Column::Code
+                                                        .eq(secret.expose_secret()),
+                                                ),
+                                        ),
+                                ),
+                        ),
+                )
                 .one(&self.transaction),
         )
         .await
@@ -772,6 +910,7 @@ impl SecurityTransaction for PgSecurityTransaction {
                     subject: Set(c.sub.clone()),
                     created_at: Set(issued_at),
                     revoked_at: Set(None),
+                    ..Default::default()
                 }
                 .insert(&self.transaction),
             )
@@ -843,32 +982,22 @@ impl SecurityTransaction for PgSecurityTransaction {
         issuer: &str,
         secret: &SecretToken,
     ) -> Result<Option<CredentialSnapshot>, SecurityError> {
-        use sea_orm::QuerySelect;
-        let Some(snapshot) = self.refresh(issuer, secret).await? else {
+        let Some(row) = self
+            .run(
+                credential::Entity::find()
+                    .filter(credential::Column::Issuer.eq(issuer))
+                    .filter(credential::Column::CredentialKind.eq("refresh"))
+                    .filter(credential::Column::SecretDigest.eq(refresh_digest(secret).to_vec()))
+                    .one(&self.transaction),
+            )
+            .await?
+        else {
             return Ok(None);
         };
-        let row = &snapshot.current.credential;
-        for (table, id) in [
-            ("security_grant", Some(row.grant_id)),
-            ("security_session", row.session_id),
-            ("security_refresh_family", row.family_id),
-        ] {
-            if let Some(id) = id {
-                self.run(
-                    self.transaction
-                        .query_one_raw(Statement::from_sql_and_values(
-                            DbBackend::Postgres,
-                            format!("SELECT id FROM {table} WHERE id=$1 FOR UPDATE"),
-                            [id.into()],
-                        )),
-                )
-                .await?;
-            }
-        }
+        self.lock_identity_credential(&row).await?;
         let row = self
             .run(
                 credential::Entity::find_by_id((issuer.to_owned(), row.jti.clone()))
-                    .lock_exclusive()
                     .one(&self.transaction),
             )
             .await?
@@ -1253,10 +1382,12 @@ impl SecurityTransaction for PgSecurityTransaction {
         }))
     }
     async fn commit(self: Box<Self>) -> Result<(), SecurityError> {
+        self.budget.remaining()?;
         self.budget
             .run(self.transaction.commit())
-            .await?
-            .map_err(unavailable)
+            .await
+            .map_err(|_| SecurityError::CommitUncertain)?
+            .map_err(commit_failure)
     }
     async fn rollback(self: Box<Self>) -> Result<(), SecurityError> {
         self.budget
@@ -1264,4 +1395,21 @@ impl SecurityTransaction for PgSecurityTransaction {
             .await?
             .map_err(unavailable)
     }
+}
+
+fn commit_failure(error: DbErr) -> SecurityError {
+    if let DbErr::Exec(sea_orm::RuntimeErr::SqlxError(e))
+    | DbErr::Query(sea_orm::RuntimeErr::SqlxError(e)) = &error
+        && let Some(code) = e.as_database_error().and_then(|e| e.code())
+    {
+        if code == "40001" || code == "40P01" || code.starts_with("23") {
+            return SecurityError::Conflict;
+        }
+        // A server rejection (including a deferred trigger) is an observed
+        // abort. Transport failures and unknown completion cannot be replayed.
+        if code != "40003" && !code.starts_with("08") {
+            return SecurityError::DependencyUnavailable;
+        }
+    }
+    SecurityError::CommitUncertain
 }

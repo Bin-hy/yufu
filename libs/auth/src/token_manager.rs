@@ -202,6 +202,7 @@ impl TokenManager {
             exp: exp.timestamp() as u64,
             nonce: nonce.map(|s| s.to_string()),
             at_hash,
+            ..Default::default()
         };
         encode(
             &Header::default(),
@@ -312,11 +313,11 @@ impl IdTokenSigner {
 
         // Extract public key DER for JWKS + a DecodingKey for self-verify
         use rsa::pkcs8::DecodePrivateKey;
-        let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(
+        let private_key = rsa::PrivateKey::from_pkcs8_pem(
             std::str::from_utf8(pem).map_err(|e| format!("Invalid UTF-8 in PEM: {}", e))?,
         )
         .map_err(|e| format!("Failed to parse RSA key: {}", e))?;
-        let public_key = rsa::RsaPublicKey::from(&private_key);
+        let public_key = rsa::PublicKey::from(&private_key);
         use rsa::pkcs1::EncodeRsaPublicKey;
         let pub_der = public_key
             .to_pkcs1_der()
@@ -324,10 +325,8 @@ impl IdTokenSigner {
 
         use base64::Engine;
         use rsa::traits::PublicKeyParts;
-        let n_b64 =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be());
-        let e_b64 =
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be());
+        let n_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.n_bytes());
+        let e_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e_bytes());
         let decoding_key = DecodingKey::from_rsa_components(&n_b64, &e_b64)
             .map_err(|e| format!("Failed to build RSA decoding key: {}", e))?;
 
@@ -381,6 +380,7 @@ impl IdTokenSigner {
             exp: exp.timestamp() as u64,
             nonce: nonce.map(|s| s.to_string()),
             at_hash,
+            ..Default::default()
         };
 
         if let Some(ref rsa_key) = self.rsa_encoding_key {
@@ -396,8 +396,127 @@ impl IdTokenSigner {
         }
     }
 
-    /// Sign a standard JWT access token (RFC 7519 claims) with RS256 (or HS256 fallback).
-    ///
+    /// Sign the managed identity profile using the caller's trusted timestamps.
+    pub fn sign_identity_id_token(
+        &self,
+        claims: &IdTokenClaims,
+    ) -> Result<crate::security::identity::SecretToken, crate::security::error::SecurityError> {
+        use crate::security::{
+            error::SecurityError,
+            identity::{PrincipalKind, PrincipalRef, SecretToken},
+        };
+        PrincipalRef::new(&claims.iss, PrincipalKind::User, &claims.sub)?;
+        let key = self
+            .rsa_encoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        if claims.aud.as_ref().is_none_or(|aud| aud.is_empty())
+            || claims.exp <= claims.iat
+            || claims.auth_time.is_none_or(|at| at > claims.iat)
+            || claims
+                .sid
+                .as_ref()
+                .is_none_or(|sid| uuid::Uuid::parse_str(sid).is_err())
+            || claims.email.is_none() && claims.email_verified.is_some()
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(self.kid.clone());
+        SecretToken::new(
+            encode(&header, claims, key).map_err(|_| SecurityError::DependencyUnavailable)?,
+        )
+    }
+
+    /// Verify a local ID Token for logout association. Expiration is deliberately
+    /// ignored; the caller must check the referenced current or recent RP session.
+    pub fn logout_reference(
+        &self,
+        token: &crate::security::identity::SecretToken,
+        issuer: &str,
+        now_seconds: u64,
+    ) -> Result<crate::claims::LogoutReference, crate::security::error::SecurityError> {
+        use crate::security::{credential::restricted_jws_key_id, error::SecurityError};
+        if token.expose_secret().len() > 8192
+            || restricted_jws_key_id(token.expose_secret(), "JWT")? != self.kid
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let key = self
+            .rsa_decoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&[issuer]);
+        validation.validate_aud = false;
+        validation.validate_exp = false;
+        let claims = decode::<IdTokenClaims>(token.expose_secret(), key, &validation)
+            .map_err(|_| SecurityError::InvalidCredential)?
+            .claims;
+        let client_id = claims
+            .aud
+            .filter(|s| !s.is_empty())
+            .ok_or(SecurityError::InvalidCredential)?;
+        let protocol_sid = claims
+            .sid
+            .and_then(|s| uuid::Uuid::parse_str(&s).ok())
+            .filter(|id| !id.is_nil())
+            .ok_or(SecurityError::InvalidCredential)?;
+        let auth_time = claims
+            .auth_time
+            .filter(|at| *at <= claims.iat)
+            .ok_or(SecurityError::InvalidCredential)?;
+        if claims.iss != issuer
+            || claims.sub.is_empty()
+            || claims.exp <= claims.iat
+            || claims.iat > now_seconds.saturating_add(60)
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
+        Ok(crate::claims::LogoutReference {
+            issuer: claims.iss,
+            subject: claims.sub,
+            client_id,
+            protocol_sid,
+            auth_time,
+        })
+    }
+
+    pub fn sign_logout_token(
+        &self,
+        claims: &crate::claims::LogoutTokenClaims,
+    ) -> Result<crate::security::identity::SecretToken, crate::security::error::SecurityError> {
+        use crate::security::{
+            error::SecurityError,
+            identity::{PrincipalKind, PrincipalRef, SecretToken},
+        };
+        PrincipalRef::new(&claims.iss, PrincipalKind::User, &claims.sub)?;
+        let key = self
+            .rsa_encoding_key
+            .as_ref()
+            .ok_or(SecurityError::DependencyUnavailable)?;
+        if claims.aud.is_empty()
+            || claims.exp <= claims.iat
+            || claims.exp - claims.iat > 120
+            || uuid::Uuid::parse_str(&claims.jti).is_err()
+            || uuid::Uuid::parse_str(&claims.sid).is_err()
+            || claims.events.len() != 1
+            || claims
+                .events
+                .get("http://schemas.openid.net/event/backchannel-logout")
+                .is_none_or(|v| v.as_object().is_none_or(|m| !m.is_empty()))
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(self.kid.clone());
+        header.typ = Some("logout+jwt".into());
+        SecretToken::new(
+            encode(&header, claims, key).map_err(|_| SecurityError::DependencyUnavailable)?,
+        )
+    }
+
+    /// Sign a standard JWT access token with RS256 (or HS256 fallback).
     /// `aud` is the application/client this token is intended for; consumers should verify it.
     /// `roles` and `permissions` are embedded so downstream services can make coarse-grained
     /// local decisions without calling the PDP on every request.
@@ -512,13 +631,10 @@ impl IdTokenSigner {
         let pub_der = self.rsa_public_key_der.as_ref()?;
 
         // Parse the DER to extract n and e
-        let public_key = rsa::RsaPublicKey::from_pkcs1_der(pub_der).ok()?;
+        let public_key = rsa::PublicKey::from_pkcs1_der(pub_der).ok()?;
         use rsa::traits::PublicKeyParts;
-        let n = public_key.n();
-        let e = public_key.e();
-
-        let n_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(n.to_bytes_be());
-        let e_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(e.to_bytes_be());
+        let n_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.n_bytes());
+        let e_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e_bytes());
 
         let jwks = serde_json::json!({
             "keys": [{
@@ -536,6 +652,202 @@ impl IdTokenSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn identity_signer() -> IdTokenSigner {
+        use rsa::pkcs8::{EncodePrivateKey, LineEnding};
+        let key = rsa::PrivateKey::new(&mut getrandom::SysRng, 2048).unwrap();
+        IdTokenSigner::from_rsa_pem(key.to_pkcs8_pem(LineEnding::LF).unwrap().as_bytes(), 300)
+            .unwrap()
+    }
+
+    fn identity_claims() -> IdTokenClaims {
+        IdTokenClaims {
+            iss: "https://issuer.test".into(),
+            sub: "123".into(),
+            aud: Some("test-client".into()),
+            iat: 1_000,
+            exp: 1_300,
+            auth_time: Some(900),
+            sid: Some(Uuid::new_v4().to_string()),
+            nonce: Some("original-nonce".into()),
+            at_hash: Some("access-hash".into()),
+            ..Default::default()
+        }
+    }
+
+    fn verify_identity_json(signer: &IdTokenSigner, token: &str) -> serde_json::Value {
+        let jwks: jsonwebtoken::jwk::JwkSet =
+            serde_json::from_str(&signer.jwks_json().unwrap()).unwrap();
+        let header = jsonwebtoken::decode_header(token).unwrap();
+        assert_eq!(header.alg, Algorithm::RS256);
+        let jwk = jwks.find(header.kid.as_deref().unwrap()).unwrap();
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&["https://issuer.test"]);
+        validation.set_audience(&["test-client"]);
+        // Fixed trusted times are intentional; this test is independent of wall time.
+        validation.validate_exp = false;
+        decode::<serde_json::Value>(token, &DecodingKey::from_jwk(jwk).unwrap(), &validation)
+            .unwrap()
+            .claims
+    }
+
+    #[test]
+    fn identity_id_token_uses_published_rsa_key_and_omits_absent_profile() {
+        let signer = identity_signer();
+        let claims = identity_claims();
+        let token = signer.sign_identity_id_token(&claims).unwrap();
+        let actual = verify_identity_json(&signer, token.expose_secret());
+        assert_eq!(actual["auth_time"], 900);
+        assert_eq!(actual["iat"], 1_000);
+        assert_eq!(actual["exp"], 1_300);
+        assert_eq!(actual["sid"], claims.sid.unwrap());
+        assert_eq!(actual["nonce"], "original-nonce");
+        for field in ["name", "preferred_username", "email", "email_verified"] {
+            assert!(
+                actual.get(field).is_none(),
+                "invented profile field: {field}"
+            );
+        }
+        let mut bad_audience = Validation::new(Algorithm::RS256);
+        bad_audience.validate_exp = false;
+        bad_audience.set_audience(&["other-client"]);
+        assert!(
+            decode::<serde_json::Value>(
+                token.expose_secret(),
+                signer.rsa_decoding_key.as_ref().unwrap(),
+                &bad_audience
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn identity_signing_rejects_hmac_and_incomplete_authentication_context() {
+        use crate::security::error::SecurityError;
+        let claims = identity_claims();
+        assert_eq!(
+            IdTokenSigner::from_hmac("secret", 300)
+                .sign_identity_id_token(&claims)
+                .err(),
+            Some(SecurityError::DependencyUnavailable)
+        );
+        let signer = identity_signer();
+        for variant in 0..5 {
+            let mut invalid = claims.clone();
+            match variant {
+                0 => invalid.auth_time = None,
+                1 => invalid.auth_time = Some(invalid.iat + 1),
+                2 => invalid.sid = Some("not-a-sid".into()),
+                3 => invalid.exp = invalid.iat,
+                _ => invalid.email_verified = Some(true),
+            }
+            assert_eq!(
+                signer.sign_identity_id_token(&invalid).err(),
+                Some(SecurityError::InvalidCredential)
+            );
+        }
+    }
+
+    #[test]
+    fn identity_logout_reference_accepts_expired_id_token_but_rejects_other_key_and_profile() {
+        use crate::security::{error::SecurityError, identity::SecretToken};
+        let signer = identity_signer();
+        let claims = identity_claims();
+        let token = signer.sign_identity_id_token(&claims).unwrap();
+        let reference = signer
+            .logout_reference(&token, "https://issuer.test", 2000)
+            .unwrap();
+        assert_eq!(reference.client_id, "test-client");
+        assert_eq!(reference.auth_time, 900);
+        assert_eq!(reference.subject, "123");
+        assert_eq!(
+            signer
+                .logout_reference(&token, "https://other.test", 2000)
+                .err(),
+            Some(SecurityError::InvalidCredential)
+        );
+        assert_eq!(
+            signer
+                .logout_reference(&token, "https://issuer.test", 900)
+                .err(),
+            Some(SecurityError::InvalidCredential)
+        );
+        let foreign = identity_signer().sign_identity_id_token(&claims).unwrap();
+        assert_eq!(
+            signer
+                .logout_reference(&foreign, "https://issuer.test", 2000)
+                .err(),
+            Some(SecurityError::InvalidCredential)
+        );
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(signer.kid.clone());
+        header.typ = Some("at+jwt".into());
+        let access_profile = SecretToken::new(
+            encode(&header, &claims, signer.rsa_encoding_key.as_ref().unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            signer
+                .logout_reference(&access_profile, "https://issuer.test", 2000)
+                .err(),
+            Some(SecurityError::InvalidCredential)
+        );
+        // A malicious JOSE URL/extension must not cause remote key retrieval.
+        header.typ = Some("JWT".into());
+        header.jku = Some("https://attacker.test/keys".into());
+        let external_key = SecretToken::new(
+            encode(&header, &claims, signer.rsa_encoding_key.as_ref().unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            signer
+                .logout_reference(&external_key, "https://issuer.test", 2000)
+                .err(),
+            Some(SecurityError::InvalidCredential)
+        );
+    }
+
+    #[test]
+    fn identity_logout_token_has_single_event_sid_and_no_nonce() {
+        use crate::{claims::LogoutTokenClaims, security::error::SecurityError};
+        let signer = identity_signer();
+        let claims = LogoutTokenClaims {
+            iss: "https://issuer.test".into(),
+            aud: "test-client".into(),
+            sub: "123".into(),
+            iat: 1_000,
+            exp: 1_120,
+            jti: Uuid::new_v4().to_string(),
+            sid: Uuid::new_v4().to_string(),
+            events: std::collections::BTreeMap::from([(
+                "http://schemas.openid.net/event/backchannel-logout".into(),
+                serde_json::json!({}),
+            )]),
+        };
+        let token = signer.sign_logout_token(&claims).unwrap();
+        let actual = verify_identity_json(&signer, token.expose_secret());
+        assert_eq!(actual["sid"], claims.sid);
+        assert_eq!(actual["jti"], claims.jti);
+        assert!(actual.get("nonce").is_none());
+        assert_eq!(actual["events"].as_object().unwrap().len(), 1);
+        let mut invalid = claims.clone();
+        invalid.exp += 1;
+        assert_eq!(
+            signer.sign_logout_token(&invalid).err(),
+            Some(SecurityError::InvalidCredential)
+        );
+        invalid = claims;
+        invalid
+            .events
+            .insert("unexpected".into(), serde_json::json!({}));
+        assert_eq!(
+            signer.sign_logout_token(&invalid).err(),
+            Some(SecurityError::InvalidCredential)
+        );
+        let mut with_nonce = actual;
+        with_nonce["nonce"] = serde_json::json!("forbidden");
+        assert!(serde_json::from_value::<LogoutTokenClaims>(with_nonce).is_err());
+    }
 
     fn assert_id_token_subject(token: &str, key: &DecodingKey, algorithm: Algorithm) {
         let mut validation = Validation::new(algorithm);
@@ -589,7 +901,7 @@ mod tests {
     fn test_sign_id_token_rsa_string_subject() {
         use rsa::pkcs8::{EncodePrivateKey, LineEnding};
 
-        let private_key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).unwrap();
+        let private_key = rsa::PrivateKey::new(&mut getrandom::SysRng, 2048).unwrap();
         let pem = private_key.to_pkcs8_pem(LineEnding::LF).unwrap();
         let signer = IdTokenSigner::from_rsa_pem(pem.as_bytes(), 300).unwrap();
         let token = signer

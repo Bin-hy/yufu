@@ -5,6 +5,10 @@ mod m20260331_000005_seed_oidc_scopes;
 mod m20260508_000006_seed_permission_authorities;
 mod m20260731_000001_seed_mcp_access;
 pub(crate) mod m20261107_000003_security_operations;
+pub(crate) mod m20261109_000004_identity_operations;
+pub(crate) mod m20261109_000010_identity_reader_operations;
+pub(crate) mod m20261109_000011_identity_migration_operations;
+pub(crate) mod m20261109_000012_identity_console_operations;
 
 pub struct Migrator;
 

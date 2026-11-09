@@ -105,6 +105,7 @@ impl UserService {
             nickname: Set(Some(nickname.to_owned())),
             role_id: Set(role.id.to_owned()),
             description: Set(None),
+            ..Default::default()
         };
 
         // 3. 插入数据库
@@ -118,7 +119,10 @@ impl UserService {
         Ok(user_vo)
     }
 
-    pub async fn get_user_by_id(db: &DatabaseConnection, user_id: IdType) -> Result<UserVO> {
+    pub async fn get_user_by_id(
+        db: &impl sea_orm::ConnectionTrait,
+        user_id: IdType,
+    ) -> Result<UserVO> {
         if let Some((user_db, role_db_opt)) =
             user::Entity::find_with_role_by_id(db, user_id).await?
         {

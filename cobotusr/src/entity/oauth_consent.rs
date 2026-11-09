@@ -14,11 +14,13 @@ pub struct Model {
     pub scope: String,     // space-separated consented scopes
     pub create_time: DateTime,
     pub update_time: DateTime,
+    pub environment_id: Option<Uuid>,
+    pub config_version_id: Option<Uuid>,
 }
 
 impl Entity {
-    pub async fn find_by_user_and_client(
-        db: &DatabaseConnection,
+    pub async fn find_by_user_and_client<C: ConnectionTrait>(
+        db: &C,
         user_id: IdType,
         client_id: &str,
     ) -> Result<Option<Model>, DbErr> {

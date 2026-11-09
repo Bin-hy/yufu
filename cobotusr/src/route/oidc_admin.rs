@@ -1,3 +1,4 @@
+use crate::service::identity::legacy_governance::{LegacyRequest, MutationScope, mutate};
 use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -68,7 +69,7 @@ pub struct SecretResp {
     pub client_secret: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct ClientUpdateReq {
     pub name: Option<String>,
     pub redirect_uris: Option<Vec<String>>,
@@ -77,7 +78,7 @@ pub struct ClientUpdateReq {
     pub public_client: Option<bool>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct ScopeInsertReq {
     pub name: String,
     pub description: Option<String>,
@@ -113,32 +114,10 @@ async fn create_client(
     State(state): State<AppState>,
     Json(req): Json<ClientCreateReq>,
 ) -> Result<Json<ClientCreateResp>> {
-    let db = &state.database.connection;
-    let user_id = parse_user_id(&claim.sub)?;
-    let redirect_uris = req
-        .redirect_uris
-        .unwrap_or_else(|| vec![req.redirect_uri.clone()]);
-    let allowed_scopes = req
-        .allowed_scopes
-        .unwrap_or_else(|| vec!["openid".into(), "profile".into(), "email".into()]);
-    let grant_types = req
-        .grant_types
-        .unwrap_or_else(|| vec!["authorization_code".into(), "refresh_token".into()]);
-    let (inserted, client_secret) = OidcService::register_client(
-        db,
-        user_id,
-        uuid::Uuid::new_v4().to_string(),
-        req.name,
-        redirect_uris,
-        allowed_scopes,
-        grant_types,
-        req.public_client,
-    )
-    .await?;
-    Ok(Json(ClientCreateResp {
-        client: ClientVO::from(inserted),
-        client_secret,
-    }))
+    let _ = (claim, state, req);
+    Err(crate::error::AppError::BadRequest(
+        "请通过开发者控制台或管理员接入注册身份应用".into(),
+    ))
 }
 
 async fn get_client(
@@ -155,58 +134,109 @@ async fn get_client(
 async fn update_client(
     claim: AccessTokenClaims,
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<LegacyRequest>,
     Path(id): Path<i32>,
     Json(req): Json<ClientUpdateReq>,
 ) -> Result<Json<ClientVO>> {
-    let db = &state.database.connection;
     let user_id = parse_user_id(&claim.sub)?;
-    let updated = OidcService::update_client(
-        db,
-        id,
-        user_id,
-        req.name,
-        req.redirect_uris,
-        req.allowed_scopes,
-        req.grant_types,
-        req.public_client,
+    mutate(
+        &state,
+        &context,
+        "PATCH",
+        "/oidc/client/{id}",
+        MutationScope::Client(id),
+        move |db| {
+            let req = req.clone();
+            Box::pin(async move {
+                let updated = OidcService::update_client(
+                    db,
+                    id,
+                    user_id,
+                    req.name,
+                    req.redirect_uris,
+                    req.allowed_scopes,
+                    req.grant_types,
+                    req.public_client,
+                )
+                .await?;
+                Ok(Json(ClientVO::from(updated)))
+            })
+        },
     )
-    .await?;
-    Ok(Json(ClientVO::from(updated)))
+    .await
 }
 
 async fn delete_client(
     claim: AccessTokenClaims,
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<LegacyRequest>,
     Path(id): Path<i32>,
 ) -> Result<http::StatusCode> {
-    let db = &state.database.connection;
     let user_id = parse_user_id(&claim.sub)?;
-    OidcService::delete_client(db, id, user_id).await?;
-    Ok(http::StatusCode::NO_CONTENT)
+    mutate(
+        &state,
+        &context,
+        "DELETE",
+        "/oidc/client/{id}",
+        MutationScope::Client(id),
+        move |db| {
+            Box::pin(async move {
+                OidcService::delete_client(db, id, user_id).await?;
+                Ok(http::StatusCode::NO_CONTENT)
+            })
+        },
+    )
+    .await
 }
 
 async fn regenerate_secret(
     claim: AccessTokenClaims,
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<LegacyRequest>,
     Path(id): Path<i32>,
 ) -> Result<Json<SecretResp>> {
-    let db = &state.database.connection;
     let user_id = parse_user_id(&claim.sub)?;
-    let (_updated, new_secret) = OidcService::regenerate_client_secret(db, id, user_id).await?;
-    Ok(Json(SecretResp {
-        client_secret: new_secret,
-    }))
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/oidc/client/{id}/secret",
+        MutationScope::Client(id),
+        move |db| {
+            Box::pin(async move {
+                let (_updated, new_secret) =
+                    OidcService::regenerate_client_secret(db, id, user_id).await?;
+                Ok(Json(SecretResp {
+                    client_secret: new_secret,
+                }))
+            })
+        },
+    )
+    .await
 }
 
 // --- Scope Handlers ---
 
 async fn add_scope(
     State(state): State<AppState>,
+    axum::Extension(context): axum::Extension<LegacyRequest>,
     Json(req): Json<ScopeInsertReq>,
 ) -> Result<Json<crate::entity::oauth_scope::Model>> {
-    let db = &state.database.connection;
-    let inserted = OidcService::add_scope(db, req.name, req.description).await?;
-    Ok(Json(inserted))
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/oidc/scope",
+        MutationScope::Registry,
+        move |db| {
+            let req = req.clone();
+            Box::pin(async move {
+                let inserted = OidcService::add_scope(db, req.name, req.description).await?;
+                Ok(Json(inserted))
+            })
+        },
+    )
+    .await
 }
 
 async fn list_scopes(

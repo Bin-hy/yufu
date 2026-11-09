@@ -24,6 +24,14 @@ mod m20261107_000001_security_identity;
 mod m20261107_000002_security_permit_audit;
 mod m20261108_000001_security_refresh_pair;
 mod m20261108_000002_auth_center;
+mod m20261109_000001_identity_accounts;
+mod m20261109_000002_identity_applications;
+mod m20261109_000003_identity_sessions;
+mod m20261109_000005_identity_code_rp;
+mod m20261109_000006_identity_governance;
+mod m20261109_000007_identity_client_secret_revision;
+mod m20261109_000008_identity_assignment_operations;
+mod m20261109_000009_identity_policy_barrier;
 
 use crate::seed;
 pub struct Migrator;
@@ -63,6 +71,32 @@ impl MigratorTrait for Migrator {
         ));
         migrations.push(Box::new(m20261108_000001_security_refresh_pair::Migration));
         migrations.push(Box::new(m20261108_000002_auth_center::Migration));
+        migrations.push(Box::new(m20261109_000001_identity_accounts::Migration));
+        migrations.push(Box::new(m20261109_000002_identity_applications::Migration));
+        migrations.push(Box::new(m20261109_000003_identity_sessions::Migration));
+        migrations.push(Box::new(
+            seed::m20261109_000004_identity_operations::Migration,
+        ));
+        migrations.push(Box::new(m20261109_000005_identity_code_rp::Migration));
+        migrations.push(Box::new(m20261109_000006_identity_governance::Migration));
+        migrations.push(Box::new(
+            m20261109_000007_identity_client_secret_revision::Migration,
+        ));
+        migrations.push(Box::new(
+            m20261109_000008_identity_assignment_operations::Migration,
+        ));
+        migrations.push(Box::new(
+            m20261109_000009_identity_policy_barrier::Migration,
+        ));
+        migrations.push(Box::new(
+            seed::m20261109_000010_identity_reader_operations::Migration,
+        ));
+        migrations.push(Box::new(
+            seed::m20261109_000011_identity_migration_operations::Migration,
+        ));
+        migrations.push(Box::new(
+            seed::m20261109_000012_identity_console_operations::Migration,
+        ));
         migrations
     }
 }

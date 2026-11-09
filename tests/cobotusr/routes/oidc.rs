@@ -1,17 +1,11 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
 use axum::http::StatusCode;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use cobotusr::config::{BootstrapClient, Config};
-use cobotusr::entity::role::RoleEnum;
 use reqwest::{Client, Url};
 use tokio::net::TcpListener;
 
 use super::super::common::{get_postgres_container, shutdown_signal};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Arc;
 
 pub(super) struct TestRsaFile(std::path::PathBuf);
 impl Drop for TestRsaFile {
@@ -20,10 +14,15 @@ impl Drop for TestRsaFile {
     }
 }
 pub(super) fn rsa_test_token(config: &mut Config) -> (String, TestRsaFile) {
+    config.auth.allow_insecure_loopback_cookies = true;
+    config
+        .http
+        .listen
+        .set_ip(std::net::Ipv4Addr::LOCALHOST.into());
     use rsa::pkcs8::EncodePrivateKey;
     static PEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let pem = PEM.get_or_init(|| {
-        rsa::RsaPrivateKey::new(&mut rand::rngs::OsRng, 2048)
+        rsa::PrivateKey::new(&mut getrandom::SysRng, 2048)
             .unwrap()
             .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
             .unwrap()
@@ -142,74 +141,52 @@ async fn authorize_code_for_client(
 
 #[tokio::test]
 async fn test_oidc_authorization_code_pkce_exchange() {
-    let (_postgres, database_url) = get_postgres_container()
+    let fixture = super::super::common::IdentityFixture::start_configured(|config| {
+        config.auth.exp_seconds = 7200;
+        config.auth.refresh_exp_seconds = 604800;
+        config.oidc.bootstrap_clients.push(BootstrapClient {
+            client_id: CLIENT_ID.to_string(),
+            name: "IM OIDC integration test".to_string(),
+            redirect_uris: vec![
+                REDIRECT_URI.to_string(),
+                POST_LOGOUT_REDIRECT_URI.to_string(),
+            ],
+            allowed_scopes: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
+            grant_types: vec![
+                "authorization_code".to_string(),
+                "refresh_token".to_string(),
+            ],
+            client_secret: None,
+            public_client: true,
+        });
+        config.oidc.bootstrap_clients.push(BootstrapClient {
+            client_id: CONFIDENTIAL_CLIENT_ID.to_string(),
+            name: "Confidential PKCE integration test".to_string(),
+            redirect_uris: vec![REDIRECT_URI.to_string()],
+            allowed_scopes: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
+            grant_types: vec!["authorization_code".to_string()],
+            client_secret: Some(CONFIDENTIAL_CLIENT_SECRET.to_string()),
+            public_client: false,
+        });
+    })
+    .await;
+    super::super::common::seed_legacy_bootstrap(&fixture).await;
+    let access_token = super::identity_support::management_access(&fixture).await;
+    let clock = fixture.clock.clone();
+    let client = fixture.client.clone();
+    let base_url = fixture.base_url.clone();
+    let expected_subject = super::identity_support::admin_id(&fixture)
         .await
-        .expect("Postgres test container should start");
-    let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
-        .await
-        .expect("test listener should bind");
-    let address = listener
-        .local_addr()
-        .expect("listener should have an address");
-
-    let mut config = Config::default();
-    config.database.url = database_url.clone();
-    config.oidc.issuer = format!("http://{address}");
-    // Config::default() derives zero token lifetimes (the `serde(default = ...)`
-    // fallbacks only apply to file-based configs); set explicit values so
-    // issued refresh tokens do not expire immediately.
-    config.auth.exp_seconds = 7200;
-    config.auth.secret = "oidc-regression-csrf-key".into();
-    config.auth.refresh_exp_seconds = 604800;
-    config.oidc.bootstrap_clients.push(BootstrapClient {
-        client_id: CLIENT_ID.to_string(),
-        name: "IM OIDC integration test".to_string(),
-        redirect_uris: vec![
-            REDIRECT_URI.to_string(),
-            POST_LOGOUT_REDIRECT_URI.to_string(),
-        ],
-        allowed_scopes: vec![
-            "openid".to_string(),
-            "profile".to_string(),
-            "email".to_string(),
-        ],
-        grant_types: vec![
-            "authorization_code".to_string(),
-            "refresh_token".to_string(),
-        ],
-        client_secret: None,
-        public_client: true,
-    });
-    config.oidc.bootstrap_clients.push(BootstrapClient {
-        client_id: CONFIDENTIAL_CLIENT_ID.to_string(),
-        name: "Confidential PKCE integration test".to_string(),
-        redirect_uris: vec![REDIRECT_URI.to_string()],
-        allowed_scopes: vec![
-            "openid".to_string(),
-            "profile".to_string(),
-            "email".to_string(),
-        ],
-        grant_types: vec!["authorization_code".to_string()],
-        client_secret: Some(CONFIDENTIAL_CLIENT_SECRET.to_string()),
-        public_client: false,
-    });
-    let (access_token, _rsa_file) = rsa_test_token(&mut config);
-    let healthy = Arc::new(AtomicBool::new(true));
-    let health = healthy.clone();
-    let clock: Arc<dyn auth::security::budget::Clock> = Arc::new(
-        auth::security::budget::SystemClock::new(Arc::new(move || health.load(Ordering::SeqCst))),
-    );
-    tokio::spawn(cobotusr::serve_with_security_clock(
-        config,
-        listener,
-        shutdown_signal(),
-        clock.clone(),
-    ));
-
-    let client = Client::new();
-    let base_url = format!("http://{address}");
-    let expected_subject = RoleEnum::Superadmin.default_id().to_string();
-
+        .to_string();
+    let database_url = fixture.config.database.url.clone();
     let end_session = client
         .get(format!("{base_url}/oidc/logout"))
         .query(&[
@@ -483,7 +460,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
             .unwrap(),
     );
     strict.authenticate(&headers).await.unwrap();
-    healthy.store(false, Ordering::SeqCst);
+    fixture.clock.set_synchronized(false);
     let unavailable = client
         .post(format!("{base_url}/oidc/token"))
         .form(&[
@@ -495,7 +472,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         .await
         .unwrap();
     assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
-    healthy.store(true, Ordering::SeqCst);
+    fixture.clock.set_synchronized(true);
     let rotated = client
         .post(format!("{base_url}/oidc/token"))
         .form(&[
@@ -518,6 +495,7 @@ async fn test_oidc_authorization_code_pkce_exchange() {
         .await
         .unwrap();
     assert_eq!(replay.status(), StatusCode::UNAUTHORIZED);
+    fixture.close().await;
 }
 
 async fn assert_session_configuration_failure(mode: &str) {

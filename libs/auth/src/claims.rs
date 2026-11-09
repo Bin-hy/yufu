@@ -87,13 +87,56 @@ impl Display for AccessTokenClaims {
 }
 
 /// OIDC ID Token claims (RFC 7519 + OpenID Connect Core 1.0)
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub struct IdTokenClaims {
-    pub iss: String,             // issuer
-    pub sub: String,             // OIDC subject; convert local user IDs at the boundary
-    pub aud: Option<String>,     // audience (client_id)
-    pub iat: u64,                // issued at
-    pub exp: u64,                // expiration
-    pub nonce: Option<String>,   // replay protection
+    pub iss: String,         // issuer
+    pub sub: String,         // OIDC subject; convert local user IDs at the boundary
+    pub aud: Option<String>, // audience (client_id)
+    pub iat: u64,            // issued at
+    pub exp: u64,            // expiration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>, // replay protection
     pub at_hash: Option<String>, // access token hash
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_time: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_verified: Option<bool>,
+}
+
+#[derive(Clone, Default)]
+pub struct IdentityProfile {
+    pub name: Option<String>,
+    pub preferred_username: Option<String>,
+    pub email: Option<String>,
+    pub email_verified: Option<bool>,
+}
+
+/// An ID Token's signed session reference, never an authentication credential.
+pub struct LogoutReference {
+    pub issuer: String,
+    pub subject: String,
+    pub client_id: String,
+    pub protocol_sid: uuid::Uuid,
+    pub auth_time: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogoutTokenClaims {
+    pub iss: String,
+    pub aud: String,
+    pub iat: u64,
+    pub exp: u64,
+    pub jti: String,
+    pub sub: String,
+    pub sid: String,
+    pub events: std::collections::BTreeMap<String, serde_json::Value>,
 }

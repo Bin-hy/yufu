@@ -41,7 +41,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
     pub async fn insert_override(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         user_id: IdType,
         authority_id: IdType,
         allow: bool,
@@ -58,7 +58,7 @@ impl Entity {
     }
 
     pub async fn delete_pair(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         user_id: IdType,
         authority_id: IdType,
     ) -> Result<DeleteResult, DbErr> {
@@ -70,7 +70,7 @@ impl Entity {
     }
 
     pub async fn find_pair(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         user_id: IdType,
         authority_id: IdType,
     ) -> Result<Option<Model>, DbErr> {
@@ -82,7 +82,7 @@ impl Entity {
     }
 
     pub async fn paginate(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         page_size: u64,
         page_number: u64,
     ) -> Result<(u64, Vec<Model>), DbErr> {
@@ -94,7 +94,7 @@ impl Entity {
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct UseAuthorityAddReq {
     pub user_id: IdType,
     pub authority_id: IdType,
@@ -102,7 +102,7 @@ pub struct UseAuthorityAddReq {
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct UseAuthorityDeleteReq {
     pub user_id: IdType,
     pub authority_id: IdType,
@@ -110,7 +110,7 @@ pub struct UseAuthorityDeleteReq {
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct UseAuthorityPatchReq {
     pub user_id: IdType,
     pub authority_id: IdType,

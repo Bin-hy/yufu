@@ -1,10 +1,26 @@
 use crate::AppState;
 use axum::Router;
 
+pub mod account;
 pub mod application;
+mod application_admin;
+mod application_governance;
+mod assignment;
 pub mod auth;
 pub mod authority;
+pub mod developer;
 pub mod enforce;
+pub mod enterprise_admin;
+pub mod identity_actions;
+pub mod identity_authorization;
+pub mod identity_browser;
+mod identity_console;
+pub(crate) mod identity_cors;
+mod identity_logout;
+mod identity_migration;
+pub mod identity_status;
+pub mod identity_token;
+pub mod identity_userinfo;
 pub mod mcp;
 pub mod oidc;
 pub mod oidc_admin;

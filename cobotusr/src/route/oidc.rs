@@ -1,6 +1,6 @@
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
-use axum::response::{Html, Redirect};
+use axum::response::Html;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use crate::entity::oauth_client;
 use crate::result::Result;
 use crate::service::oidc::{CreateAuthCodeParams, OidcService, get_issuer_base};
 use crate::service::security::{browser, revocation::RevocationReceipt};
-use crate::{AppState, IdType, parse_user_id};
+use crate::{AppState, parse_user_id};
 use auth::claims::AccessTokenClaims;
 use auth::security::{budget::SecurityBudget, error::SecurityError, identity::SecretToken};
 use chrono::Utc;
@@ -23,12 +23,16 @@ pub struct OidcDiscovery {
     pub jwks_uri: Option<String>,
     pub revocation_endpoint: String,
     pub introspection_endpoint: String,
-    pub end_session_endpoint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_session_endpoint: Option<String>,
     pub response_types_supported: Vec<String>,
+    pub response_modes_supported: Vec<String>,
     pub subject_types_supported: Vec<String>,
     pub id_token_signing_alg_values_supported: Vec<String>,
     pub grant_types_supported: Vec<String>,
     pub token_endpoint_auth_methods_supported: Vec<String>,
+    pub introspection_endpoint_auth_methods_supported: Vec<String>,
+    pub revocation_endpoint_auth_methods_supported: Vec<String>,
     pub scopes_supported: Vec<String>,
     pub claims_supported: Vec<String>,
     pub code_challenge_methods_supported: Vec<String>,
@@ -166,7 +170,8 @@ pub struct ClientInfoQuery {
     pub scope: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConsentRequest {
     pub client_id: String,
     pub redirect_uri: String,
@@ -203,16 +208,39 @@ pub fn get_public_routes() -> Router<AppState> {
             get(openid_configuration),
         )
         .route("/.well-known/jwks.json", get(jwks))
-        .route("/oidc/token", post(token_endpoint))
-        .route("/oidc/revoke", post(revoke))
-        .route("/oidc/introspect", post(introspect))
+        .route(
+            "/oidc/token",
+            post(super::identity_token::token).layer(axum::extract::DefaultBodyLimit::max(16_384)),
+        )
+        .route(
+            "/oidc/revoke",
+            post(super::identity_status::revoke)
+                .layer(axum::extract::DefaultBodyLimit::max(16_384)),
+        )
+        .route(
+            "/oidc/introspect",
+            post(super::identity_status::introspect)
+                .layer(axum::extract::DefaultBodyLimit::max(16_384)),
+        )
+        .route(
+            "/oidc/userinfo",
+            get(super::identity_userinfo::userinfo).post(super::identity_userinfo::userinfo),
+        )
         .route("/oidc/logout", get(end_session).post(confirm_end_session))
-        .route("/oidc/authorize", get(authorize))
+        .route(
+            "/oidc/end-session",
+            get(super::identity_logout::get)
+                .post(super::identity_logout::post)
+                .layer(axum::extract::DefaultBodyLimit::max(16_384)),
+        )
+        .route(
+            "/oidc/authorize",
+            get(super::identity_authorization::authorize),
+        )
 }
 
 pub fn get_auth_routes() -> Router<AppState> {
     Router::new()
-        .route("/oidc/userinfo", get(userinfo))
         .route("/oidc/authorize/client-info", get(authorize_client_info))
         .route("/oidc/authorize/consent", post(authorize_consent))
         .route("/oidc/authorized-apps", get(list_authorized_apps))
@@ -233,31 +261,38 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
         issuer: base.clone(),
         authorization_endpoint: format!("{}/oidc/authorize", base),
         token_endpoint: format!("{}/oidc/token", base),
-        userinfo_endpoint: format!("{}/api/v1/oidc/userinfo", base),
+        userinfo_endpoint: format!("{}/oidc/userinfo", base),
         jwks_uri: Some(format!("{}/.well-known/jwks.json", base)),
         revocation_endpoint: format!("{}/oidc/revoke", base),
         introspection_endpoint: format!("{}/oidc/introspect", base),
-        end_session_endpoint: format!("{}/oidc/logout", base),
+        end_session_endpoint: (state.id_token_signer.algorithm() == "RS256")
+            .then(|| format!("{}/oidc/end-session", base)),
         response_types_supported: vec!["code".to_string()],
+        response_modes_supported: vec!["query".into()],
         subject_types_supported: vec!["public".to_string()],
         id_token_signing_alg_values_supported: vec![state.id_token_signer.algorithm().to_string()],
         grant_types_supported: vec![
             "authorization_code".to_string(),
             "refresh_token".to_string(),
-            "client_credentials".to_string(),
         ],
         token_endpoint_auth_methods_supported: vec![
             "client_secret_post".to_string(),
             "client_secret_basic".to_string(),
             "none".to_string(),
         ],
+        introspection_endpoint_auth_methods_supported: vec![
+            "client_secret_basic".into(),
+            "client_secret_post".into(),
+        ],
+        revocation_endpoint_auth_methods_supported: vec![
+            "client_secret_basic".into(),
+            "client_secret_post".into(),
+            "none".into(),
+        ],
         scopes_supported: vec![
             "openid".to_string(),
             "profile".to_string(),
             "email".to_string(),
-            "phone".to_string(),
-            "address".to_string(),
-            "offline_access".to_string(),
         ],
         claims_supported: vec![
             "sub".to_string(),
@@ -269,10 +304,12 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
             "at_hash".to_string(),
             "preferred_username".to_string(),
             "name".to_string(),
-            "nickname".to_string(),
             "email".to_string(),
+            "email_verified".into(),
+            "auth_time".into(),
+            "sid".into(),
         ],
-        code_challenge_methods_supported: vec!["S256".to_string(), "plain".to_string()],
+        code_challenge_methods_supported: vec!["S256".to_string()],
     };
     Ok(Json(resp))
 }
@@ -289,59 +326,12 @@ async fn jwks(State(state): State<AppState>) -> axum::response::Response {
     }
 }
 
-/// Extract client_id and client_secret from HTTP Basic Auth header.
-/// Returns (client_id, client_secret) if present.
-fn extract_basic_auth(headers: &http::HeaderMap) -> (Option<String>, Option<String>) {
-    let result = (|| {
-        let auth = headers.get(http::header::AUTHORIZATION)?;
-        let auth_str = auth.to_str().ok()?;
-        let encoded = auth_str.strip_prefix("Basic ")?;
-        let decoded =
-            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded.trim())
-                .ok()?;
-        let credentials = String::from_utf8(decoded).ok()?;
-        let (id, secret) = credentials.split_once(':')?;
-        Some((id.to_string(), secret.to_string()))
-    })();
-    match result {
-        Some((id, secret)) => (Some(id), Some(secret)),
-        None => (None, None),
-    }
-}
-
 /// Unified token endpoint — dispatches by grant_type
 /// Accepts application/x-www-form-urlencoded (OAuth2 standard).
-/// Supports client auth via POST body or HTTP Basic Auth.
-async fn token_endpoint(
-    State(state): State<AppState>,
-    headers: http::HeaderMap,
-    axum::extract::Form(mut req): axum::extract::Form<TokenRequest>,
-) -> Result<Json<TokenResponse>> {
-    // If client_id/client_secret not in body, try HTTP Basic Auth header
-    if req.client_id.is_none() || req.client_secret.is_none() {
-        let (basic_id, basic_secret) = extract_basic_auth(&headers);
-        if req.client_id.is_none() {
-            req.client_id = basic_id;
-        }
-        if req.client_secret.is_none() {
-            req.client_secret = basic_secret;
-        }
-    }
-
-    match req.grant_type.as_str() {
-        "authorization_code" => handle_authorization_code(&state, &req).await,
-        "refresh_token" => handle_refresh_token(&state, &req).await,
-        "client_credentials" => handle_client_credentials(&state, &req).await,
-        _ => Err(crate::error::AppError::BadRequest(format!(
-            "unsupported grant_type: {}",
-            req.grant_type
-        ))),
-    }
-}
-
-async fn handle_authorization_code(
+pub(crate) async fn handle_authorization_code(
     state: &AppState,
     req: &TokenRequest,
+    budget: &SecurityBudget,
 ) -> Result<Json<TokenResponse>> {
     use crate::service::security::lifecycle::CodeExchangeRequest;
     use auth::security::identity::SecretToken;
@@ -366,7 +356,7 @@ async fn handle_authorization_code(
         .clone()
         .map(SecretToken::new)
         .transpose()?;
-    let set = OidcService::exchange_authorization_code(
+    let set = OidcService::exchange_authorization_code_with_budget(
         state,
         CodeExchangeRequest {
             code: &code,
@@ -375,12 +365,17 @@ async fn handle_authorization_code(
             redirect_uri: req.redirect_uri.as_deref(),
             code_verifier: verifier.as_ref(),
         },
+        budget,
     )
     .await?;
     Ok(Json(session_token_response(state, set)))
 }
 
-async fn handle_refresh_token(state: &AppState, req: &TokenRequest) -> Result<Json<TokenResponse>> {
+pub(crate) async fn handle_refresh_token(
+    state: &AppState,
+    req: &TokenRequest,
+    budget: &SecurityBudget,
+) -> Result<Json<TokenResponse>> {
     use crate::service::security::lifecycle::RefreshRequest;
     use auth::security::identity::SecretToken;
     let refresh_token = SecretToken::new(req.refresh_token.clone().ok_or(
@@ -397,13 +392,14 @@ async fn handle_refresh_token(state: &AppState, req: &TokenRequest) -> Result<Js
         .clone()
         .map(SecretToken::new)
         .transpose()?;
-    let set = OidcService::rotate_session_refresh(
+    let set = OidcService::rotate_session_refresh_with_budget(
         state,
         RefreshRequest {
             refresh_token: &refresh_token,
             client_id,
             client_secret: secret.as_ref(),
         },
+        budget,
     )
     .await?;
     Ok(Json(session_token_response(state, set)))
@@ -422,41 +418,51 @@ fn session_token_response(
     }
 }
 
-async fn handle_client_credentials(
+pub(crate) async fn handle_client_credentials(
     state: &AppState,
     req: &TokenRequest,
+    budget: &SecurityBudget,
+    request_id: uuid::Uuid,
 ) -> Result<Json<TokenResponse>> {
-    let db = &state.database.connection;
-
-    // Authenticate client
-    let client = OidcService::authenticate_client(
-        db,
-        req.client_id.as_deref(),
-        req.client_secret.as_deref(),
+    let client_id = req
+        .client_id
+        .as_deref()
+        .ok_or(SecurityError::InvalidCredential)?;
+    let secret = SecretToken::new(
+        req.client_secret
+            .clone()
+            .ok_or(SecurityError::InvalidCredential)?,
+    )?;
+    let signing_state = state.clone();
+    let access_token = crate::service::identity::legacy_client::execute(
+        state,
+        client_id,
+        &secret,
+        None,
+        "client_credentials",
+        request_id,
+        budget,
+        |_, client, _| {
+            let client = client.clone();
+            let scopes = req.scope.clone();
+            let state = signing_state.clone();
+            Box::pin(async move {
+                if let Some(scope) = scopes {
+                    let scopes = scope
+                        .split_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>();
+                    if !OidcService::client_allows_scopes(&client, &scopes) {
+                        return Err(crate::error::AppError::BadRequest(
+                            "requested scope not allowed by client".into(),
+                        ));
+                    }
+                }
+                OidcService::issue_client_credentials_token(&state, &client)
+            })
+        },
     )
     .await?;
-    if !OidcService::client_allows_grant_type(&client, "client_credentials") {
-        return Err(crate::error::AppError::BadRequest(
-            "client not allowed client_credentials grant".to_string(),
-        ));
-    }
-
-    // Validate requested scopes
-    if let Some(scope) = &req.scope {
-        let req_scopes: Vec<String> = scope
-            .split(' ')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !OidcService::client_allows_scopes(&client, &req_scopes) {
-            return Err(crate::error::AppError::BadRequest(
-                "requested scope not allowed by client".to_string(),
-            ));
-        }
-    }
-
-    let access_token = OidcService::issue_client_credentials_token(state, &client)?;
-
     Ok(Json(TokenResponse {
         access_token,
         id_token: None,
@@ -466,15 +472,13 @@ async fn handle_client_credentials(
     }))
 }
 
-async fn revoke(
+pub(crate) async fn revoke_legacy(
     State(state): State<AppState>,
-    headers: HeaderMap,
-    axum::extract::Form(mut req): axum::extract::Form<RevokeRequest>,
+    axum::extract::Form(req): axum::extract::Form<RevokeRequest>,
+    budget: &SecurityBudget,
 ) -> Result<Json<RevocationReceipt>> {
-    let budget = SecurityBudget::new(state.security_clock()?)?;
     // A hint is advisory; registered refresh history and signed access evidence
     // are both tried regardless of its value.
-    normalize_revocation_client_auth(&headers, &mut req)?;
     let client_id = req
         .client_id
         .as_deref()
@@ -513,38 +517,23 @@ async fn revoke(
                     access_reference: reference.as_ref(),
                 },
                 &state.issuer(),
-                &budget,
+                budget,
             )
             .await?,
     ))
 }
 
-fn normalize_revocation_client_auth(headers: &HeaderMap, req: &mut RevokeRequest) -> Result<()> {
-    if let Some(value) = browser::single_header(headers, "authorization")? {
-        if !value.starts_with("Basic ") {
-            return Err(SecurityError::InvalidCredential.into());
-        }
-        let (id, secret) = extract_basic_auth(headers);
-        let id = id.ok_or(SecurityError::InvalidCredential)?;
-        let secret = secret.ok_or(SecurityError::InvalidCredential)?;
-        if req.client_secret.is_some() || req.client_id.as_ref().is_some_and(|body| body != &id) {
-            return Err(crate::error::AppError::BadRequest(
-                "conflicting client authentication".into(),
-            ));
-        }
-        req.client_id = Some(id);
-        req.client_secret = Some(secret);
-    }
-    Ok(())
-}
-
-async fn introspect(
+pub(crate) async fn introspect_legacy(
     State(state): State<AppState>,
     axum::extract::Form(req): axum::extract::Form<IntrospectRequest>,
 ) -> Result<Json<IntrospectResponse>> {
     let db = &state.database.connection;
-    OidcService::authenticate_client(db, req.client_id.as_deref(), req.client_secret.as_deref())
-        .await?;
+    let client = OidcService::authenticate_client(
+        db,
+        req.client_id.as_deref(),
+        req.client_secret.as_deref(),
+    )
+    .await?;
 
     let inactive = IntrospectResponse {
         active: false,
@@ -561,7 +550,7 @@ async fn introspect(
         None => return Ok(Json(inactive)),
     };
 
-    if rec.revoked {
+    if rec.revoked || rec.client_id != client.client_id {
         return Ok(Json(inactive));
     }
 
@@ -591,25 +580,7 @@ async fn introspect(
     }))
 }
 
-async fn userinfo(
-    claims: AccessTokenClaims,
-    State(state): State<AppState>,
-) -> Result<Json<UserInfoResp>> {
-    let db = &state.database.connection;
-    let user_id = parse_user_id(&claims.sub)?;
-    let user_vo = crate::service::user::UserService::get_user_by_id(db, user_id).await?;
-
-    let email_domain = &state.config.oidc.email_domain;
-    Ok(Json(UserInfoResp {
-        sub: user_vo.id.to_string(),
-        preferred_username: Some(user_vo.username.clone()),
-        name: user_vo.nickname.clone(),
-        nickname: user_vo.nickname,
-        email: Some(format!("{}@{}", user_vo.username, email_domain)),
-    }))
-}
-
-fn html_attribute(value: &str) -> String {
+pub(super) fn html_attribute(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -689,121 +660,6 @@ async fn confirm_end_session(
     Ok((headers, Html(body)))
 }
 
-/// Build a query string from authorize params (for redirect URLs).
-fn build_authorize_query_string(q: &AuthorizeQuery) -> String {
-    let mut parts = vec![
-        format!("client_id={}", urlencoding::encode(&q.client_id)),
-        format!("redirect_uri={}", urlencoding::encode(&q.redirect_uri)),
-        format!("response_type={}", urlencoding::encode(&q.response_type)),
-    ];
-    if let Some(ref cc) = q.code_challenge {
-        parts.push(format!("code_challenge={}", urlencoding::encode(cc)));
-        parts.push(format!(
-            "code_challenge_method={}",
-            urlencoding::encode(&q.code_challenge_method)
-        ));
-    }
-    if let Some(ref scope) = q.scope {
-        parts.push(format!("scope={}", urlencoding::encode(scope)));
-    }
-    if let Some(ref state) = q.state {
-        parts.push(format!("state={}", urlencoding::encode(state)));
-    }
-    if let Some(ref nonce) = q.nonce {
-        parts.push(format!("nonce={}", urlencoding::encode(nonce)));
-    }
-    parts.join("&")
-}
-
-async fn authorize(
-    State(state): State<AppState>,
-    axum::extract::Query(q): axum::extract::Query<AuthorizeQuery>,
-) -> Result<Redirect> {
-    if q.response_type != "code" {
-        return Err(crate::error::AppError::BadRequest(
-            "unsupported response_type, expected code".to_string(),
-        ));
-    }
-
-    if q.code_challenge.is_some() {
-        let method = q.code_challenge_method.clone();
-        if method != "S256" && method != "plain" {
-            return Err(crate::error::AppError::BadRequest(
-                "unsupported code_challenge_method".to_string(),
-            ));
-        }
-    }
-
-    let db = &state.database.connection;
-    let client_id = q.client_id.clone();
-    let redirect_uri = q.redirect_uri.clone();
-
-    let client = crate::entity::oauth_client::Entity::get_by_client_id(db, &client_id)
-        .await?
-        .ok_or(crate::error::AppError::Unauthorized(
-            "invalid client_id".to_string(),
-        ))?;
-    if !OidcService::client_has_redirect(&client, &redirect_uri) {
-        return Err(crate::error::AppError::Unauthorized(
-            "invalid redirect_uri".to_string(),
-        ));
-    }
-    if !OidcService::public_client_requires_s256_pkce(
-        &client,
-        q.code_challenge.as_deref(),
-        &q.code_challenge_method,
-    ) {
-        return Err(crate::error::AppError::BadRequest(
-            "public clients require a non-empty S256 code_challenge".to_string(),
-        ));
-    }
-
-    let req_scopes: Vec<String> = q
-        .scope
-        .clone()
-        .unwrap_or_else(|| "openid".to_string())
-        .split(' ')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    if !OidcService::client_allows_scopes(&client, &req_scopes) {
-        return Err(crate::error::AppError::Unauthorized(
-            "requested scope not allowed by client".to_string(),
-        ));
-    }
-    if !OidcService::scopes_exist(db, &req_scopes).await? {
-        return Err(crate::error::AppError::Unauthorized(
-            "requested scope does not exist".to_string(),
-        ));
-    }
-
-    // Try to extract JWT from Authorization header (manually, since we're not behind auth middleware)
-    let qs = build_authorize_query_string(&q);
-    let user_id: Option<IdType> = {
-        // Try to read token from Authorization header via request extensions
-        // Since we're in a no-prefix route, we manually verify the token
-        // The token should be passed as a cookie by the SPA
-        None // Will be set below if we can extract from headers
-    };
-
-    // For this no-auth route, we can't directly access request headers from the handler signature
-    // with axum extractors in a clean way without changing the signature.
-    // Instead, we use an alternative approach: the frontend SPA handles the flow.
-    //
-    // Flow:
-    // 1. Third-party app redirects user to /oidc/authorize?...
-    // 2. This handler ALWAYS redirects to the frontend at /oidc/consent?...
-    //    (the frontend will check if user is logged in via its router guard)
-    // 3. The frontend consent page calls /api/v1/oidc/authorize/client-info to get app info
-    // 4. The frontend consent page calls POST /api/v1/oidc/authorize/consent to approve/deny
-    //
-    // This is simpler and more aligned with the SPA architecture.
-
-    let _ = user_id; // suppress unused warning
-    let frontend_url = format!("/oidc/consent?{}", qs);
-    Ok(Redirect::to(&frontend_url))
-}
-
 /// GET /api/v1/oidc/authorize/client-info — returns client info for the consent page
 async fn authorize_client_info(
     claims: AccessTokenClaims,
@@ -853,93 +709,98 @@ async fn authorize_client_info(
 /// POST /api/v1/oidc/authorize/consent — approve or deny authorization
 async fn authorize_consent(
     claims: AccessTokenClaims,
+    axum::Extension(context): axum::Extension<
+        crate::service::identity::legacy_governance::LegacyRequest,
+    >,
     State(state): State<AppState>,
     Json(req): Json<ConsentRequest>,
 ) -> Result<Json<ConsentResponse>> {
-    let db = &state.database.connection;
-
-    if !req.approved {
-        // User denied — redirect with error
-        let mut url = req.redirect_uri;
-        let sep = if url.contains('?') { '&' } else { '?' };
-        url.push(sep);
-        url.push_str("error=access_denied");
-        if let Some(st) = req.state {
-            url.push_str(&format!("&state={}", st));
-        }
-        return Ok(Json(ConsentResponse { redirect_url: url }));
-    }
-
-    // Validate request
-    if req.response_type != "code" {
-        return Err(crate::error::AppError::BadRequest(
-            "unsupported response_type".to_string(),
-        ));
-    }
-
-    let client = crate::entity::oauth_client::Entity::get_by_client_id(db, &req.client_id)
+    use crate::service::identity::legacy_governance::{MutationScope, mutate};
+    let target = oauth_client::Entity::get_by_client_id(&state.database.connection, &req.client_id)
         .await?
-        .ok_or(crate::error::AppError::Unauthorized(
-            "invalid client_id".to_string(),
-        ))?;
-    if !OidcService::client_has_redirect(&client, &req.redirect_uri) {
-        return Err(crate::error::AppError::Unauthorized(
-            "invalid redirect_uri".to_string(),
-        ));
-    }
-    if !OidcService::public_client_requires_s256_pkce(
-        &client,
-        req.code_challenge.as_deref(),
-        &req.code_challenge_method,
-    ) {
-        return Err(crate::error::AppError::BadRequest(
-            "public clients require a non-empty S256 code_challenge".to_string(),
-        ));
-    }
-
-    let scope_str = req.scope.clone().unwrap_or_else(|| "openid".to_string());
-    let req_scopes: Vec<String> = scope_str
-        .split(' ')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    if !OidcService::client_allows_scopes(&client, &req_scopes) {
-        return Err(crate::error::AppError::Unauthorized(
-            "requested scope not allowed".to_string(),
-        ));
-    }
-
+        .ok_or_else(|| crate::error::AppError::Unauthorized("invalid client_id".into()))?;
     let user_id = parse_user_id(&claims.sub)?;
-
-    // Save consent
-    OidcService::save_consent(db, user_id, &req.client_id, &scope_str).await?;
-
-    // Generate authorization code
-    let code = OidcService::create_authorization_code(
-        db,
-        CreateAuthCodeParams {
-            user_id,
-            client_id: req.client_id,
-            redirect_uri: Some(req.redirect_uri.clone()),
-            code_challenge: req.code_challenge,
-            code_challenge_method: req.code_challenge_method,
-            scope: req.scope,
-            state: req.state.clone(),
-            nonce: req.nonce,
+    mutate(
+        &state,
+        &context,
+        "POST",
+        "/oidc/authorize/consent",
+        MutationScope::ClientConsent(target.id),
+        |db| {
+            let req = req.clone();
+            Box::pin(async move {
+                let client = oauth_client::Entity::get_by_client_id(db, &req.client_id)
+                    .await?
+                    .ok_or_else(|| {
+                        crate::error::AppError::Unauthorized("invalid client_id".into())
+                    })?;
+                if client.management_state != "legacy_unmanaged" {
+                    return Err(crate::error::AppError::BadRequest(
+                        "请通过标准授权入口建立并完成授权流程".into(),
+                    ));
+                }
+                if !OidcService::client_has_redirect(&client, &req.redirect_uri) {
+                    return Err(crate::error::AppError::Unauthorized(
+                        "invalid redirect_uri".into(),
+                    ));
+                }
+                let mut url = url::Url::parse(&req.redirect_uri).map_err(|_| {
+                    crate::error::AppError::BadRequest("invalid redirect_uri".into())
+                })?;
+                if !req.approved {
+                    url.query_pairs_mut().append_pair("error", "access_denied");
+                } else {
+                    if req.response_type != "code" {
+                        return Err(crate::error::AppError::BadRequest(
+                            "unsupported response_type".into(),
+                        ));
+                    }
+                    if !OidcService::public_client_requires_s256_pkce(
+                        &client,
+                        req.code_challenge.as_deref(),
+                        &req.code_challenge_method,
+                    ) {
+                        return Err(crate::error::AppError::BadRequest(
+                            "public clients require a non-empty S256 code_challenge".into(),
+                        ));
+                    }
+                    let scope = req.scope.as_deref().unwrap_or("openid");
+                    let scopes = scope
+                        .split_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>();
+                    if !OidcService::client_allows_scopes(&client, &scopes) {
+                        return Err(crate::error::AppError::Unauthorized(
+                            "requested scope not allowed".into(),
+                        ));
+                    }
+                    OidcService::save_consent(db, user_id, &req.client_id, scope).await?;
+                    let code = OidcService::create_authorization_code(
+                        db,
+                        CreateAuthCodeParams {
+                            user_id,
+                            client_id: req.client_id,
+                            redirect_uri: Some(req.redirect_uri),
+                            code_challenge: req.code_challenge,
+                            code_challenge_method: req.code_challenge_method,
+                            scope: req.scope,
+                            state: req.state.clone(),
+                            nonce: req.nonce,
+                        },
+                    )
+                    .await?;
+                    url.query_pairs_mut().append_pair("code", &code);
+                }
+                if let Some(state) = req.state {
+                    url.query_pairs_mut().append_pair("state", &state);
+                }
+                Ok(Json(ConsentResponse {
+                    redirect_url: url.into(),
+                }))
+            })
         },
     )
-    .await?;
-
-    // Build redirect URL
-    let mut url = req.redirect_uri;
-    let sep = if url.contains('?') { '&' } else { '?' };
-    url.push(sep);
-    url.push_str(&format!("code={}", code));
-    if let Some(st) = req.state {
-        url.push_str(&format!("&state={}", st));
-    }
-
-    Ok(Json(ConsentResponse { redirect_url: url }))
+    .await
 }
 
 /// GET /api/v1/oidc/authorized-apps — list user's authorized apps

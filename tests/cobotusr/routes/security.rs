@@ -792,10 +792,10 @@ fn security_signing_fixture() -> &'static SecuritySigningFixture {
     };
     static FIXTURE: std::sync::OnceLock<SecuritySigningFixture> = std::sync::OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let private=rsa::RsaPrivateKey::new(&mut rand::rngs::OsRng,2048).unwrap();
+        let private=rsa::PrivateKey::new(&mut getrandom::SysRng,2048).unwrap();
         let pem=private.to_pkcs8_pem(rsa::pkcs8::LineEnding::LF).unwrap();
-        let public=rsa::RsaPublicKey::from(&private);
-        let n=URL_SAFE_NO_PAD.encode(private.n().to_bytes_be());let e=URL_SAFE_NO_PAD.encode(private.e().to_bytes_be());
+        let public=rsa::PublicKey::from(&private);
+        let n=URL_SAFE_NO_PAD.encode(private.n_bytes());let e=URL_SAFE_NO_PAD.encode(private.e_bytes());
         SecuritySigningFixture {encoding:jsonwebtoken::EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
             jwks:serde_json::json!({"keys":[{"kid":"key","n":n,"e":e},{"kid":"other-key","n":n,"e":e}]}),
             public_pem:public.to_public_key_pem(rsa::pkcs8::LineEnding::LF).unwrap()}
@@ -1448,24 +1448,11 @@ async fn security_t19_registration_repairs_missing_methods_without_granting_user
 
 #[tokio::test]
 async fn security_t19_live_legacy_routes_cannot_bypass_missing_registration() {
-    let (_container, url) = crate::cobotusr::common::get_postgres_container()
-        .await
-        .unwrap();
-    let db = Database::connect(url.clone()).await.unwrap();
-    let mut cfg = cobotusr::config::Config::default();
-    cfg.database.url = url;
-    let token = crate::cobotusr::common::get_test_token(&mut cfg);
-    let prefix = cfg.http.api_prefix.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}{}", listener.local_addr().unwrap(), prefix);
-    let (stop, stopped) = tokio::sync::oneshot::channel();
-    let server = tokio::spawn(cobotusr::serve(cfg, listener, async {
-        let _ = stopped.await;
-    }));
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .unwrap();
+    let fixture = crate::cobotusr::common::IdentityFixture::start().await;
+    let token = super::identity_support::management_access(&fixture).await;
+    let db = fixture.db.clone();
+    let base = format!("{}/api/v1", fixture.base_url);
+    let client = fixture.client.clone();
     let before = client
         .get(format!("{base}/user"))
         .bearer_auth(&token)
@@ -1522,8 +1509,7 @@ async fn security_t19_live_legacy_routes_cannot_bypass_missing_registration() {
         .await
         .unwrap();
     assert_eq!(legacy.status(), reqwest::StatusCode::UNAUTHORIZED);
-    let _ = stop.send(());
-    server.await.unwrap();
+    fixture.close().await;
 }
 
 fn policy_device(gateway: &str, device: &str) -> auth::security::policy::ResourceRef {
@@ -2199,6 +2185,7 @@ impl cobotusr::service::security::lifecycle::SessionTokenSigner for SessionTestS
             exp: claims.exp,
             nonce: nonce.map(str::to_owned),
             at_hash: None,
+            ..Default::default()
         };
         auth::security::identity::SecretToken::new(
             jsonwebtoken::encode(&header, &id, &security_signing_fixture().encoding).unwrap(),

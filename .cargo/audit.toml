@@ -1,0 +1,24 @@
+# Dependency vulnerability policy for the enterprise SSO provider.
+#
+# Every ignored advisory below is either unreachable in the shipped binaries
+# (optional feature that is never enabled) or dev/build-only. Re-evaluate each
+# entry on every dependency refresh; do not add an entry without a reason.
+[advisories]
+ignore = [
+    # libsqlite3-sys is only reachable through the optional sqlx-sqlite
+    # driver. This workspace enables sqlx-postgres only, so the crate is not
+    # compiled. sqlx-sqlite 0.9.0 pins ">=0.30.1, <0.38.0"; revisit when sqlx
+    # relaxes that bound.
+    "RUSTSEC-2026-0459",
+    # rkyv is an optional rust_decimal feature. It is not enabled and the
+    # crate is not compiled.
+    "RUSTSEC-2026-0235",
+    # Dev-only: testcontainers 0.28.0 still depends on the unmaintained
+    # astral-tokio-tar. It is not linked into production binaries.
+    "RUSTSEC-2026-0440",
+    # Build-time proc-macro pulled in by sea-orm-macros; no runtime exposure.
+    "RUSTSEC-2026-0173",
+    # arrow-data is only reachable through the optional sea-orm-arrow
+    # feature. It is not enabled and the crate is not compiled.
+    "RUSTSEC-2026-0442",
+]

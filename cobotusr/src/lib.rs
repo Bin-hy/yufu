@@ -10,10 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
-use tower_http::{
-    cors::{Any, CorsLayer},
-    trace::TraceLayer,
-};
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, info_span, warn};
 
 use crate::config::Config;
@@ -29,6 +26,8 @@ use auth::token_manager::{IdTokenSigner, TokenManager};
 
 pub mod clock;
 pub mod config;
+mod config_identity;
+pub mod domain;
 pub mod entity;
 pub mod error;
 pub mod migration;
@@ -41,6 +40,34 @@ pub mod service;
 mod swagger_docs;
 mod webui;
 
+fn deployment_cors(cfg: &Config) -> CorsLayer {
+    let origins = cfg.auth.origins.clone();
+    let wildcard = origins.iter().any(|o| o == "*");
+    CorsLayer::new()
+        .allow_headers([
+            AUTHORIZATION,
+            CONTENT_TYPE,
+            ACCEPT,
+            http::HeaderName::from_static("x-csrf-token"),
+        ])
+        .allow_methods([
+            Method::GET,
+            Method::PATCH,
+            Method::POST,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_credentials(!wildcard)
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(
+            move |origin: &HeaderValue, head: &http::request::Parts| {
+                !route::identity_cors::is_identity_path(head.uri.path())
+                    && origin
+                        .to_str()
+                        .is_ok_and(|o| wildcard || origins.iter().any(|allowed| allowed == o))
+            },
+        ))
+}
+
 fn is_successful_http_exchange(status: StatusCode) -> bool {
     status.is_informational() || status.is_success()
 }
@@ -50,14 +77,47 @@ pub(crate) fn redact_access_token(uri: &http::Uri) -> String {
         return uri.to_string();
     };
 
+    // Identity endpoints carry action proofs, PKCE, nonce and personal data.
+    // Preserve only the path for both access logs and historical recordings.
+    if uri.path().split('/').any(|segment| {
+        matches!(
+            segment,
+            "identity" | "account" | "developer" | "admin" | "oidc"
+        )
+    }) {
+        return uri.path().to_owned();
+    }
+
+    fn sensitive(key: &str) -> bool {
+        matches!(
+            key,
+            "access_token"
+                | "refresh_token"
+                | "id_token"
+                | "id_token_hint"
+                | "logout_token"
+                | "token"
+                | "code"
+                | "code_verifier"
+                | "client_secret"
+                | "password"
+                | "old_password"
+                | "new_password"
+                | "secret"
+                | "invitation"
+                | "reset_token"
+                | "action_secret"
+        )
+    }
+
     let pairs: Vec<_> = url::form_urlencoded::parse(query.as_bytes()).collect();
-    if !pairs.iter().any(|(key, _)| key == "access_token") {
+    if !pairs.iter().any(|(key, _)| sensitive(key)) {
         return uri.to_string();
     }
 
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     for (key, value) in pairs {
-        let value = if key == "access_token" {
+        let value = if sensitive(&key) {
             "REDACTED"
         } else {
             value.as_ref()
@@ -82,6 +142,16 @@ fn redact_sensitive_headers(mut headers: HeaderMap) -> HeaderMap {
 /// `http.api_prefix` instead of being hard-coded.
 fn should_skip_body_logging(uri: &http::Uri, headers: &HeaderMap, api_prefix: &str) -> bool {
     let path = uri.path();
+    if ["identity", "account", "developer", "admin"]
+        .iter()
+        .any(|group| {
+            let prefix = format!("{api_prefix}/{group}");
+            path == prefix || path.starts_with(&format!("{prefix}/"))
+        })
+        || (path.split('/').any(|segment| segment == "oidc") && !path.ends_with("/jwks"))
+    {
+        return true;
+    }
     matches!(
         path,
         "/oidc/token" | "/oidc/revoke" | "/oidc/introspect" | "/oidc/logout"
@@ -219,8 +289,8 @@ async fn serve_internal<F>(
 ) where
     F: Future<Output = ()> + Send + 'static,
 {
-    if let Err(error) = cfg.validate_browser_cookie_policy() {
-        error!(reason = %error, "invalid browser cookie policy; server not started");
+    if let Err(error) = cfg.validate_identity_policy() {
+        error!(reason = %error, "invalid identity configuration; server not started");
         return;
     }
     if cfg.auth.allow_insecure_loopback_cookies
@@ -232,6 +302,14 @@ async fn serve_internal<F>(
         return;
     }
     info!("Server listening on {}", listener.local_addr().unwrap());
+
+    let id_token_signer = match cfg.load_identity_signer().await {
+        Ok(signer) => signer,
+        Err(error) => {
+            error!(reason = %error, "identity signer unavailable; server not started");
+            return;
+        }
+    };
 
     // Initialize database connection
     let database_service = DatabaseService::new(&cfg.database)
@@ -245,52 +323,6 @@ async fn serve_internal<F>(
     // they never cross service boundaries). Access tokens move to RS256 via id_token_signer.
     let refresh_token_manager = TokenManager::new(&cfg.auth.secret, cfg.auth.refresh_exp_seconds);
 
-    // Initialize IdTokenSigner. Default RS256 (load RSA from path, auto-generate if absent);
-    // tests / dev can opt into HS256 via oidc.signing_algorithm to skip the RSA dance.
-    let access_token_exp = cfg
-        .oidc
-        .access_token_expire_seconds
-        .unwrap_or(cfg.auth.exp_seconds);
-    let id_token_signer = if cfg.oidc.signing_algorithm.eq_ignore_ascii_case("HS256") {
-        info!("OIDC signer: HS256 (HMAC) — using auth.secret as key");
-        IdTokenSigner::from_hmac(&cfg.auth.secret, access_token_exp)
-    } else {
-        let key_path = if !cfg.oidc.rsa_private_key_path.is_empty() {
-            cfg.oidc.rsa_private_key_path.clone()
-        } else {
-            cfg.auth.rsa_private_key_path.clone()
-        };
-        match tokio::fs::read(&key_path).await {
-            Ok(pem) => {
-                info!("Loaded RSA private key from {}", key_path);
-                IdTokenSigner::from_rsa_pem(&pem, access_token_exp)
-                    .expect("Failed to parse RSA private key")
-            }
-            Err(_) => {
-                info!(
-                    "RSA key not found at {}, generating new key pair...",
-                    key_path
-                );
-                use rsa::pkcs8::EncodePrivateKey;
-                let mut rng = rand::rngs::OsRng;
-                let private_key =
-                    rsa::RsaPrivateKey::new(&mut rng, 2048).expect("Failed to generate RSA key");
-                let pem_str = private_key
-                    .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-                    .expect("Failed to encode RSA key to PEM");
-                if let Some(parent) = std::path::Path::new(&key_path).parent() {
-                    let _ = tokio::fs::create_dir_all(parent).await;
-                }
-                tokio::fs::write(&key_path, pem_str.as_bytes())
-                    .await
-                    .expect("Failed to write RSA key file");
-                info!("Generated and saved RSA key to {}", key_path);
-                IdTokenSigner::from_rsa_pem(pem_str.as_bytes(), access_token_exp)
-                    .expect("Failed to parse generated RSA key")
-            }
-        }
-    };
-
     let database = Arc::new(database_service);
     let id_token_signer = Arc::new(id_token_signer);
 
@@ -301,7 +333,10 @@ async fn serve_internal<F>(
         id_token_signer: id_token_signer.clone(),
         security_clock,
     };
-    let _ = app_state.init().await;
+    if app_state.init().await.is_err() {
+        error!("identity initialization failed; server not started");
+        return;
+    }
 
     // Auth middleware stack (applied in reverse layer order — bottom runs first):
     //   1. access_middleware_local_rs256 — verify Bearer JWT, inject AccessTokenClaims
@@ -322,6 +357,10 @@ async fn serve_internal<F>(
             load_user_middleware,
         ))
         .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            service::identity::legacy_governance::request_context,
+        ))
+        .layer(middleware::from_fn_with_state(
             id_token_signer.clone(),
             access_middleware_local_rs256,
         ));
@@ -337,51 +376,36 @@ async fn serve_internal<F>(
     ));
 
     let api_prefix = &cfg.http.api_prefix;
-    #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
-    let mut app = Router::new()
+    let legacy_routes = Router::new()
         .nest(api_prefix, sub_auth_router)
         .nest(api_prefix, sub_public_router)
         .nest(api_prefix, sub_service_router)
         .nest(api_prefix, route::get_revocation_routes())
-        .merge(get_no_prefix_routes())
-        .layer({
-            let origins: Vec<String> = app_state.clone().config.auth.origins;
-            let has_wildcard = origins.iter().any(|o| o == "*");
-            let cors_layer = CorsLayer::new()
-                .allow_headers([
-                    AUTHORIZATION,
-                    CONTENT_TYPE,
-                    ACCEPT,
-                    http::HeaderName::from_static("x-csrf-token"),
-                ])
-                .allow_methods([
-                    Method::GET,
-                    Method::PATCH,
-                    Method::POST,
-                    Method::DELETE,
-                    Method::OPTIONS,
-                ]);
-
-            if has_wildcard {
-                // Browser SPA requests authenticate with bearer tokens, not cookies.  A true
-                // wildcard therefore avoids credential-mode restrictions while reliably
-                // returning Access-Control-Allow-Origin for public OIDC endpoints.
-                cors_layer.allow_origin(Any)
-            } else {
-                // Use predicate to match request Origin against allowed origins list
-                cors_layer.allow_credentials(true).allow_origin(
-                    tower_http::cors::AllowOrigin::predicate(
-                        move |origin: &HeaderValue, _request_head: &http::request::Parts| {
-                            if let Ok(origin_str) = origin.to_str() {
-                                origins.contains(&origin_str.to_string())
-                            } else {
-                                false
-                            }
-                        },
-                    ),
+        .layer(deployment_cors(&cfg));
+    #[cfg_attr(not(feature = "openapi"), allow(unused_mut))]
+    let mut app = Router::new()
+        .merge(legacy_routes)
+        .nest(
+            api_prefix,
+            Router::new()
+                .route(
+                    "/oidc/userinfo",
+                    axum::routing::get(route::identity_userinfo::userinfo)
+                        .post(route::identity_userinfo::userinfo),
                 )
-            }
-        })
+                .layer(middleware::from_fn_with_state(
+                    app_state.clone(),
+                    route::identity_browser::request_context,
+                )),
+        )
+        .nest(
+            api_prefix,
+            route::identity_browser::get_routes(app_state.clone()),
+        )
+        .merge(get_no_prefix_routes().layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            route::identity_browser::request_context,
+        )))
         .with_state(app_state.clone())
         .layer(axum::middleware::from_fn_with_state(
             cfg.http.api_prefix.clone(),
@@ -412,8 +436,59 @@ async fn serve_internal<F>(
         app = app.merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", ApiDoc::openapi()));
     }
 
+    let workers = if cfg.identity.background_workers_enabled {
+        match app_state.security_clock() {
+            Ok(clock) => {
+                use service::identity::{
+                    logout_dispatcher::LogoutDispatcher, logout_transport::HttpsLogoutTransport,
+                    repository::PgIdentityRepository, workers::IdentityWorkers,
+                };
+                let repository = Arc::new(PgIdentityRepository::new(
+                    database.connection.clone(),
+                    clock.clone(),
+                ));
+                let transport = Arc::new(HttpsLogoutTransport::new(
+                    cfg.identity.clone(),
+                    clock.clone(),
+                ));
+                match LogoutDispatcher::new(
+                    repository.clone(),
+                    clock.clone(),
+                    id_token_signer,
+                    cfg.clone(),
+                    transport,
+                ) {
+                    Ok(dispatcher) => Some(IdentityWorkers::start(
+                        Arc::new(dispatcher),
+                        repository,
+                        clock,
+                        cfg.identity.clone(),
+                    )),
+                    Err(reason) => {
+                        error!(
+                            reason = reason.code(),
+                            "identity workers unavailable; server not started"
+                        );
+                        return;
+                    }
+                }
+            }
+            Err(_) => {
+                warn!("identity workers require the host security clock");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let shutdown = async move {
+        signal.await;
+        if let Some(workers) = workers {
+            workers.shutdown().await;
+        }
+    };
     axum::serve(listener, app)
-        .with_graceful_shutdown(signal)
+        .with_graceful_shutdown(shutdown)
         .await
         .unwrap_or_else(|e| error!("Application error: {e}"));
 }
@@ -489,6 +564,14 @@ impl AppState {
     pub async fn init(&self) -> result::Result<()> {
         self.ensure_sadmin_authorities().await?;
         self.init_sadmin_from_config().await?;
+        crate::service::identity::account::initialize_provider(
+            &self.database.connection,
+            &self.issuer(),
+            u64::try_from(chrono::Utc::now().timestamp_millis()).map_err(|_| {
+                crate::domain::identity::error::IdentityError::DependencyUnavailable
+            })?,
+        )
+        .await?;
         self.init_oidc_bootstrap_clients().await?;
         Ok(())
     }
@@ -512,13 +595,7 @@ impl AppState {
     /// Issuer URL used in access/id token `iss` claim.
     /// Priority: cfg.oidc.issuer > cfg.http.public > derived from listen address.
     pub fn issuer(&self) -> String {
-        if !self.config.oidc.issuer.is_empty() {
-            self.config.oidc.issuer.clone()
-        } else if !self.config.http.public.is_empty() {
-            self.config.http.public.clone()
-        } else {
-            format!("http://{}", self.config.http.listen)
-        }
+        self.config.issuer()
     }
 
     /// Configured upper bound (days) for long-lived MCP access tokens.
@@ -561,170 +638,22 @@ impl AppState {
         Ok(())
     }
 
-    /// Auto-register OIDC clients listed in `[[oidc.bootstrap_clients]]`,
-    /// and pair each one with an `Application` row so it shows up in the
-    /// permission system. Existing secrets are NEVER overwritten. Public
-    /// clients are upgraded when configured as such, and bootstrap redirect
-    /// URIs are added (without removing administrator-managed URIs) so old
-    /// databases receive required callback paths on upgrade.
+    /// Historical bootstrap entries are compatibility references. Trust changes
+    /// require an authenticated, explicit administrator operation.
     async fn init_oidc_bootstrap_clients(&self) -> result::Result<()> {
-        use crate::entity::{application, oauth_client};
-        use rand::RngCore;
-        use rand::rngs::OsRng;
-        use sea_orm::Set;
-
-        let bootstrap = &self.config.oidc.bootstrap_clients;
-        if bootstrap.is_empty() {
-            return Ok(());
-        }
-
-        let db = &self.database.connection;
-
-        // Owner of bootstrap clients = the super-admin user we just seeded.
-        let sadmin = user::Entity::find()
-            .filter(user::Column::Username.eq(&self.config.auth.super_admin.username))
-            .one(db)
+        for entry in &self.config.oidc.bootstrap_clients {
+            if crate::entity::oauth_client::Entity::get_by_client_id(
+                &self.database.connection,
+                &entry.client_id,
+            )
             .await?
-            .ok_or_else(|| {
-                crate::error::AppError::InternalServerError(anyhow::anyhow!(
-                    "bootstrap clients require a super-admin user, none found"
-                ))
-            })?;
-
-        for entry in bootstrap {
-            // Dirty-data guard (mirrors OidcService::register_client): a public
-            // client proves possession with PKCE and has no secret, so the
-            // client_credentials grant can never succeed for it. Rejecting at
-            // startup beats a silent 401 in every downstream machine call.
-            if entry.public_client && entry.grant_types.iter().any(|g| g == "client_credentials") {
-                return Err(crate::error::AppError::InternalServerError(
-                    anyhow::anyhow!(
-                        "bootstrap client '{}' is public_client but requests the \
-                     client_credentials grant — public clients cannot authenticate \
-                     with a secret; use a separate confidential machine client",
-                        entry.client_id
-                    ),
-                ));
-            }
-
-            // ── 1. OIDC client ──
-            let oidc_client_id = match oauth_client::Entity::get_by_client_id(db, &entry.client_id)
-                .await?
+            .is_some()
             {
-                Some(existing) => {
-                    let mut redirect_uris: Vec<String> = existing
-                        .redirect_uris
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|uri| !uri.is_empty())
-                        .map(str::to_string)
-                        .collect();
-                    let mut redirects_changed = false;
-                    for uri in &entry.redirect_uris {
-                        if !redirect_uris.contains(uri) {
-                            redirect_uris.push(uri.clone());
-                            redirects_changed = true;
-                        }
-                    }
-                    let public_upgrade = entry.public_client && !existing.public_client;
-                    if public_upgrade || redirects_changed {
-                        let mut active: oauth_client::ActiveModel = existing.into();
-                        if public_upgrade {
-                            active.public_client = Set(true);
-                            active.client_secret_hash = Set(String::new());
-                        }
-                        if redirects_changed {
-                            active.redirect_uris = Set(redirect_uris.join(","));
-                        }
-                        active.update_time = Set(chrono::Utc::now().naive_utc());
-                        let updated = active.update(db).await?;
-                        info!(client_id = %entry.client_id, public_upgrade, redirects_changed, "OIDC bootstrap client upgraded");
-                        updated.id
-                    } else {
-                        info!(client_id = %entry.client_id, "OIDC bootstrap client already exists");
-                        existing.id
-                    }
-                }
-                None => {
-                    let (secret, generated) = match (&entry.client_secret, entry.public_client) {
-                        (_, true) => (String::new(), false),
-                        (Some(s), false) => (s.clone(), false),
-                        (None, false) => {
-                            let mut buf = [0u8; 32];
-                            OsRng.fill_bytes(&mut buf);
-                            (hex::encode(buf), true)
-                        }
-                    };
-                    let secret_hash = if entry.public_client {
-                        String::new()
-                    } else {
-                        bcrypt::hash(&secret, bcrypt::DEFAULT_COST).map_err(|e| {
-                            crate::error::AppError::InternalServerError(anyhow::anyhow!(
-                                "bcrypt hash failed for bootstrap client {}: {e}",
-                                entry.client_id
-                            ))
-                        })?
-                    };
-
-                    let now = chrono::Utc::now().naive_utc();
-                    let inserted = oauth_client::ActiveModel {
-                        id: ActiveValue::NotSet,
-                        client_id: Set(entry.client_id.clone()),
-                        user_id: Set(sadmin.id),
-                        name: Set(entry.name.clone()),
-                        redirect_uris: Set(entry.redirect_uris.join(",")),
-                        allowed_scopes: Set(entry.allowed_scopes.join(",")),
-                        client_secret_hash: Set(secret_hash),
-                        public_client: Set(entry.public_client),
-                        grant_types: Set(entry.grant_types.join(",")),
-                        create_time: Set(now),
-                        update_time: Set(now),
-                    }
-                    .insert(db)
-                    .await?;
-
-                    if generated {
-                        tracing::warn!(
-                            client_id = %entry.client_id,
-                            client_secret = %secret,
-                            "OIDC bootstrap client registered with AUTO-GENERATED secret — \
-                             copy this value to your client config NOW; it won't be shown again",
-                        );
-                    } else {
-                        info!(client_id = %entry.client_id, "OIDC bootstrap client registered (using configured secret)");
-                    }
-                    inserted.id
-                }
-            };
-
-            // ── 2. Application row (paired by app_key = client_id) ──
-            //
-            // Backfilled even when the oauth_client already existed, so users
-            // upgrading from before Phase 2.A get the Application implicitly.
-            if application::Entity::get_by_app_key(db, &entry.client_id)
-                .await?
-                .is_none()
-            {
-                let now = chrono::Utc::now().naive_utc();
-                application::ActiveModel {
-                    id: ActiveValue::NotSet,
-                    app_key: Set(entry.client_id.clone()),
-                    name: Set(entry.name.clone()),
-                    description: Set(None),
-                    oidc_client_id: Set(Some(oidc_client_id)),
-                    create_time: Set(now),
-                    update_time: Set(now),
-                }
-                .insert(db)
-                .await?;
-                info!(
-                    app_key = %entry.client_id,
-                    oidc_client_id,
-                    "Application registered for bootstrap OIDC client"
-                );
+                info!(client_id = %entry.client_id, "Historical bootstrap configuration preserved without changes");
+            } else {
+                tracing::warn!(client_id = %entry.client_id, "Bootstrap entry requires explicit governed application registration; no client was created");
             }
         }
-
         Ok(())
     }
 
@@ -755,6 +684,7 @@ impl AppState {
                 description: Set(Some("The System Admin.".to_string())),
                 create_time: Set(chrono::Utc::now().naive_utc()),
                 update_time: Set(chrono::Utc::now().naive_utc()),
+                ..Default::default()
             }
             .insert(db)
             .await?;
@@ -779,16 +709,15 @@ mod tests {
 
     #[test]
     fn test_redact_access_token_masks_each_token_and_preserves_other_parameters() {
-        let uri: http::Uri =
-            "/api/v1/oidc/userinfo?format=json&access_token=first&access_token=second"
-                .parse()
-                .unwrap();
+        let uri: http::Uri = "/api/v1/data?format=json&access_token=first&access_token=second"
+            .parse()
+            .unwrap();
 
         let redacted = redact_access_token(&uri);
 
         assert_eq!(
             redacted,
-            "/api/v1/oidc/userinfo?format=json&access_token=REDACTED&access_token=REDACTED"
+            "/api/v1/data?format=json&access_token=REDACTED&access_token=REDACTED"
         );
         assert!(!redacted.contains("first"));
         assert!(!redacted.contains("second"));
@@ -797,7 +726,7 @@ mod tests {
     #[test]
     fn test_redact_access_token_leaves_uris_without_token_unchanged() {
         let without_query: http::Uri = "/api/v1/users".parse().unwrap();
-        let without_token: http::Uri = "/api/v1/oidc/userinfo?format=json".parse().unwrap();
+        let without_token: http::Uri = "/api/v1/users?format=json".parse().unwrap();
 
         assert_eq!(
             redact_access_token(&without_query),
@@ -807,6 +736,41 @@ mod tests {
             redact_access_token(&without_token),
             without_token.to_string()
         );
+    }
+
+    #[test]
+    fn test_identity_protocol_logs_exclude_queries_bodies_and_credentials() {
+        for path in [
+            "/oidc/authorize",
+            "/oidc/token",
+            "/oidc/logout",
+            "/api/v1/oidc/userinfo",
+            "/custom/identity/login",
+            "/custom/identity/invitations/accept",
+            "/custom/identity/password-resets/complete",
+            "/custom/developer/apps/7/secret-reset",
+            "/custom/account/profile",
+            "/custom/admin/invitations",
+        ] {
+            let uri: http::Uri = format!("{path}?code=secret-code&state=secret-state&nonce=secret-nonce&client_secret=secret-client&action_secret=secret-action&email=secret-person").parse().unwrap();
+            assert_eq!(redact_access_token(&uri), path);
+            assert!(
+                should_skip_body_logging(&uri, &HeaderMap::new(), "/custom"),
+                "{path}"
+            );
+        }
+        let uri: http::Uri =
+            "/public?%61ccess_token=secret&password=secret&code_verifier=secret&format=json"
+                .parse()
+                .unwrap();
+        let redacted = redact_access_token(&uri);
+        assert!(!redacted.contains("secret"));
+        assert!(redacted.contains("format=json"));
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+        headers.insert(COOKIE, HeaderValue::from_static("flow=secret"));
+        headers.insert("x-csrf-token", HeaderValue::from_static("secret"));
+        assert!(redact_sensitive_headers(headers).is_empty());
     }
 
     #[test]

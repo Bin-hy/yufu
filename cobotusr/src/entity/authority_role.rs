@@ -5,7 +5,7 @@ use crate::entity::{authority, role};
 use sea_orm::entity::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DeleteResult, EntityTrait, PaginatorTrait, QueryFilter, Set,
-    TransactionTrait,
+    TransactionSession,
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
     pub async fn add_one(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
         authority_id: IdType,
     ) -> Result<Model, DbErr> {
@@ -45,7 +45,7 @@ impl Entity {
     }
 
     pub async fn add_batch_tx(
-        db: &DatabaseConnection,
+        db: &(impl sea_orm::ConnectionTrait + sea_orm::TransactionTrait),
         role_id: IdType,
         authority_ids: Vec<IdType>,
     ) -> Result<Vec<Model>, DbErr> {
@@ -67,7 +67,7 @@ impl Entity {
     }
 
     pub async fn delete_pair(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
         authority_id: IdType,
     ) -> Result<DeleteResult, DbErr> {
@@ -79,7 +79,7 @@ impl Entity {
     }
 
     pub async fn delete_batch(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
         authority_ids: Vec<IdType>,
     ) -> Result<DeleteResult, DbErr> {
@@ -91,7 +91,7 @@ impl Entity {
     }
 
     pub async fn paginate_authorities_by_role(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         role_id: IdType,
         page_size: u64,
         page_number: u64,

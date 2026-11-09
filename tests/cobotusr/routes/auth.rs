@@ -18,6 +18,8 @@ struct LocalHttpFixture {
     _rsa: super::oidc::TestRsaFile,
     db: DatabaseConnection,
     root: String,
+    issuer: String,
+    insecure_cookies: bool,
     api: String,
     client: Client,
     clock: Arc<dyn auth::security::budget::Clock>,
@@ -93,6 +95,14 @@ async fn local_http_fixture(mode: &str) -> LocalHttpFixture {
     if mode == "hmac" {
         config.oidc.signing_algorithm = "HS256".into();
     }
+    // HTTP is the internal test transport. Healthy production fixtures model
+    // TLS termination with a distinct, fixed HTTPS issuer and Secure cookies.
+    let insecure_cookies = matches!(mode, "monitored-loopback" | "hmac");
+    config.auth.allow_insecure_loopback_cookies = insecure_cookies;
+    if !insecure_cookies {
+        config.oidc.issuer = format!("https://{address}");
+    }
+    let issuer = config.oidc.issuer.clone();
     let server = if mode == "missing-clock" {
         tokio::spawn(cobotusr::serve(config, listener, shutdown_signal()))
     } else {
@@ -117,6 +127,8 @@ async fn local_http_fixture(mode: &str) -> LocalHttpFixture {
         _rsa: rsa,
         db,
         root,
+        issuer,
+        insecure_cookies,
         api,
         client,
         clock,
@@ -153,17 +165,22 @@ fn csrf_request(
     let clock = test_clock(true);
     let token = auth::security::csrf::CsrfProtector::new("t24-local-test-key".into())
         .unwrap()
-        .issue(&fixture.root, refresh, clock.as_ref())
+        .issue(&fixture.issuer, refresh, clock.as_ref())
         .unwrap();
     let cookies = format!(
-        "__Host-cobotusr-csrf={}{}",
+        "{}={}{}",
+        if fixture.insecure_cookies {
+            "cobotusr-dev-csrf"
+        } else {
+            "__Host-cobotusr-csrf"
+        },
         token.expose_secret(),
         refresh_cookie
             .map(|cookie| format!("; {cookie}"))
             .unwrap_or_default()
     );
     request
-        .header("origin", &fixture.root)
+        .header("origin", &fixture.issuer)
         .header("x-csrf-token", token.expose_secret())
         .header("cookie", cookies)
 }
@@ -211,7 +228,7 @@ async fn security_t24_http_register_login_refresh_and_replay_use_registered_idp_
             .unwrap(),
         ),
         CredentialExpectation::new(
-            &fixture.root,
+            &fixture.issuer,
             "cobotusr",
             "cobotusr",
             vec![CredentialProfile::new(PrincipalKind::User, TokenUse::UserSession).unwrap()],
@@ -631,7 +648,7 @@ async fn security_browser_loopback_cookie_flow_and_monitor_failure() {
     assert_eq!(forbidden.status(), 403);
     assert!(!forbidden.headers().contains_key("set-cookie"));
     let registered = fixture.client.post(format!("{}/register", fixture.api))
-        .header("origin", &fixture.root).header("cookie", &csrf_cookie).header("x-csrf-token", &proof)
+        .header("origin", &fixture.issuer).header("cookie", &csrf_cookie).header("x-csrf-token", &proof)
         .json(&serde_json::json!({"username":"loopback-test", "nickname":"test", "password":"test password"}))
         .send().await.unwrap();
     assert_eq!(registered.status(), 200);
@@ -649,7 +666,7 @@ async fn security_browser_loopback_cookie_flow_and_monitor_failure() {
     let logout = fixture
         .client
         .post(format!("{}/logout", fixture.api))
-        .header("origin", &fixture.root)
+        .header("origin", &fixture.issuer)
         .header("cookie", session_cookies.join("; "))
         .header("x-csrf-token", body["csrf_token"].as_str().unwrap())
         .send()
@@ -868,8 +885,8 @@ async fn security_browser_loopback_aliases_and_rejection_diagnostics() {
             assert!(!body.to_string().contains(proof));
         }
     }
-    // Without the development opt-in, Secure cookies remain required and aliases
-    // remain untrusted. A missing cookie must explain why GET /csrf alone isn't enough.
+    // The fixed production HTTPS issuer requires Secure cookies and rejects
+    // development aliases. GET /csrf without its cookie is insufficient.
     let secure = local_http_fixture("healthy").await;
     let response = secure
         .client
@@ -893,7 +910,7 @@ async fn security_browser_loopback_aliases_and_rejection_diagnostics() {
     let response = secure
         .client
         .post(format!("{}/login", secure.api))
-        .header("origin", &secure.root)
+        .header("origin", &secure.issuer)
         .header("x-csrf-token", &proof)
         .json(&LoginData {
             username: "isolated-nonexistent".into(),
@@ -905,7 +922,7 @@ async fn security_browser_loopback_aliases_and_rejection_diagnostics() {
     assert_eq!(response.status(), 403);
     assert_eq!(
         response.json::<serde_json::Value>().await.unwrap()["code"],
-        "csrf_cookie_requires_https"
+        "csrf_cookie_missing"
     );
 }
 

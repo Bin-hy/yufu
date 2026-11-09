@@ -24,7 +24,10 @@ pub struct Model {
 }
 
 impl Entity {
-    pub async fn insert_one(db: &DatabaseConnection, insert: RoleAddReq) -> Result<Model, DbErr> {
+    pub async fn insert_one(
+        db: &impl sea_orm::ConnectionTrait,
+        insert: RoleAddReq,
+    ) -> Result<Model, DbErr> {
         let now = chrono::Utc::now().naive_utc();
         let am = ActiveModel {
             id: NotSet,
@@ -36,7 +39,7 @@ impl Entity {
     }
 
     pub async fn paginate(
-        db: &DatabaseConnection,
+        db: &impl sea_orm::ConnectionTrait,
         page_size: u64,
         page_number: u64,
     ) -> Result<(u64, Vec<Model>), DbErr> {
@@ -46,7 +49,10 @@ impl Entity {
         Ok((total_pages, records))
     }
 
-    pub async fn update_name(db: &DatabaseConnection, patch: RolePatchReq) -> Result<Model, DbErr> {
+    pub async fn update_name(
+        db: &impl sea_orm::ConnectionTrait,
+        patch: RolePatchReq,
+    ) -> Result<Model, DbErr> {
         let dbm = Self::find_by_id(patch.id)
             .one(db)
             .await?
@@ -57,7 +63,10 @@ impl Entity {
         am.update(db).await
     }
 
-    pub async fn delete_checked(db: &DatabaseConnection, id: IdType) -> Result<bool, DbErr> {
+    pub async fn delete_checked(
+        db: &impl sea_orm::ConnectionTrait,
+        id: IdType,
+    ) -> Result<bool, DbErr> {
         let res = Self::delete_by_id(id).exec(db).await?;
         Ok(res.rows_affected == 1)
     }
@@ -117,18 +126,18 @@ impl From<Model> for RoleVO {
 
 // req
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct RoleAddReq {
     pub name: String,
 }
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RolePatchReq {
     pub id: IdType,
     pub name: String,
 }
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RoleDeleteReq {
     pub id: IdType,
 }

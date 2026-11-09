@@ -3,6 +3,10 @@ use http::StatusCode;
 use sea_orm::{DbErr, SqlErr};
 #[derive(Debug)]
 pub enum AppError {
+    Identity {
+        reason: crate::domain::identity::error::IdentityError,
+        request_id: uuid::Uuid,
+    },
     Security(auth::security::error::SecurityError),
     BrowserRejected(BrowserRejection),
     NotFound(String),
@@ -45,6 +49,12 @@ impl BrowserRejection {
 }
 
 impl AppError {
+    pub fn identity(
+        reason: crate::domain::identity::error::IdentityError,
+        request_id: uuid::Uuid,
+    ) -> Self {
+        Self::Identity { reason, request_id }
+    }
     pub fn not_found<T>(t: T) -> Self
     where
         T: ToString,
@@ -70,6 +80,20 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
+            AppError::Identity { reason, request_id } => {
+                use crate::domain::identity::error::IdentityError;
+                let status = match reason {
+                    IdentityError::Unauthenticated | IdentityError::LoginRequired => StatusCode::UNAUTHORIZED,
+                    IdentityError::Forbidden | IdentityError::CookieRequiresHttps | IdentityError::SelfApproval | IdentityError::AccessDenied | IdentityError::ConsentRequired => StatusCode::FORBIDDEN,
+                    IdentityError::NotFound => StatusCode::NOT_FOUND,
+                    IdentityError::Conflict | IdentityError::AlreadyConsumed | IdentityError::OwnerRequired | IdentityError::LastAdministrator | IdentityError::ApprovalObsolete => StatusCode::CONFLICT,
+                    IdentityError::Expired => StatusCode::GONE,
+                    IdentityError::InvalidInput | IdentityError::InvalidScope => StatusCode::BAD_REQUEST,
+                    IdentityError::DependencyUnavailable | IdentityError::DeadlineExceeded | IdentityError::CapacityExceeded | IdentityError::CommitUncertain => StatusCode::SERVICE_UNAVAILABLE,
+                };
+                tracing::warn!(%request_id, reason = reason.code(), "identity request rejected");
+                (status, [(http::header::CACHE_CONTROL, "no-store".to_owned()), (http::HeaderName::from_static("x-request-id"), request_id.to_string())], axum::Json(serde_json::json!({"code":reason.code(),"request_id":request_id}))).into_response()
+            }
             AppError::BrowserRejected(reason) => (
                 StatusCode::FORBIDDEN,
                 [(http::header::CACHE_CONTROL, "no-store")],
@@ -87,14 +111,15 @@ impl IntoResponse for AppError {
                     SecurityError::Conflict => StatusCode::CONFLICT,
                     SecurityError::DependencyUnavailable
                     | SecurityError::DeadlineExceeded
-                    | SecurityError::CapacityExceeded => StatusCode::SERVICE_UNAVAILABLE,
+                    | SecurityError::CapacityExceeded
+                    | SecurityError::CommitUncertain => StatusCode::SERVICE_UNAVAILABLE,
                 };
                 (status, err.to_string()).into_response()
             }
             AppError::NotFound(err) => (StatusCode::NOT_FOUND, err).into_response(),
             AppError::AlreadyExists(err) => (StatusCode::CONFLICT, err).into_response(),
-            AppError::InternalServerError(err) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            AppError::InternalServerError(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal_server_error").into_response()
             }
             AppError::Throw(err) => (StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
             AppError::Unauthorized(err) => (StatusCode::UNAUTHORIZED, err).into_response(),
@@ -110,7 +135,10 @@ where
 {
     fn from(err: E) -> Self {
         let err = err.into();
-        if let Some(security) = err.downcast_ref::<auth::security::error::SecurityError>() {
+        if let Some(identity) = err.downcast_ref::<crate::domain::identity::error::IdentityError>()
+        {
+            AppError::identity(*identity, uuid::Uuid::new_v4())
+        } else if let Some(security) = err.downcast_ref::<auth::security::error::SecurityError>() {
             AppError::Security(*security)
         } else {
             AppError::InternalServerError(err)
