@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useUserStore } from '@/pinia/stores/user'
 import { useRoute, useRouter } from 'vue-router'
 import { DropdownMenuItem } from 'reka-ui'
 import { ChevronsLeft, ChevronsRight, ArrowUpRight } from '@lucide/vue'
 import Logo from '@/layouts/components/Logo/index.vue'
 import Tooltip from '@/components/ui/tooltip/tooltip.vue'
 import DropdownMenu from '@/components/ui/dropdown-menu/dropdown-menu.vue'
-import { navigationGroups, assignmentLinks, activeNavigation } from '@/router/navigation'
+import { navigationFor, assignmentLinks, activeNavigation } from '@/router/navigation'
 import { navigateWorkspace } from '@/workspace/coordinator'
 import { useLayoutStore } from '@/pinia/stores/layout'
 defineProps<{ collapsed?: boolean; mobile?: boolean }>()
@@ -13,6 +15,8 @@ const emit = defineEmits<{ navigate: [] }>()
 const route = useRoute(),
     router = useRouter(),
     layout = useLayoutStore()
+const user = useUserStore()
+const navigationGroups = computed(() => navigationFor(user.centerSession))
 async function navigate(event: MouseEvent, name: string) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
     event.preventDefault()

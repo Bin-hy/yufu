@@ -1,54 +1,13 @@
 <script setup lang="ts">
-import {
-    ArrowUpRight,
-    Users,
-    ShieldCheck,
-    AppWindow,
-    KeyRound,
-    ScrollText,
-    Network,
-} from '@lucide/vue'
+import { computed } from 'vue'
+import { ArrowUpRight } from '@lucide/vue'
+import { navigationFor } from '@/router/navigation'
 import PageHeader from '@/components/workspace/page-header.vue'
 import { useUserStore } from '@/pinia/stores/user'
 const user = useUserStore()
-const shortcuts = [
-    {
-        name: 'user-list',
-        title: '用户与身份',
-        description: '管理用户账号与角色，维护身份访问边界。',
-        icon: Users,
-    },
-    {
-        name: 'authority-assign',
-        title: 'API 访问控制',
-        description: '为角色分配接口访问权限。',
-        icon: Network,
-    },
-    {
-        name: 'permission-assign',
-        title: '资源权限',
-        description: '配置资源范围与操作能力。',
-        icon: ShieldCheck,
-    },
-    {
-        name: 'application-list',
-        title: '应用注册',
-        description: '管理应用、OAuth 客户端与密钥。',
-        icon: AppWindow,
-    },
-    {
-        name: 'authorized-apps-list',
-        title: '授权管理',
-        description: '查看已授权应用，管理或撤销访问。',
-        icon: KeyRound,
-    },
-    {
-        name: 'recordings-list',
-        title: '操作审计',
-        description: '检查操作记录，追踪用户活动。',
-        icon: ScrollText,
-    },
-]
+const shortcuts = computed(() => navigationFor(user.centerSession).flatMap(group => group.items)
+    .filter(item => item.name !== 'dashboard-home')
+    .map(item => ({ ...item, description: '进入' + item.title + '，使用企业统一账户管理。' })))
 </script>
 <template>
     <div class="workspace-page">
@@ -72,8 +31,8 @@ const shortcuts = [
                 <p class="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
                     保持工作上下文，专注当前任务。打开的页面会保留分页与筛选，未保存的修改会在离开前提醒。
                 </p>
-                <router-link to="/users/create" class="ui-button ui-button-default mt-5"
-                    >创建用户<ArrowUpRight :size="15" aria-hidden="true"
+                <router-link to="/account" class="ui-button ui-button-default mt-5"
+                    >账户中心<ArrowUpRight :size="15" aria-hidden="true"
                 /></router-link>
                 <p v-if="user.identityError" role="alert" class="inline-error mt-4">
                     {{ user.identityError }}

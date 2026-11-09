@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getToken, setToken, removeToken } from '@/common/cache/cookies'
-import { getCurrentUser } from '@/pages/profile/api'
+import { setToken, removeToken } from '@/common/cache/cookies'
+import { getCenterSession } from '@/pages/account/api'
+import type { CenterSession } from '@/pages/account/api/type'
 import { establishSession, sessionEpoch, resetSession, onSessionReset } from '@/workspace/session'
 export interface UserInfo {
     id?: number
@@ -11,6 +12,7 @@ export interface UserInfo {
 }
 export const useUserStore = defineStore('user', () => {
     const userInfo = ref<UserInfo | null>(null),
+        centerSession = ref<CenterSession | null>(null),
         isLoggedIn = ref(false),
         loading = ref(false),
         identityError = ref<string | null>(null)
@@ -36,6 +38,7 @@ export const useUserStore = defineStore('user', () => {
         loading.value = false
         identityError.value = null
         userInfo.value = null
+        centerSession.value = null
         isLoggedIn.value = false
         removeToken()
         try {
@@ -49,34 +52,37 @@ export const useUserStore = defineStore('user', () => {
         clearLocal()
     }
     onSessionReset(clearLocal)
-    function initUserInfo() {
-        if (!getToken()) return
+    function setCenterSession(info: CenterSession) {
+        const previous = centerSession.value
+        if (previous && (previous.sub !== info.sub || previous.developer_enabled !== info.developer_enabled
+            || previous.administrator !== info.administrator || previous.sso_session_id !== info.sso_session_id)) resetSession()
+        establishSession(info.user_id)
+        centerSession.value = info
+        userInfo.value = { id: info.user_id, username: info.username, nickname: info.nickname }
         isLoggedIn.value = true
-        try {
-            const info = JSON.parse(localStorage.getItem('userInfo') ?? 'null')
-            if (info?.username)
-                userInfo.value = { username: info.username, nickname: info.nickname }
-        } catch {
-            /* 当前身份接口恢复 */
-        }
+        identityError.value = null
+    }
+    function initUserInfo() {
+        // Stored labels/tokens are not evidence of a current center session.
+        removeToken()
+        userInfo.value = null
+        isLoggedIn.value = false
     }
     async function ensureSession(): Promise<void> {
         if (restoring) return restoring
-        if (!getToken()) return
         const epoch = sessionEpoch.value
         loading.value = true
         identityError.value = null
-        const current: Promise<void> = getCurrentUser({ errorPresentation: 'local' })
+        const current: Promise<void> = getCenterSession({ errorPresentation: 'local' })
             .then((info) => {
                 if (epoch !== sessionEpoch.value) return
-                establishSession(info.id)
-                userInfo.value = { id: info.id, username: info.username, nickname: info.nickname }
-                isLoggedIn.value = true
-                persist(userInfo.value)
+                setCenterSession(info)
             })
             .catch((error) => {
-                if (epoch === sessionEpoch.value)
+                if (epoch === sessionEpoch.value) {
+                    if (error.response?.status === 401) resetSession()
                     identityError.value = error.message ?? '身份加载失败，请重试'
+                }
             })
             .finally(() => {
                 if (restoring === current) restoring = null
@@ -87,10 +93,12 @@ export const useUserStore = defineStore('user', () => {
     }
     return {
         userInfo,
+        centerSession,
         isLoggedIn,
         loading,
         identityError,
         setUserInfo,
+        setCenterSession,
         clearUserInfo: logout,
         logout,
         initUserInfo,

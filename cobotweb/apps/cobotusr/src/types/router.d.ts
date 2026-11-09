@@ -4,6 +4,7 @@ declare module 'vue-router' {
     interface RouteMeta extends Record<PropertyKey, unknown> {
         /** 是否需要认证 */
         requiresAuth?: boolean
+        qualification?: 'developer' | 'administrator'
         /** 路由标题 */
         title?: string
         /** 是否隐藏在侧边栏 */

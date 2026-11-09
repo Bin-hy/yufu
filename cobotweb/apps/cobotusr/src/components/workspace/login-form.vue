@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, onScopeDispose } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { loginApi } from '@/pages/login/api'
+import { centerLogin } from '@/pages/account/api'
 import { useUserStore } from '@/pinia/stores/user'
 import { useTabsStore } from '@/pinia/stores/tabs'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { setRememberUser, removeRememberUser, getRememberUser } from '@/common/cache/localstorage'
 import { resetSession, sessionOwner } from '@/workspace/session'
 import { loadWorkspace } from '@/storage/workspace'
+import { canEnter } from '@/router/guard'
 import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiCheckbox from '@/components/ui/checkbox/checkbox.vue'
 import AuthLayout from '@/layouts/auth-layout.vue'
-const props = defineProps<{ oidc?: boolean }>(),
+const props = defineProps<{ oidc?: boolean; flowId?: string; actionId?: string }>(),
     router = useRouter(),
     route = useRoute(),
     user = useUserStore(),
@@ -26,6 +27,7 @@ const remembered = getRememberUser(),
     validation = ref(''),
     mutation = useAsyncMutation(),
     { pending, error } = mutation
+onScopeDispose(() => { form.password = '' })
 async function submit() {
     if (pending.value) return
     validation.value = ''
@@ -36,16 +38,10 @@ async function submit() {
     resetSession()
     const saved = await mutation.run(
         () =>
-            loginApi(
-                { username: form.username.trim(), password: form.password },
-                { errorPresentation: 'local' },
-            ),
+            centerLogin({ username: form.username.trim(), password: form.password,
+                flow_id: props.flowId || (typeof route.query.flow_id === 'string' ? route.query.flow_id : undefined) }),
         async (result) => {
-            user.setUserInfo({
-                username: result.username,
-                nickname: result.nickname,
-                token: result.access_token,
-            })
+            user.setCenterSession(result)
             form.password = ''
             if (!props.oidc) {
                 if (form.remember) setRememberUser(form.username.trim())
@@ -54,20 +50,29 @@ async function submit() {
             await user.ensureSession()
             const snapshot = loadWorkspace(router, sessionOwner.value)
             if (snapshot)
-                for (const tab of snapshot.tabs) tabs.sync(router.resolve(tab.fullPath), false)
+                for (const tab of snapshot.tabs) {
+                    const restored = router.resolve(tab.fullPath)
+                    if (canEnter(restored.meta, user.centerSession)) tabs.sync(restored, false)
+                }
         },
     )
+    form.password = ''
     if (saved) {
-        if (props.oidc) await router.replace({ name: 'oidc-consent', query: route.query })
+        if (props.actionId) {
+            await router.replace({ name: 'account-action', query: { action_id: props.actionId } })
+        } else if (props.oidc) {
+            const flow = props.flowId || (typeof route.query.flow_id === 'string' ? route.query.flow_id : '')
+            window.location.assign(router.resolve({ name: 'oidc-consent', query: { flow_id: flow } }).href)
+        }
         else {
             const path =
-                typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
+                typeof route.query.redirect === 'string' ? route.query.redirect : '/account'
             const target =
                 path.startsWith('/') &&
                 !path.startsWith('//') &&
                 router.resolve(path).meta.workspace
                     ? path
-                    : '/dashboard'
+                    : '/account'
             await router.replace(target)
         }
     }
@@ -114,7 +119,7 @@ async function submit() {
                 还没有账户？<RouterLink
                     :to="{ name: 'register' }"
                     class="text-primary underline underline-offset-4"
-                    >创建账户</RouterLink
+                    >凭企业邀请创建账户</RouterLink
                 >
             </p>
         </form></AuthLayout

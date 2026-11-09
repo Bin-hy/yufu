@@ -3,7 +3,18 @@ import { useUserStore } from '@/pinia/stores/user'
 import { pinia } from '@/pinia'
 import { useTabsStore } from '@/pinia/stores/tabs'
 import { checkDrafts } from '@/workspace/draft-registry'
-import { logoutRequest } from '@/pages/login/api'
+import { centerLogout } from '@/pages/account/api'
+import { emitToast } from '@/utils/toast'
+async function endCenterSession() {
+    try {
+        await centerLogout()
+        return true
+    } catch (error) {
+        if ((error as { response?: { status: number } }).response?.status === 401) return true
+        emitToast({ type: 'error', message: (error as Error).message || '退出失败，请重试' })
+        return false
+    }
+}
 export async function logoutAndRedirect(router: Router): Promise<void> {
     if (
         !(await checkDrafts(
@@ -12,12 +23,12 @@ export async function logoutAndRedirect(router: Router): Promise<void> {
         ))
     )
         return
-    await logoutRequest({ errorPresentation: 'local' }).catch(() => undefined)
+    if (!(await endCenterSession())) return
     useUserStore(pinia).logout()
     await router.replace('/login')
 }
 export async function logoutOnly(router?: Router): Promise<void> {
-    await logoutRequest({ errorPresentation: 'local' }).catch(() => undefined)
+    if (!(await endCenterSession())) return
     useUserStore(pinia).logout()
     if (router) await router.replace('/login')
 }

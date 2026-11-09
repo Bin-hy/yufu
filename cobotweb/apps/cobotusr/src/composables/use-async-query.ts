@@ -84,7 +84,12 @@ export function useAsyncQuery<T>(options: {
     }
     watch(
         () => [toValue(options.key), active(), sessionEpoch.value] as const,
-        ([key, enabled], old) => {
+        ([key, enabled, epoch], old) => {
+            if (old && old[2] !== epoch) {
+                data.value = null
+                loadedKey = ''
+                stale.value = true
+            }
             if (!enabled) {
                 if (controller) stale.value = true
                 cancel()

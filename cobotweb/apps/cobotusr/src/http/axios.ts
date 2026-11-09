@@ -33,8 +33,10 @@ function isHtmlResponse(response?: { data?: unknown; headers?: Record<string, un
 export function createHttpClient(options?: {
     adapter?: AxiosRequestConfig['adapter']
     refresh?: () => Promise<string>
+    authMode?: 'legacy' | 'center'
 }) {
-    const baseURL = import.meta.env.VITE_BASE_URL?.trim() || '/api/v1'
+    const center = options?.authMode === 'center'
+    const baseURL = center ? '/api/v1' : import.meta.env.VITE_BASE_URL?.trim() || '/api/v1'
     const instance: AxiosInstance = axios.create({ adapter: options?.adapter })
     const proofs = new Map<string, { token: string; epoch: number; expiresAt: number }>()
     const challenges = new Map<string, { epoch: number; promise: Promise<string> }>()
@@ -61,7 +63,7 @@ export function createHttpClient(options?: {
         if (pending?.epoch === epoch) return pending.promise
         const promise = instance.request({
             baseURL: key,
-            url: 'csrf',
+            url: center ? 'identity/csrf' : 'csrf',
             method: 'GET',
             timeout: 8000,
             withCredentials: true,
@@ -129,10 +131,15 @@ export function createHttpClient(options?: {
             if (epoch !== sessionEpoch.value) throw new axios.CanceledError('会话已改变')
             const status = error.response?.status
             const url = String(original.url ?? '')
+            if (center && status === 401 && /^(?:\/?(?:account|developer|admin)\/|\/?identity\/logout$|\/?identity\/flows\/[^/]+\/complete$)/i.test(url)) {
+                expireSession()
+                error.message = '中心会话已失效，请重新登录'
+                throw error
+            }
             if (['post', 'put', 'patch', 'delete'].includes(String(original.method).toLowerCase())
                 && (status === 403 || !error.response))
                 proofs.delete(proofKey(original))
-            if (status === 401 && !original._skipAuthRefresh && !/(?:login|register|csrf)$/i.test(url)) {
+            if (!center && status === 401 && !original._skipAuthRefresh && !/(?:login|register|csrf)$/i.test(url)) {
                 if (original._retry || /refresh$/i.test(url)) {
                     expireSession()
                     throw error
@@ -198,6 +205,9 @@ export function createHttpClient(options?: {
         },
     )
     return function request<T>(config: RequestOptions): Promise<T> {
+        if (center && ((config.baseURL && config.baseURL !== baseURL)
+            || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(config.url ?? '')))
+            return Promise.reject(new Error('中心接口必须使用同源地址'))
         return instance.request({
             baseURL,
             timeout: 8000,
@@ -205,8 +215,9 @@ export function createHttpClient(options?: {
             ...config,
             headers: {
                 'Content-Type': 'application/json',
-                Authorization: getToken() ? 'Bearer ' + getToken() : undefined,
+                Authorization: !center && getToken() ? 'Bearer ' + getToken() : undefined,
                 ...config.headers,
+                ...(center ? { Authorization: undefined } : {}),
             },
             _epoch: sessionEpoch.value,
         } as AxiosRequestConfig) as Promise<T>

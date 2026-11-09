@@ -54,7 +54,7 @@ const layout = useLayoutStore(),
                         }}</span
                         ><ChevronDown :size="14" aria-hidden="true" /></button></template
                 ><DropdownMenuItem as-child
-                    ><router-link to="/profile" class="dropdown-item"
+                    ><router-link to="/account" class="dropdown-item"
                         ><UserRound :size="15" aria-hidden="true" />个人中心</router-link
                     ></DropdownMenuItem
                 ><DropdownMenuItem class="dropdown-item sm:hidden" @select="setTheme('light')"

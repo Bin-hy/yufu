@@ -13,6 +13,7 @@ assert.equal(root.hostname, '127.0.0.1')
 assert.notEqual(root.port, '4000')
 const webkit = process.platform === 'darwin' && Number(release().split('.')[0]) < 24
     ? compatibleWebkit : currentWebkit
+const pathname = (url) => new URL(url).pathname
 if (process.env.COBOTUSR_AUTH_TEST_MODE === 'secure-cookie-diagnostic') {
     const browser = await webkit.launch({ headless: true })
     try {
@@ -21,8 +22,8 @@ if (process.env.COBOTUSR_AUTH_TEST_MODE === 'secure-cookie-diagnostic') {
         await page.goto('/login')
         await page.getByLabel('用户名', { exact: true }).fill('isolated-nonexistent')
         await page.getByLabel('密码', { exact: true }).fill('wrong password')
-        const challenge = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/csrf')
-        const login = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/login')
+        const challenge = page.waitForResponse((response) => pathname(response.url()) === '/api/v1/identity/csrf')
+        const login = page.waitForResponse((response) => pathname(response.url()) === '/api/v1/identity/login')
         await page.getByRole('button', { name: '登录', exact: true }).click()
         assert.equal((await challenge).status(), 200)
         const rejected = await login
@@ -30,8 +31,8 @@ if (process.env.COBOTUSR_AUTH_TEST_MODE === 'secure-cookie-diagnostic') {
         assert.equal((await rejected.json()).code, 'csrf_cookie_requires_https')
         await page.getByRole('alert').filter({ hasText: '--allow-insecure-loopback-cookies' }).waitFor()
         assert.equal(await page.getByLabel('用户名', { exact: true }).inputValue(), 'isolated-nonexistent')
-        assert.ok(!(await context.cookies()).some((cookie) => cookie.name === '__Host-cobotusr-csrf'))
-        log('WebKit: default Secure policy, GET /csrf 200 then login 403, actionable UI message passed')
+        assert.ok(!(await context.cookies()).some((cookie) => cookie.name.startsWith('__Host-cobotusr-')))
+        log('WebKit: default Secure policy, GET /identity/csrf 200 then login 403, actionable UI message passed')
         await context.close()
     } finally { await browser.close() }
     process.exit(0)
@@ -48,9 +49,9 @@ for (const [site, baseURL] of Object.entries({ ipv4: root.origin, localhost: `ht
         const pageErrors = []
         const requests = []
         page.on('pageerror', (error) => pageErrors.push(error.message))
-        page.on('response', (response) => events.push([new URL(response.url()).pathname, response.status()]))
+        page.on('response', (response) => events.push([pathname(response.url()), response.status()]))
         page.on('request', (request) => {
-            if (new URL(request.url()).pathname.startsWith('/api/v1/')) requests.push(request)
+            if (pathname(request.url()).startsWith('/api/v1/')) requests.push(request)
         })
         await page.goto('/login')
         const username = `isolated-${engineName}-${site}`
@@ -65,58 +66,44 @@ for (const [site, baseURL] of Object.entries({ ipv4: root.origin, localhost: `ht
             return response.status
         }, username)
         assert.equal(registration, 200, `${name}: registration`)
-        // Check the default HTTPS policy separately in backend tests; this fixture opts into HTTP loopback.
-        const initialCookies = await context.cookies()
-        const refreshCookie = initialCookies.find((cookie) => cookie.name === 'refresh_token')
-        assert.ok(refreshCookie?.httpOnly && !refreshCookie.secure)
-        assert.ok(initialCookies.some((cookie) => cookie.name === 'cobotusr-dev-csrf' && !cookie.secure))
 
         await page.getByLabel('用户名', { exact: true }).fill('isolated-test-admin')
         await page.getByLabel('密码', { exact: true }).fill('isolated test password')
-        const loginResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/login')
-        const identityResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/user')
+        const challengeResponse = page.waitForResponse((response) => pathname(response.url()) === '/api/v1/identity/csrf')
+        const loginResponse = page.waitForResponse((response) => pathname(response.url()) === '/api/v1/identity/login')
         await page.getByRole('button', { name: '登录', exact: true }).click()
+        const challenge = await challengeResponse
+        assert.equal(challenge.status(), 200, `${name}: csrf challenge`)
         const logged = await loginResponse
         assert.equal(logged.status(), 200, `${name}: login`)
         const loginBody = await logged.json()
-        assert.equal((await identityResponse).status(), 200, `${name}: current identity`)
-        await page.waitForURL(/\/dashboard$/)
-        log(`${name}: access token length=${loginBody.access_token.length}; browser cookie lengths=${JSON.stringify((await context.cookies()).map((cookie) => [cookie.name, cookie.value.length]))}`)
-        const loggedRequest = requests.find((request) => new URL(request.url()).pathname === '/api/v1/login')
-        assert.ok((await loggedRequest.allHeaders())['x-csrf-token'])
+        assert.ok(loginBody.csrf_token, `${name}: center CSRF proof`)
+        await page.waitForURL(/\/account$/)
+        const loginRequest = requests.find((request) => pathname(request.url()) === '/api/v1/identity/login')
+        assert.equal((await loginRequest.allHeaders())['x-csrf-token'], (await challenge.json()).csrf_token, `${name}: login CSRF binding`)
+        const sessionCookies = await context.cookies()
+        const ssoCookie = sessionCookies.find((cookie) => cookie.name === 'cobotusr-dev-sso')
+        assert.ok(ssoCookie?.httpOnly && !ssoCookie.secure, `${name}: HttpOnly center session cookie`)
+        assert.ok(sessionCookies.some((cookie) => cookie.name === 'cobotusr-dev-center-csrf' && !cookie.httpOnly && !cookie.secure), `${name}: center CSRF cookie`)
+        log(`${name}: center login cookies=${JSON.stringify(sessionCookies.map((cookie) => [cookie.name, cookie.value.length]))}`)
 
-        // Force an access-token failure only in the browser; the actual backend handles refresh.
-        let failed = false
-        await page.route('**/api/v1/user', async (route) => {
-            if (!failed && route.request().method() === 'GET') {
-                failed = true
-                await route.fulfill({ status: 401, body: 'isolated expired access' })
-            } else await route.continue()
-        })
-        const responses = Promise.all([
-            page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/csrf'),
-            page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/refresh'),
-        ])
+        const restored = page.waitForResponse((response) => pathname(response.url()) === '/api/v1/account/session' && response.status() === 200)
         await page.reload()
-        const [challengeResponse, refreshed] = await responses
-        assert.equal(refreshed.status(), 200, `${name}: refresh`)
-        const refreshBody = await refreshed.json()
-        const refreshRequest = requests.find((request) => new URL(request.url()).pathname === '/api/v1/refresh')
-        assert.ok((await refreshRequest.allHeaders())['x-csrf-token'] === (await challengeResponse.json()).csrf_token, `${name}: refresh CSRF binding`)
-        assert.ok(loginBody.csrf_token)
+        assert.equal((await restored).status(), 200, `${name}: session restore`)
         await page.getByRole('button', { name: '用户菜单' }).waitFor()
 
-        const logoutResponse = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/v1/logout')
+        const logoutResponse = page.waitForResponse((response) => pathname(response.url()) === '/api/v1/identity/logout')
         await page.getByRole('button', { name: '用户菜单' }).click()
         await page.getByRole('menuitem', { name: '退出登录' }).click()
         const loggedOut = await logoutResponse
         assert.equal(loggedOut.status(), 200, `${name}: logout`)
-        assert.ok((await loggedOut.request().allHeaders())['x-csrf-token'] === refreshBody.csrf_token, `${name}: logout CSRF binding`)
+        assert.equal((await loggedOut.request().allHeaders())['x-csrf-token'], loginBody.csrf_token, `${name}: logout CSRF binding`)
         await page.waitForURL(/\/login$/)
-        assert.ok(!(await context.cookies()).some((cookie) => ['refresh_token', 'cobotusr-dev-csrf'].includes(cookie.name)))
-        assert.ok(!(await page.evaluate(() => JSON.stringify(globalThis.localStorage))).includes(refreshBody.csrf_token))
+        const remaining = await context.cookies()
+        assert.ok(!remaining.some((cookie) => ['cobotusr-dev-sso', 'cobotusr-dev-center-csrf'].includes(cookie.name)), `${name}: center cookies cleared`)
+        assert.ok(!(await page.evaluate(() => JSON.stringify(globalThis.localStorage))).includes(loginBody.csrf_token))
         assert.deepEqual(pageErrors, [])
-        log(`${name}: real registration, UI login, real refresh, UI logout and browser cookies passed`)
+        log(`${name}: real registration, center UI login, session restore, UI logout and browser cookies passed`)
         await context.close()
     } catch (error) {
         log(`${name} response diagnostics: ${JSON.stringify(events.filter(([path]) => !path.startsWith('/assets/')))}`)

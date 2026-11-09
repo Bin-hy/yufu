@@ -1,30 +1,6 @@
-import { request } from '@/http/axios'
-import type { RequestOptions } from '@/http/axios'
-import type { ClientInfoResponse, ConsentRequest, ConsentResponse } from './type'
-
-export async function getAuthorizeClientInfo(
-    params: {
-        client_id: string
-        scope?: string
-    },
-    options: RequestOptions = {},
-): Promise<ClientInfoResponse> {
-    return request<ClientInfoResponse>({
-        url: '/oidc/authorize/client-info',
-        method: 'GET',
-        params,
-        ...options,
-    })
-}
-
-export async function submitConsent(
-    data: ConsentRequest,
-    options: RequestOptions = {},
-): Promise<ConsentResponse> {
-    return request<ConsentResponse>({
-        url: '/oidc/authorize/consent',
-        method: 'POST',
-        data,
-        ...options,
-    })
-}
+import { identityRequest } from '@/http/identity'
+import type { AuthorizationFlow } from './type'
+export const inspectFlow = (id: string, signal?: AbortSignal) =>
+    identityRequest<AuthorizationFlow>({ url: `identity/flows/${encodeURIComponent(id)}`, signal, errorPresentation: 'local' })
+export const completeFlow = (id: string, approved: boolean) =>
+    identityRequest<{ redirect_url: string }>({ url: `identity/flows/${encodeURIComponent(id)}/complete`, method: 'POST', data: { approved }, errorPresentation: 'local' })
