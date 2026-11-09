@@ -88,3 +88,6 @@ cobotweb/apps/cobotusr/test-results/
 cobotweb/apps/cobotusr/playwright-report/
 # Configuration
 /conf/cobotusr.toml
+
+# dev docs
+devdocs/
