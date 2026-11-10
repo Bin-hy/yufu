@@ -55,6 +55,55 @@ async fn test_get_page_authorities() -> Result<(), AppError> {
     Ok(())
 }
 
+/// A full-scope legacy write loads every affected account. The bound is a
+/// deployment setting, so an estate above it is refused before any work runs
+/// rather than failing halfway through the transaction.
+#[tokio::test]
+async fn authority_write_refuses_estates_above_the_configured_bound() -> Result<(), AppError> {
+    use sea_orm::ConnectionTrait;
+    let fixture = IdentityFixture::start_configured(|config| {
+        config.identity.legacy_governance_max_users = 1;
+    })
+    .await;
+    fixture
+        .db
+        .execute_unprepared(
+            r#"INSERT INTO "user" (username,password,role_id,create_time,update_time)
+               VALUES ('bound-second','bound-hash',3,NOW(),NOW())"#,
+        )
+        .await
+        .unwrap();
+    let token = super::identity_support::management_access(&fixture).await;
+    let body = AuthorityInsertReq {
+        name: "bound_authority".to_string(),
+        authority_uri: "/bound/authority/path".to_string(),
+        method: "GET".to_string(),
+    };
+    let resp = Client::new()
+        .post(format!("{}/api/v1/authority", fixture.base_url))
+        .json(&body)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await?;
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    let payload: serde_json::Value = resp.json().await?;
+    assert_eq!(payload["code"], "capacity_exceeded");
+    let stored: i64 = fixture
+        .db
+        .query_one_raw(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "SELECT COUNT(*)::bigint AS value FROM authority WHERE name='bound_authority'",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "value")
+        .unwrap();
+    assert_eq!(stored, 0, "the refused write leaves no authority behind");
+    fixture.close().await;
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_patch_authority() -> Result<(), AppError> {
     let fixture = IdentityFixture::start().await;

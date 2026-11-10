@@ -47,6 +47,7 @@ where
 {
     let budget = context.budget.clone();
     let manager = &context.manager;
+    let max_users = state.config.identity.legacy_governance_max_users;
     let repository =
         PgIdentityRepository::new(state.database.connection.clone(), state.security_clock()?);
     let request_id = context.id;
@@ -57,7 +58,10 @@ where
             Err(SecurityError::Conflict) if attempt < 2 => continue,
             Err(error) => return Err(error.into()),
         };
-        let output = match apply(&mut tx, manager, method, route, scope, request_id, &change).await
+        let output = match apply(
+            &mut tx, manager, method, route, scope, request_id, max_users, &change,
+        )
+        .await
         {
             Ok(output) => output,
             Err(mut error) => {
@@ -100,6 +104,7 @@ async fn apply<T, F>(
     route: &str,
     scope: MutationScope,
     request_id: Uuid,
+    max_users: usize,
     change: &F,
 ) -> Result<T>
 where
@@ -136,12 +141,15 @@ where
     };
     let rows = tx
         .identity_rows(
-            &format!("SELECT u.id FROM \"user\" u WHERE {predicate} ORDER BY u.id LIMIT 1001"),
+            &format!(
+                "SELECT u.id FROM \"user\" u WHERE {predicate} ORDER BY u.id LIMIT {}",
+                max_users.saturating_add(1)
+            ),
             values,
         )
         .await
         .map_err(|e| AppError::identity(e, request_id))?;
-    if rows.len() > 1000 {
+    if rows.len() > max_users {
         return Err(AppError::identity(
             IdentityError::CapacityExceeded,
             request_id,

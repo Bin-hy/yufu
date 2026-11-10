@@ -19,6 +19,9 @@ pub struct Identity {
     pub logout_max_age_seconds: u64,
     /// Exact HTTPS origins allowed for enterprise private network deliveries.
     pub logout_private_origins: Vec<String>,
+    /// Users one legacy full-scope write may touch. The security budget still
+    /// bounds the work; this only decides when the write is refused up front.
+    pub legacy_governance_max_users: usize,
     pub audit_retention_seconds: u64,
     pub operation_retention_seconds: u64,
 }
@@ -38,6 +41,7 @@ impl Default for Identity {
             logout_retry_seconds: vec![5, 30, 120, 600, 3_600],
             logout_max_age_seconds: 86_400,
             logout_private_origins: Vec::new(),
+            legacy_governance_max_users: 1_000,
             audit_retention_seconds: 90 * 86_400,
             operation_retention_seconds: 86_400,
         }
@@ -126,6 +130,10 @@ impl Config {
         anyhow::ensure!(
             (1..=86_400).contains(&policy.logout_max_age_seconds),
             "invalid logout retry horizon"
+        );
+        anyhow::ensure!(
+            (1..=10_000).contains(&policy.legacy_governance_max_users),
+            "invalid legacy governance bound"
         );
         anyhow::ensure!(
             !policy.logout_retry_seconds.is_empty()
@@ -289,6 +297,8 @@ mod tests {
             |p| p.logout_timeout_millis = 2_001,
             |p| p.logout_retry_seconds = vec![30, 5],
             |p| p.logout_max_age_seconds = 86_401,
+            |p| p.legacy_governance_max_users = 0,
+            |p| p.legacy_governance_max_users = 10_001,
             |p| p.audit_retention_seconds = 0,
             |p| p.operation_retention_seconds = 0,
             |p| p.logout_private_origins = vec!["https://internal.example/path".into()],
