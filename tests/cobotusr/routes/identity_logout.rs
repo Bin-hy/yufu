@@ -199,6 +199,11 @@ async fn identity_protocol_logout_http_get_has_no_revocation_and_post_needs_orig
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers()["referrer-policy"],
+        "same-origin",
+        "the confirm form must keep a real Origin; no-referrer makes Chromium send null"
+    );
     cookies.absorb(response.headers());
     let html = response.text().await.unwrap();
     let flow = html

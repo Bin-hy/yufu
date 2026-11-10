@@ -12,6 +12,7 @@ pub enum ConsoleKind {
     Accounts,
     Audit,
     Deliveries,
+    AppDeliveries,
 }
 pub enum ConsoleQuery {
     Applications {
@@ -45,6 +46,12 @@ pub enum ConsoleQuery {
         limit: u32,
     },
     Deliveries {
+        after: Option<Uuid>,
+        limit: u32,
+    },
+    AppDeliveries {
+        application_id: i32,
+        environment_id: Uuid,
         after: Option<Uuid>,
         limit: u32,
     },

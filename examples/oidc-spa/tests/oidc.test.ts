@@ -128,13 +128,15 @@ describe('local session projection', () => {
 })
 
 describe('spa sign-in flow', () => {
-  it('starts a top-level redirect', async () => {
-    const fake = manager()
+  it('starts a top-level redirect with a fresh nonce', async () => {
+    const signinRedirect = vi.fn(async (_args?: { nonce?: string }) => undefined)
+    const fake = manager({ signinRedirect })
     const oidc = createSpaOidc(config, { storage: new MemoryStorage() as unknown as Storage, manager: fake })
 
     await oidc.signIn()
 
-    expect(fake.signinRedirect).toHaveBeenCalledTimes(1)
+    expect(signinRedirect).toHaveBeenCalledTimes(1)
+    expect(signinRedirect.mock.calls[0]?.[0]?.nonce).toMatch(/^[A-Za-z0-9_-]{43}$/)
   })
 
   it('completes the callback into a local session', async () => {

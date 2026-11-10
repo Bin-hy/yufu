@@ -196,6 +196,8 @@ export function createHttpClient(options?: {
                       ? browserRejectionMessages[error.response.data.code]
                     : status === 503 && error.response?.data === 'security dependency unavailable'
                       ? '认证服务暂不可用，请检查后端时钟同步与依赖状态'
+                    : status === 400 && error.response?.data?.code === 'invalid_input'
+                      ? `输入内容不符合要求，请按表单提示检查后重试${typeof error.response.data.request_id === 'string' && error.response.data.request_id ? `（请求标识 ${error.response.data.request_id}）` : ''}`
                     : typeof error.response?.data === 'string'
                       ? error.response.data
                       : (error.response?.data?.message ?? error.message ?? '请求失败，请重试')

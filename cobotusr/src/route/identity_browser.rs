@@ -96,7 +96,9 @@ pub(crate) async fn request_context(
 fn protect_response(mut response: Response, id: Uuid) -> Response {
     for (name, value) in browser::protected_headers() {
         if let Some(name) = name {
-            response.headers_mut().insert(name, value);
+            // Middleware supplies a safe default; a handler that set the header
+            // explicitly has already considered the response's context.
+            response.headers_mut().entry(name).or_insert(value);
         }
     }
     if let Ok(value) = HeaderValue::from_str(&id.to_string()) {

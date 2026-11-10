@@ -180,28 +180,17 @@ impl PgSecurityTransaction {
             }
             ConsoleQuery::Deliveries { after, limit } => {
                 let rows=self.identity_rows("SELECT d.id,d.event_id,d.status,d.attempt_count,d.next_attempt_at,d.last_error_code,d.created_at,d.delivered_at,e.application_id,e.kind,a.name FROM identity_logout_delivery d JOIN identity_oidc_rp_session p ON p.id=d.rp_session_id JOIN identity_app_environment e ON e.id=p.environment_id JOIN application a ON a.id=e.application_id WHERE ($1::uuid IS NULL OR d.id>$1) ORDER BY d.id LIMIT $2",vec![after.into(),i64::from(limit+1).into()]).await?;
-                let items = rows
-                    .into_iter()
-                    .map(|r| {
-                        Ok(ConsoleDelivery {
-                            id: get(&r, "id")?,
-                            event_id: get(&r, "event_id")?,
-                            application_id: get(&r, "application_id")?,
-                            name: get(&r, "name")?,
-                            environment: get(&r, "kind")?,
-                            status: get(&r, "status")?,
-                            attempt_count: u32::try_from(get::<i32>(&r, "attempt_count")?)
-                                .map_err(|_| IdentityError::DependencyUnavailable)?,
-                            next_attempt_at: unsigned(get(&r, "next_attempt_at")?)? / 1000,
-                            last_error_code: get(&r, "last_error_code")?,
-                            created_at: unsigned(get(&r, "created_at")?)? / 1000,
-                            delivered_at: get::<Option<i64>>(&r, "delivered_at")?
-                                .map(unsigned)
-                                .transpose()?
-                                .map(|v| v / 1000),
-                        })
-                    })
-                    .collect::<Result<Vec<_>, IdentityError>>()?;
+                let items = console_deliveries(rows)?;
+                Ok(ConsoleResult::Deliveries(page(items, limit, |r| r.id)))
+            }
+            ConsoleQuery::AppDeliveries {
+                application_id,
+                environment_id,
+                after,
+                limit,
+            } => {
+                let rows=self.identity_rows("SELECT d.id,d.event_id,d.status,d.attempt_count,d.next_attempt_at,d.last_error_code,d.created_at,d.delivered_at,e.application_id,e.kind,a.name FROM identity_logout_delivery d JOIN identity_oidc_rp_session p ON p.id=d.rp_session_id JOIN identity_app_environment e ON e.id=p.environment_id JOIN application a ON a.id=e.application_id WHERE e.application_id=$1 AND p.environment_id=$2::uuid AND ($3::uuid IS NULL OR d.id>$3) ORDER BY d.id LIMIT $4",vec![application_id.into(),environment_id.into(),after.into(),i64::from(limit+1).into()]).await?;
+                let items = console_deliveries(rows)?;
                 Ok(ConsoleResult::Deliveries(page(items, limit, |r| r.id)))
             }
         }
@@ -251,4 +240,30 @@ impl PgSecurityTransaction {
             _ => Err(IdentityError::InvalidInput),
         }
     }
+}
+
+fn console_deliveries(
+    rows: Vec<sea_orm::QueryResult>,
+) -> Result<Vec<ConsoleDelivery>, IdentityError> {
+    rows.into_iter()
+        .map(|r| {
+            Ok(ConsoleDelivery {
+                id: get(&r, "id")?,
+                event_id: get(&r, "event_id")?,
+                application_id: get(&r, "application_id")?,
+                name: get(&r, "name")?,
+                environment: get(&r, "kind")?,
+                status: get(&r, "status")?,
+                attempt_count: u32::try_from(get::<i32>(&r, "attempt_count")?)
+                    .map_err(|_| IdentityError::DependencyUnavailable)?,
+                next_attempt_at: unsigned(get(&r, "next_attempt_at")?)? / 1000,
+                last_error_code: get(&r, "last_error_code")?,
+                created_at: unsigned(get(&r, "created_at")?)? / 1000,
+                delivered_at: get::<Option<i64>>(&r, "delivered_at")?
+                    .map(unsigned)
+                    .transpose()?
+                    .map(|v| v / 1000),
+            })
+        })
+        .collect()
 }

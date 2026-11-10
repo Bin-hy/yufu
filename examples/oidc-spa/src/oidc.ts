@@ -26,7 +26,7 @@ export interface OidcUserLike {
 }
 
 export interface UserManagerLike {
-  signinRedirect(): Promise<void>
+  signinRedirect(args?: { nonce?: string }): Promise<void>
   signinRedirectCallback(url?: string): Promise<OidcUserLike>
   signinSilent(): Promise<OidcUserLike | null>
   signoutRedirect(): Promise<void>
@@ -80,6 +80,19 @@ export function userManagerSettings(
   }
 }
 
+/**
+ * The provider requires a nonce on every authorization request, so the client
+ * generates one per sign-in. oidc-client-ts stores it with the pending state
+ * and rejects the callback when the ID Token echoes a different value.
+ */
+export function createNonce(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
 function stringClaim(profile: Record<string, unknown>, name: string): string | undefined {
   const value = profile[name]
   return typeof value === 'string' && value.trim() ? value : undefined
@@ -95,8 +108,8 @@ export function toSpaSession(user: OidcUserLike, now: number): SpaSession {
       issuer,
       subject,
       displayName:
-        stringClaim(user.profile, 'name') ??
         stringClaim(user.profile, 'preferred_username') ??
+        stringClaim(user.profile, 'name') ??
         subject,
       email: stringClaim(user.profile, 'email'),
     },
@@ -132,7 +145,7 @@ export function createSpaOidc(config: SpaConfig, options: SpaOidcOptions = {}): 
 
   return {
     async signIn() {
-      await manager.signinRedirect()
+      await manager.signinRedirect({ nonce: createNonce() })
     },
 
     async completeSignIn(url) {

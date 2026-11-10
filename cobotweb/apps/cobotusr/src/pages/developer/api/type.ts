@@ -10,6 +10,7 @@ export interface RegistrationReceipt { operation_id: string; application_id: num
 export interface ChangeReceipt { operation_id: string; summary: Record<string, string | number | boolean | null>; client_secret?: string }
 export interface Reader { id: string; reader_id: string; environment_id: string; approved_audience: string; enabled: boolean; revision: number; created_at: number }
 export interface ReaderReceipt { operation_id: string; reader_id: string; revision: number; secret?: string }
+export interface Delivery { id: string; event_id: string; application_id: number; name: string; environment: 'development' | 'production'; status: string; attempt_count: number; next_attempt_at: number; last_error_code: string | null; created_at: number; delivered_at: number | null }
 export interface Approval { approval_id: string; application_id: number; environment_id: string; version_id: string; config: EnvironmentConfig; snapshot: { owner_user_id: number; [key: string]: unknown }; requested_by: number; status: string; reviewed_by: number | null; reason: string | null; logout_limitation_accepted: boolean }
 export type ApplicationsPage = Page<Application, number>
 export const emptyConfig = (): EnvironmentConfig => ({ client_kind: 'server_web', redirect_uris: [], post_logout_redirect_uris: [], browser_origins: [], access_audience: '', identity_scopes: 'openid profile email', consent_policy: 'user_consent', logout_capability: 'online', backchannel_logout_uri: null })

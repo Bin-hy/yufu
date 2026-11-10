@@ -26,6 +26,17 @@ pub fn write_evidence(
     center_secret: Option<&str>,
     browser_secret: &str,
 ) -> cobotusr::service::identity::browser::BrowserWriteEvidence {
+    write_evidence_at(f, &f.base_url, center_secret, browser_secret)
+}
+/// Same evidence, but the request Origin is the issuer a browser actually sees.
+/// The fixture listens on plain HTTP behind a TLS front end, so the two origins
+/// differ by scheme and port.
+pub fn write_evidence_at(
+    f: &IdentityFixture,
+    origin: &str,
+    center_secret: Option<&str>,
+    browser_secret: &str,
+) -> cobotusr::service::identity::browser::BrowserWriteEvidence {
     use cobotusr::service::identity::browser;
     let mut request = axum::http::HeaderMap::new();
     request.insert(
@@ -64,7 +75,7 @@ pub fn write_evidence(
         axum::http::header::COOKIE,
         format!("{original}; {}", extra.join("; ")).parse().unwrap(),
     );
-    request.insert(axum::http::header::ORIGIN, f.base_url.parse().unwrap());
+    request.insert(axum::http::header::ORIGIN, origin.parse().unwrap());
     request.insert(
         "x-csrf-token",
         challenge.csrf_token.expose_secret().parse().unwrap(),
@@ -104,7 +115,15 @@ pub fn config(
     client: ClientKind,
     backchannel: bool,
 ) -> EnvironmentConfig {
-    EnvironmentConfigInput {
+    config_with(kind, client, backchannel, |_| {})
+}
+pub fn config_with(
+    kind: AppEnvironmentKind,
+    client: ClientKind,
+    backchannel: bool,
+    customize: impl FnOnce(&mut EnvironmentConfigInput),
+) -> EnvironmentConfig {
+    let mut input = EnvironmentConfigInput {
         client_kind: client,
         redirect_uris: vec!["https://rp.example/callback".into()],
         post_logout_redirect_uris: vec!["https://rp.example/bye".into()],
@@ -122,9 +141,9 @@ pub fn config(
             LogoutCapability::Online
         },
         backchannel_logout_uri: backchannel.then(|| "https://rp.example/backchannel".into()),
-    }
-    .validate(kind, true)
-    .unwrap()
+    };
+    customize(&mut input);
+    input.validate(kind, true).unwrap()
 }
 pub struct AppSeed {
     pub app: i32,
@@ -143,6 +162,23 @@ pub async fn app_kind(
     key: &str,
     backchannel: bool,
     kind: ClientKind,
+) -> AppSeed {
+    app_with_configs(
+        f,
+        key,
+        kind,
+        config(AppEnvironmentKind::Development, kind, backchannel),
+        config(AppEnvironmentKind::Production, kind, backchannel),
+    )
+    .await
+}
+
+pub async fn app_with_configs(
+    f: &IdentityFixture,
+    key: &str,
+    kind: ClientKind,
+    development: EnvironmentConfig,
+    production: EnvironmentConfig,
 ) -> AppSeed {
     let owner = admin_id(f).await;
     f.db.execute_raw(Statement::from_sql_and_values(
@@ -174,14 +210,14 @@ pub async fn app_kind(
                 .clone()
                 .map(|hash| SecretToken::new(hash).unwrap()),
             initial_version_id: dev_ver,
-            config: config(AppEnvironmentKind::Development, kind, backchannel),
+            config: development,
         },
         production: NewEnvironmentWrite {
             id: prod,
             client_id: format!("{key}-prod"),
             client_secret_hash: secret_hash.map(|hash| SecretToken::new(hash).unwrap()),
             initial_version_id: prod_ver,
-            config: config(AppEnvironmentKind::Production, kind, backchannel),
+            config: production,
         },
     };
     let result = tx
@@ -206,12 +242,22 @@ pub async fn center(f: &IdentityFixture, user_id: i32) -> BrowserSessionSnapshot
 }
 
 pub async fn center_secret(f: &IdentityFixture, user_id: i32) -> (BrowserSessionSnapshot, String) {
+    center_secret_at(f, &f.base_url, user_id).await
+}
+
+/// The persisted principal namespace is the configured issuer, which differs
+/// from the plain-HTTP listener when a TLS front end publishes another origin.
+pub async fn center_secret_at(
+    f: &IdentityFixture,
+    issuer: &str,
+    user_id: i32,
+) -> (BrowserSessionSnapshot, String) {
     let secret = cobotusr::domain::identity::account::IssuedSecret::from_entropy(rand::random());
     let digest = secret.digest();
     let at = f.clock.now().unwrap().unix_millis;
     let root = BrowserSessionSnapshot {
         id: Uuid::new_v4(),
-        principal: stable_principal(&f.base_url, user_id).unwrap(),
+        principal: stable_principal(issuer, user_id).unwrap(),
         user_id,
         secret_digest: digest,
         auth_epoch: scalar(

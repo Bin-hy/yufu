@@ -94,6 +94,19 @@ it.each([200, 502])('接口返回 %i HTML 时显示地址错误，不把页面�
     )
 })
 
+it('invalid_input 400 转换为带请求标识的中文提示', async () => {
+    const request = createHttpClient({
+        adapter: async (config) => {
+            if (config.url === 'csrf') return response(config, { csrf_token: 'test-bootstrap' })
+            throw new axios.AxiosError('Bad Request', 'ERR_BAD_REQUEST', config, {},
+                { data: { code: 'invalid_input', request_id: 'bb1a7a3e-0808-42f5-b4bd-e161fa884aea' }, status: 400, statusText: 'Bad Request', headers: {}, config })
+        },
+    })
+    await expect(request({ url: 'users', method: 'POST', errorPresentation: 'local' })).rejects.toThrow(
+        '输入内容不符合要求，请按表单提示检查后重试（请求标识 bb1a7a3e-0808-42f5-b4bd-e161fa884aea）',
+    )
+})
+
 function unauthorized(config: InternalAxiosRequestConfig) {
     return Promise.reject(
         new axios.AxiosError(

@@ -44,6 +44,7 @@ impl ConsoleService {
                 ConsoleKind::Accounts => Some(IdentityOperation::AccountRead),
                 ConsoleKind::Audit => Some(IdentityOperation::AuditRead),
                 ConsoleKind::Deliveries => Some(IdentityOperation::DeliveryRead),
+                ConsoleKind::AppDeliveries => return Err(IdentityError::InvalidInput),
                 _ => None,
             };
             if let Some(operation) = operation {
@@ -105,8 +106,65 @@ impl ConsoleService {
                     after: uuid_cursor()?,
                     limit,
                 },
+                ConsoleKind::AppDeliveries => return Err(IdentityError::InvalidInput),
             };
             tx.console_read(query).await
+        }
+        .await;
+        finish_read(tx, result, budget).await
+    }
+    /// Owner-scoped delivery overview: a developer sees only the environment
+    /// they hold membership for, an administrator needs `DeliveryRead`.
+    pub async fn list_app_deliveries(
+        &self,
+        secret: &str,
+        application_id: i32,
+        environment_id: Uuid,
+        after: Option<&str>,
+        limit: u32,
+        budget: &SecurityBudget,
+    ) -> Result<ConsoleResult, IdentityError> {
+        if application_id <= 0 {
+            return Err(IdentityError::InvalidInput);
+        }
+        validate_limit(limit)?;
+        super::sso::validate_opaque(secret)?;
+        let after = after
+            .map(|value| {
+                value
+                    .parse::<Uuid>()
+                    .map_err(|_| IdentityError::InvalidInput)
+            })
+            .transpose()?;
+        let mut tx = self.repository.begin(budget).await?;
+        let result = async {
+            let actor = read_current_actor(
+                tx.as_mut(),
+                &SecretDigest::of(secret),
+                now(self.clock.as_ref())?,
+            )
+            .await?;
+            let workspace = tx.application_workspace(application_id).await?;
+            if actor.account().administrator {
+                tx.authorize_identity_operation(&actor, IdentityOperation::DeliveryRead)
+                    .await?;
+            } else {
+                super::application::require_membership(&workspace, &actor)?;
+            }
+            if !workspace
+                .environments
+                .iter()
+                .any(|e| e.environment_id == environment_id)
+            {
+                return Err(IdentityError::Forbidden);
+            }
+            tx.console_read(ConsoleQuery::AppDeliveries {
+                application_id,
+                environment_id,
+                after,
+                limit,
+            })
+            .await
         }
         .await;
         finish_read(tx, result, budget).await

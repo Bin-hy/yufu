@@ -7,11 +7,11 @@ import { resetSession } from '@/workspace/session'
 import AppDetail from '@/pages/developer/views/app-detail.vue'
 import type { EnvironmentConfig } from '@/pages/developer/api/type'
 const mocked = vi.hoisted(() => ({
-    getApp: vi.fn(), changeApp: vi.fn(), getReaders: vi.fn(), changeReader: vi.fn(), getApproval: vi.fn(),
+    getApp: vi.fn(), changeApp: vi.fn(), getReaders: vi.fn(), changeReader: vi.fn(), getApproval: vi.fn(), getAppDeliveries: vi.fn(),
     getCandidates: vi.fn(), getProviderMetadata: vi.fn(), getAssignments: vi.fn(), setAssignment: vi.fn(), setTestUser: vi.fn(),
 }))
 vi.mock('@/pages/developer/api', () => ({
-    getApp: mocked.getApp, changeApp: mocked.changeApp, getReaders: mocked.getReaders, changeReader: mocked.changeReader,
+    getApp: mocked.getApp, changeApp: mocked.changeApp, getReaders: mocked.getReaders, changeReader: mocked.changeReader, getAppDeliveries: mocked.getAppDeliveries,
     getApproval: mocked.getApproval, getCandidates: mocked.getCandidates, getProviderMetadata: mocked.getProviderMetadata,
     listApps: vi.fn(), registerApp: vi.fn(), registerAdminApp: vi.fn(),
 }))
@@ -31,6 +31,7 @@ beforeEach(() => {
     useUserStore(pinia).setCenterSession(identity)
     mocked.getApp.mockResolvedValue(application)
     mocked.getReaders.mockResolvedValue({ items: [], next: null })
+    mocked.getAppDeliveries.mockResolvedValue({ items: [], next: null })
     mocked.getAssignments.mockResolvedValue([])
     mocked.getProviderMetadata.mockResolvedValue({ issuer: 'https://id.example' })
 })

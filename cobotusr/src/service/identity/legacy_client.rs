@@ -54,20 +54,16 @@ where
             Err(error) => return Err(error.into()),
         };
         let outcome = async {
-            let (client, target) = lock_client(&mut tx, client_id, sync_target, request_id).await?;
-            if client.public_client {
-                return Err(AppError::Unauthorized(
-                    "confidential client required".into(),
-                ));
-            }
-            authenticate_session_client(&client, Some(secret), grant, budget)
-                .await
-                .map_err(|error| match error {
-                    SecurityError::InvalidCredential => {
-                        AppError::Unauthorized("invalid client authentication".into())
-                    }
-                    error => error.into(),
-                })?;
+            let (client, target) = lock_client(
+                &mut tx,
+                client_id,
+                secret,
+                sync_target,
+                grant,
+                budget,
+                request_id,
+            )
+            .await?;
             let output = budget
                 .run(change(&tx.transaction, &client, target.as_ref()))
                 .await??;
@@ -132,7 +128,10 @@ where
 async fn lock_client(
     tx: &mut PgSecurityTransaction,
     client_id: &str,
+    secret: &SecretToken,
     sync_target: Option<&str>,
+    grant: &str,
+    budget: &SecurityBudget,
     request_id: Uuid,
 ) -> Result<(oauth_client::Model, Option<application::Model>)> {
     tx.acquire_identity_scope(&IdentityLockScope::new(vec![IdentityLockKey::Policy])?)
@@ -142,6 +141,16 @@ async fn lock_client(
         .oidc_client(client_id)
         .await?
         .ok_or_else(|| AppError::Unauthorized("invalid client authentication".into()))?;
+    // Authenticate before resolving the sync target so an unauthenticated
+    // caller cannot use the response to probe which application keys exist.
+    authenticate_session_client(&initial, Some(secret), grant, budget)
+        .await
+        .map_err(|error| match error {
+            SecurityError::InvalidCredential => {
+                AppError::Unauthorized("invalid client authentication".into())
+            }
+            error => error.into(),
+        })?;
     let mut keys = vec![IdentityLockKey::OAuthClient(initial.id)];
     let target = if let Some(app_key) = sync_target {
         let target = tx
@@ -170,6 +179,11 @@ async fn lock_client(
         .legacy_oidc_client(client_id)
         .await?
         .ok_or_else(|| AppError::Unauthorized("invalid client authentication".into()))?;
+    if client.client_secret_hash != initial.client_secret_hash
+        || client.public_client != initial.public_client
+    {
+        return Err(SecurityError::InvalidCredential.into());
+    }
     if let Some(target) = &target {
         let current = tx
             .run(application::Entity::get_by_app_key(

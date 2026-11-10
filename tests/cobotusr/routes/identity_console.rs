@@ -8,6 +8,7 @@ use super::{
 use cobotusr::{
     domain::identity::{
         account::{PersonKind, SecretDigest},
+        console::ConsoleResult,
         error::IdentityError,
     },
     service::identity::{console::ConsoleService, repository::*},
@@ -19,6 +20,12 @@ use uuid::Uuid;
 
 fn service(f: &IdentityFixture) -> ConsoleService {
     ConsoleService::new(Arc::new(repository(f)), f.clock.clone())
+}
+fn expect_error<T>(result: Result<T, IdentityError>, expected: IdentityError) {
+    match result {
+        Ok(_) => panic!("expected {expected:?}"),
+        Err(actual) => assert_eq!(actual, expected),
+    }
 }
 fn safe(value: &Value) {
     match value {
@@ -378,6 +385,136 @@ async fn identity_console_delivery_retry_retains_target_jti_and_respects_lease_h
         )
         .await,
         Err(IdentityError::NotFound)
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn identity_console_app_deliveries_are_environment_scoped_paginated_and_member_only() {
+    let f = IdentityFixture::start().await;
+    let a = app(&f, "console-app-deliveries", true).await;
+    let (_, secret) = center_secret(&f, a.owner).await;
+    issued(&f, "console-app-deliveries-dev", &secret, "openid").await;
+    issued(&f, "console-app-deliveries-dev", &secret, "openid").await;
+    let evidence = write_evidence(&f, Some(&secret), &"A".repeat(43));
+    let consent = scalar(&f, "SELECT id::bigint AS value FROM oauth_consent").await as i32;
+    service(&f)
+        .withdraw_consent(&evidence, consent, Uuid::new_v4(), &budget(&f))
+        .await
+        .unwrap();
+    let total = scalar(
+        &f,
+        "SELECT COUNT(*)::bigint AS value FROM identity_logout_delivery",
+    )
+    .await;
+    assert!(
+        total >= 2,
+        "one delivery per relying party session, got {total}"
+    );
+    let svc = service(&f);
+    let ConsoleResult::Deliveries(first) = svc
+        .list_app_deliveries(&secret, a.app, a.development, None, 1, &budget(&f))
+        .await
+        .unwrap()
+    else {
+        panic!("wrong console result")
+    };
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(first.items[0].application_id, a.app);
+    assert_eq!(first.items[0].environment, "development");
+    let next = first.next.expect("more delivery pages");
+    let ConsoleResult::Deliveries(second) = svc
+        .list_app_deliveries(
+            &secret,
+            a.app,
+            a.development,
+            Some(&next.to_string()),
+            1,
+            &budget(&f),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("wrong console result")
+    };
+    assert_eq!(second.items.len(), 1);
+    assert!(second.items[0].id > first.items[0].id);
+    let ConsoleResult::Deliveries(production) = svc
+        .list_app_deliveries(&secret, a.app, a.production, None, 25, &budget(&f))
+        .await
+        .unwrap()
+    else {
+        panic!("wrong console result")
+    };
+    assert!(production.items.is_empty() && production.next.is_none());
+    expect_error(
+        svc.list_app_deliveries(&secret, a.app, Uuid::new_v4(), None, 25, &budget(&f))
+            .await,
+        IdentityError::Forbidden,
+    );
+    expect_error(
+        svc.list_app_deliveries(&secret, a.app, a.development, None, 0, &budget(&f))
+            .await,
+        IdentityError::InvalidInput,
+    );
+    expect_error(
+        svc.list_app_deliveries(
+            &secret,
+            a.app,
+            a.development,
+            Some("not-a-cursor"),
+            25,
+            &budget(&f),
+        )
+        .await,
+        IdentityError::InvalidInput,
+    );
+    let mut cookies = BrowserCookies::default();
+    http_login(&f, &mut cookies).await;
+    for root in ["developer", "admin"] {
+        let path = format!(
+            "/{root}/apps/{}/environments/{}/logout-deliveries",
+            a.app, a.development
+        );
+        let response = get(&f, &cookies, &path).await;
+        assert_eq!(response.status(), 200, "{path}");
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let body = response.json::<Value>().await.unwrap();
+        safe(&body);
+        assert_eq!(body["items"].as_array().unwrap().len() as i64, total);
+        assert_eq!(
+            f.client
+                .get(format!("{}/api/v1{path}", f.base_url))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+    }
+    // Demoting the owner to an ordinary account forces the developer branch:
+    // membership still grants the scoped read, losing it is refused.
+    f.db.execute_unprepared(&format!(
+        "UPDATE \"user\" SET role_id=3 WHERE id={}",
+        a.owner
+    ))
+    .await
+    .unwrap();
+    assert!(
+        svc.list_app_deliveries(&secret, a.app, a.development, None, 25, &budget(&f))
+            .await
+            .is_ok()
+    );
+    f.db.execute_unprepared(&format!(
+        "DELETE FROM identity_app_member WHERE application_id={} AND user_id={}",
+        a.app, a.owner
+    ))
+    .await
+    .unwrap();
+    expect_error(
+        svc.list_app_deliveries(&secret, a.app, a.development, None, 25, &budget(&f))
+            .await,
+        IdentityError::OwnerRequired,
     );
     f.close().await;
 }

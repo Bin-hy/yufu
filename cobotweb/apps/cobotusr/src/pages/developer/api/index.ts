@@ -1,6 +1,6 @@
 import { identityRequest } from '@/http/identity'
 import type { Page } from '@/pages/account/api/type'
-import type { Application, ApplicationsPage, Registration, RegistrationReceipt, ChangeReceipt, Reader, ReaderReceipt, Approval, Assignment } from './type'
+import type { Application, ApplicationsPage, Registration, RegistrationReceipt, ChangeReceipt, Reader, ReaderReceipt, Approval, Assignment, Delivery } from './type'
 export async function getProviderMetadata(signal?: AbortSignal): Promise<{ issuer: string }> {
     const response = await fetch('/.well-known/openid-configuration', { signal, credentials: 'omit', cache: 'no-store' })
     if (!response.ok) throw new Error('无法读取身份提供方配置')
@@ -17,3 +17,4 @@ export const getReaders = (administrator: boolean, id: number, env: string, sign
 export const changeReader = (administrator: boolean, id: number, env: string, readerId: string | null, data: unknown, key: string) => identityRequest<ReaderReceipt>({ url: `${administrator ? 'admin' : 'developer'}/apps/${id}/environments/${encodeURIComponent(env)}/integration/readers${readerId ? '/' + encodeURIComponent(readerId) : ''}`, method: readerId ? 'PATCH' : 'POST', data, headers: { 'Idempotency-Key': key }, errorPresentation: 'local' })
 export const getApproval = (administrator: boolean, id: number, approvalId: string, signal?: AbortSignal) => identityRequest<Approval>({ url: `${administrator ? 'admin' : 'developer'}/apps/${id}/approvals/${encodeURIComponent(approvalId)}`, signal, errorPresentation: 'local' })
 export const getCandidates = (signal?: AbortSignal, after?: number) => identityRequest<Page<{ user_id: number; username: string; nickname: string }, number>>({ url: 'developer/collaboration-candidates', params: { after }, signal, errorPresentation: 'local' })
+export const getAppDeliveries = (administrator: boolean, id: number, env: string, signal?: AbortSignal, after?: string) => identityRequest<Page<Delivery>>({ url: `${administrator ? 'admin' : 'developer'}/apps/${id}/environments/${encodeURIComponent(env)}/logout-deliveries`, params: { after }, signal, errorPresentation: 'local' })

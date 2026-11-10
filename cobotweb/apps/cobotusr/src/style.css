@@ -70,6 +70,8 @@
     a,
     select:not(:disabled) {
         cursor: pointer;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
     }
     :focus-visible {
         outline: 2px solid hsl(var(--ring));
@@ -320,12 +322,200 @@
         color: hsl(var(--muted-foreground));
         line-height: 1.5;
     }
+    .field-error {
+        color: hsl(var(--destructive));
+        font-size: 12px;
+        line-height: 1.5;
+    }
+    .ui-input.has-error,
+    .ui-select.has-error,
+    textarea.ui-input.has-error {
+        border-color: hsl(var(--destructive));
+    }
+    .checkbox-field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 38px;
+        font-size: 13px;
+    }
     .inline-error {
         color: hsl(var(--destructive));
         background: hsl(var(--destructive) / 0.07);
         padding: 10px 12px;
         border-radius: 6px;
         font-size: 13px;
+    }
+    .registration-panel {
+        overflow: hidden;
+    }
+    .registration-steps {
+        padding: 14px 24px;
+        border-bottom: 1px solid hsl(var(--border));
+        background: hsl(var(--muted) / 0.3);
+    }
+    .wizard-steps {
+        display: flex;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+    .wizard-steps li {
+        flex: none;
+    }
+    .wizard-step-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 5px 10px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: hsl(var(--muted-foreground));
+        font-size: 12px;
+        background: transparent;
+        transition:
+            background-color 120ms,
+            border-color 120ms,
+            color 120ms;
+    }
+    .wizard-step-button:hover:not(:disabled) {
+        background: hsl(var(--accent));
+        color: hsl(var(--accent-foreground));
+    }
+    .wizard-step-button:disabled {
+        opacity: 0.45;
+    }
+    .wizard-step-button[aria-current='step'] {
+        background: hsl(var(--card));
+        border-color: hsl(var(--primary) / 0.3);
+        color: hsl(var(--primary));
+        font-weight: 600;
+    }
+    .wizard-step-index {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 999px;
+        background: hsl(var(--muted));
+        font-size: 11px;
+    }
+    .wizard-step-button[aria-current='step'] .wizard-step-index {
+        background: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+    }
+    .registration-body {
+        padding: 22px 24px;
+    }
+    .registration-step-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+    }
+    .registration-step-header h2 {
+        margin: 0;
+        text-wrap: balance;
+    }
+    .step-counter {
+        flex: none;
+        padding: 4px 8px;
+        border-radius: 5px;
+        background: hsl(var(--muted));
+        color: hsl(var(--muted-foreground));
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+    }
+    .registration-footer {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 15px 24px;
+        border-top: 1px solid hsl(var(--border));
+        background: hsl(var(--muted) / 0.35);
+    }
+    .wizard-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+    .summary-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .summary-card {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 13px;
+        padding: 15px;
+        border: 1px solid hsl(var(--border));
+        border-radius: 8px;
+        background: hsl(var(--muted) / 0.25);
+    }
+    .summary-card h3 {
+        margin: 0;
+        font-size: 13px;
+    }
+    .summary-card .ui-button {
+        align-self: flex-start;
+    }
+    .summary-list {
+        display: grid;
+        gap: 9px;
+        margin: 0;
+    }
+    .summary-list > div {
+        min-width: 0;
+    }
+    .summary-list dt {
+        color: hsl(var(--muted-foreground));
+        font-size: 11px;
+    }
+    .summary-list dd {
+        margin: 3px 0 0;
+        font-size: 13px;
+        overflow-wrap: anywhere;
+    }
+    .app-card {
+        display: flex;
+        min-width: 0;
+        padding: 18px;
+        border: 1px solid hsl(var(--border));
+        border-radius: 12px;
+        background: hsl(var(--card));
+        transition:
+            border-color 120ms,
+            box-shadow 120ms;
+    }
+    .app-card:hover {
+        border-color: hsl(var(--primary) / 0.5);
+        box-shadow: 0 8px 26px hsl(var(--primary) / 0.08);
+    }
+    .app-environment-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 13px 0 0;
+        padding: 0;
+        list-style: none;
+    }
+    .app-environment-list li {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: hsl(var(--muted-foreground));
+        font-size: 12px;
     }
     .icon-button {
         width: 36px;
@@ -627,6 +817,21 @@
         font-size: 11px;
         white-space: nowrap;
     }
+    .status-success {
+        background: hsl(var(--primary) / 0.12);
+        color: hsl(var(--primary));
+    }
+    .status-muted {
+        background: hsl(var(--muted));
+        color: hsl(var(--muted-foreground));
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ui-button,
+    .wizard-step-button,
+    .app-card {
+        transition-duration: 0ms;
+    }
 }
 @media (max-width: 1023px) {
     .workspace-sidebar {
@@ -650,6 +855,15 @@
     }
     .page-header h1 {
         font-size: 23px;
+    }
+    .summary-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .registration-steps,
+    .registration-body,
+    .registration-footer {
+        padding-left: 16px;
+        padding-right: 16px;
     }
     .query-toolbar {
         flex-direction: column;

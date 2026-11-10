@@ -11,6 +11,8 @@ mod identity_assignment_service;
 mod identity_authorization;
 mod identity_authorization_http;
 mod identity_browser;
+#[cfg(unix)]
+mod identity_browser_e2e;
 mod identity_console;
 mod identity_cors;
 mod identity_developer;

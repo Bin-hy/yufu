@@ -133,6 +133,20 @@ async fn test_sync_permissions_app_key_proxy_and_guards() {
     .await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
+    // A bad secret must not reveal whether the requested app_key exists.
+    let resp = sync_permissions(
+        &client,
+        &base_url,
+        serde_json::json!({
+            "client_id": MACHINE_CLIENT_ID,
+            "client_secret": "wrong-secret",
+            "app_key": "no-such-application",
+            "permissions": [],
+        }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
     // ── 3. no app_key → defaults to the authenticating client's own
     //       application (legacy behaviour).
     let resp = sync_permissions(

@@ -33,6 +33,14 @@ pub fn get_routes() -> Router<AppState> {
         .route("/admin/audit-events", get(audit))
         .route("/admin/logout-deliveries", get(deliveries))
         .route("/admin/logout-deliveries/{id}/retry", post(retry))
+        .route(
+            "/developer/apps/{id}/environments/{env}/logout-deliveries",
+            get(app_deliveries),
+        )
+        .route(
+            "/admin/apps/{id}/environments/{env}/logout-deliveries",
+            get(app_deliveries),
+        )
 }
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -96,6 +104,32 @@ list_route!(rps, RelyingParties);
 list_route!(accounts, Accounts);
 list_route!(audit, Audit);
 list_route!(deliveries, Deliveries);
+async fn app_deliveries(
+    State(state): State<AppState>,
+    Extension(context): Extension<IdentityRequest>,
+    headers: HeaderMap,
+    path: Result<Path<(i32, Uuid)>, PathRejection>,
+    query: Result<Query<Page>, QueryRejection>,
+) -> ManagementResponse {
+    let result = async {
+        let Path((application_id, environment_id)) =
+            path.map_err(|_| IdentityError::InvalidInput)?;
+        let Query(page) = query.map_err(|_| IdentityError::InvalidInput)?;
+        let secret = browser::read_sso_cookie(&state.config, &headers)?;
+        console(&state)?
+            .list_app_deliveries(
+                &secret,
+                application_id,
+                environment_id,
+                page.after.as_deref(),
+                page.limit,
+                &context.budget,
+            )
+            .await
+    }
+    .await;
+    response(result, context.id)
+}
 async fn withdraw(
     State(state): State<AppState>,
     Extension(context): Extension<IdentityRequest>,

@@ -30,11 +30,27 @@ async function render(component: Component, path = '/account') {
         { path: '/account/action', name: 'account-action', component: {} }, { path: '/register', name: 'register', component: {} },
         { path: '/account/sessions', name: 'account-sessions', component: {} },
         { path: '/developer/apps', name: 'developer-apps', component: {} }, { path: '/developer/apps/:id', name: 'developer-app', component: {} },
-        { path: '/admin/apps/:id', name: 'admin-app', component: {} }, { path: '/oidc/consent', name: 'oidc-consent', component: {} },
+        { path: '/admin/apps', name: 'admin-apps', component: {} }, { path: '/admin/apps/:id', name: 'admin-app', component: {} }, { path: '/oidc/consent', name: 'oidc-consent', component: {} },
     ] })
     await router.push(path)
-    const wrapper = mount(component, { global: { plugins: [pinia, router] } }); wrappers.push(wrapper)
+    const wrapper = mount(component, { attachTo: document.body, global: { plugins: [pinia, router] } }); wrappers.push(wrapper)
     await flushPromises(); return { wrapper, router }
+}
+async function openRegistration(wrapper: VueWrapper, action: string) {
+    await wrapper.findAll('button').find(b => b.text() === action)!.trigger('click')
+    await nextTick()
+}
+async function nextRegistrationStep(wrapper: VueWrapper) {
+    await wrapper.findAll('button').find(b => b.text() === '下一步')!.trigger('click')
+    await flushPromises()
+}
+async function fillBasicStep(wrapper: VueWrapper, key = 'my-app', name = 'My App') {
+    await wrapper.find('#app-key').setValue(key)
+    await wrapper.find('#app-name').setValue(name)
+}
+async function fillEnvironmentStep(wrapper: VueWrapper, prefix: string, redirects: string, audience = 'urn:my-app:api') {
+    await wrapper.find(`#${prefix}-redirects`).setValue(redirects)
+    await wrapper.find(`#${prefix}-audience`).setValue(audience)
 }
 it('资料保存失败显示错误，改密成功才清会话并导航登录', async () => {
     mocked.profile.mockRejectedValue(new Error('profile rejected'))
@@ -71,9 +87,13 @@ it('会话列表区分中心和应用，撤销失败保留原结果且不伪报�
 it('注册失败重试使用同一操作键，秘密仅在一次结果中显示并随会话清理', async () => {
     mocked.register.mockRejectedValueOnce(new Error('commit uncertain')).mockResolvedValue({ operation_id: 'op-one', application_id: 1, environments: [{ environment_id: 'dev', kind: 'development' }], secrets: [{ environment_id: 'dev', client_secret: 'once-only-fixture-secret' }] })
     const { wrapper } = await render(Apps, '/developer/apps')
-    await wrapper.findAll('button').find(b => b.text() === '注册应用')!.trigger('click')
-    await wrapper.find('#app-key').setValue('my-app'); await wrapper.find('#app-name').setValue('My App')
-    for (const prefix of ['registration-dev', 'registration-prod']) { await wrapper.find(`#${prefix}-redirects`).setValue('https://app.example/callback'); await wrapper.find(`#${prefix}-audience`).setValue('urn:my-app:api') }
+    await openRegistration(wrapper, '注册应用')
+    await fillBasicStep(wrapper)
+    await nextRegistrationStep(wrapper)
+    await fillEnvironmentStep(wrapper, 'registration-dev', 'https://app.example/callback')
+    await nextRegistrationStep(wrapper)
+    await fillEnvironmentStep(wrapper, 'registration-prod', 'https://app.example/callback')
+    await nextRegistrationStep(wrapper)
     await wrapper.find('form').trigger('submit'); await flushPromises()
     expect(wrapper.text()).toContain('commit uncertain'); expect(wrapper.text()).not.toContain('once-only-fixture-secret')
     await wrapper.find('form').trigger('submit'); await flushPromises()
@@ -82,6 +102,64 @@ it('注册失败重试使用同一操作键，秘密仅在一次结果中显示�
     expect(wrapper.text()).toContain('once-only-fixture-secret')
     expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0)
     resetSession(); await nextTick(); expect(wrapper.text()).not.toContain('once-only-fixture-secret')
+})
+it('开发者注册按环境区分回调必填与 https 规则，生产草稿可留空提交', async () => {
+    mocked.register.mockResolvedValue({ operation_id: 'op-scheme', application_id: 3, environments: [] })
+    const { wrapper } = await render(Apps, '/developer/apps')
+    await openRegistration(wrapper, '注册应用')
+    await fillBasicStep(wrapper, 'cobotrix-spa-example', 'cobotrix-spa-example')
+    await nextRegistrationStep(wrapper)
+    const dev = wrapper.find('#registration-dev-redirects')
+    let prod = wrapper.find('#registration-prod-redirects')
+    expect((dev.element as HTMLTextAreaElement).required).toBe(true)
+    expect(wrapper.text()).toContain('本机调试可使用 http://localhost')
+    await dev.setValue('http://127.0.0.1:5173/callback')
+    await wrapper.find('#registration-dev-audience').setValue('urn:app:api')
+    await nextRegistrationStep(wrapper)
+    prod = wrapper.find('#registration-prod-redirects')
+    expect((prod.element as HTMLTextAreaElement).required).toBe(false)
+    expect(wrapper.text()).toContain('可先留空，生产配置经审批后生效；填写时必须使用 https')
+    await wrapper.find('#registration-prod-audience').setValue('urn:app:api')
+    await nextRegistrationStep(wrapper)
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(mocked.register).toHaveBeenCalledTimes(1)
+    expect(mocked.register.mock.calls[0]![0].development.redirect_uris).toEqual(['http://127.0.0.1:5173/callback'])
+    expect(mocked.register.mock.calls[0]![0].production.redirect_uris).toEqual([])
+})
+it('管理员注册的生产回调必填且不显示草稿留空提示', async () => {
+    const { wrapper } = await render(Apps, '/admin/apps')
+    await openRegistration(wrapper, '配置获批第三方')
+    await fillBasicStep(wrapper)
+    await nextRegistrationStep(wrapper)
+    await fillEnvironmentStep(wrapper, 'registration-dev', 'https://app.example/callback')
+    await nextRegistrationStep(wrapper)
+    expect((wrapper.find('#registration-prod-redirects').element as HTMLTextAreaElement).required).toBe(true)
+    expect((wrapper.find('#registration-prod-redirects').element as HTMLTextAreaElement).required).toBe(true)
+    expect(wrapper.text()).toContain('必须使用 https；http 地址（包括 127.0.0.1）会被拒绝')
+    expect(wrapper.text()).not.toContain('可先留空')
+})
+it('进入确认前本地校验拦截生产 http 回调，行内显示错误且不发起请求', async () => {
+    const { wrapper } = await render(Apps, '/developer/apps')
+    await openRegistration(wrapper, '注册应用')
+    await fillBasicStep(wrapper, 'cobotrix-spa-example', 'cobotrix-spa-example')
+    await nextRegistrationStep(wrapper)
+    await fillEnvironmentStep(wrapper, 'registration-dev', 'http://127.0.0.1:5173/callback', 'urn:app:api')
+    await nextRegistrationStep(wrapper)
+    await fillEnvironmentStep(wrapper, 'registration-prod', 'http://127.0.0.1:5173/callback', 'urn:app:api')
+    await nextRegistrationStep(wrapper)
+    expect(wrapper.find('#registration-step-title').text()).toBe('生产环境')
+    expect(wrapper.find('#registration-prod-redirect_uris-error').text()).toContain('生产环境「登录回调地址」 http://127.0.0.1:5173/callback')
+    expect(wrapper.text()).toContain('生产环境必须使用 https')
+    expect(mocked.register).not.toHaveBeenCalled()
+})
+it('注册向导在基础信息缺失时停留在当前步骤并聚焦第一个错误字段', async () => {
+    const { wrapper } = await render(Apps, '/developer/apps')
+    await openRegistration(wrapper, '注册应用')
+    await nextRegistrationStep(wrapper)
+    expect(wrapper.text()).toContain('基础信息')
+    expect(wrapper.find('#registration-dev-redirects').exists()).toBe(false)
+    expect(wrapper.find('#app-key-error').text()).toContain('「应用 Key」不能为空')
+    expect(document.activeElement?.id).toBe('app-key')
 })
 it('账户邀请秘密在网络请求前从普通与 hash 路由地址删除，不接受自选回调', () => {
     for (const hash of ['#kind=invitation&secret=' + 'A'.repeat(43), '#/account/action#kind=password_reset&secret=' + 'A'.repeat(43)]) {

@@ -94,7 +94,8 @@ export function toIdentityClaims(claims: IDToken): IdentityClaims {
   return {
     issuer: claims.iss,
     subject: claims.sub,
-    displayName: stringClaim(claims, 'name') ?? stringClaim(claims, 'preferred_username') ?? claims.sub,
+    // The login handle is stable; the nickname can be changed by the user.
+    displayName: stringClaim(claims, 'preferred_username') ?? stringClaim(claims, 'name') ?? claims.sub,
     email: stringClaim(claims, 'email'),
     sid: stringClaim(claims, 'sid'),
   }

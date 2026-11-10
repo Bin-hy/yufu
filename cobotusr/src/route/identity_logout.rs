@@ -87,6 +87,15 @@ async fn start(
                     crate::service::security::repository::now(clock.as_ref())?,
                 )?,
             );
+            // Chromium sends `Origin: null` on a same-origin form POST when the
+            // document is served with `Referrer-Policy: no-referrer`, which the
+            // confirm endpoint correctly rejects. The page only submits back to
+            // itself, so `same-origin` keeps the referrer from leaking anywhere
+            // else while preserving the real Origin.
+            response_headers.insert(
+                http::header::REFERRER_POLICY,
+                http::HeaderValue::from_static("same-origin"),
+            );
             let name = application_name
                 .as_deref()
                 .map(super::oidc::html_attribute)
