@@ -13,16 +13,16 @@ use cobotusr::route::auth::{LoginData, RegistryData};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 use std::sync::Arc;
 
-struct LocalHttpFixture {
+pub(super) struct LocalHttpFixture {
     _container: testcontainers::ContainerAsync<testcontainers::GenericImage>,
     _rsa: super::oidc::TestRsaFile,
-    db: DatabaseConnection,
-    root: String,
-    issuer: String,
-    insecure_cookies: bool,
-    api: String,
-    client: Client,
-    clock: Arc<dyn auth::security::budget::Clock>,
+    pub(super) db: DatabaseConnection,
+    pub(super) root: String,
+    pub(super) issuer: String,
+    pub(super) insecure_cookies: bool,
+    pub(super) api: String,
+    pub(super) client: Client,
+    pub(super) clock: Arc<dyn auth::security::budget::Clock>,
     _monitor: Option<cobotusr::clock::ClockMonitor>,
     _ntp: Option<tokio::task::JoinHandle<()>>,
     server: tokio::task::JoinHandle<()>,
@@ -35,7 +35,7 @@ impl Drop for LocalHttpFixture {
         }
     }
 }
-async fn local_http_fixture(mode: &str) -> LocalHttpFixture {
+pub(super) async fn local_http_fixture(mode: &str) -> LocalHttpFixture {
     let (container, database_url) = get_postgres_container().await.unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

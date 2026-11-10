@@ -226,3 +226,58 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 | `cargo fmt --all -- --check` / `cargo clippy --workspace --all-targets --all-features -- -D warnings` / `cargo machete` / `cargo audit` | 全部通过 | audit 载入 1430 条 advisory、扫描 494 个 crate，退出码 0；machete 未发现未使用依赖（新增 `rcgen`、`rustls`、`tokio-rustls` 均被测试使用）。 |
 
 同时修正上一提交遗留的回归：`security_browser_real_frontend_login_refresh_logout_all_engines` 与 `security_browser_secure_http_rejection_is_actionable_in_webkit` 仍在调用已随旧前端删除的 `tests/e2e/real-auth.mjs`，全量套件因此失败。这两个用例只覆盖已退役的旧登录页浏览器流程，本轮连同 `run_browser_auth_test` 一并删除；浏览器证据由 `identity_browser_e2e` 与三引擎 SSO 套件承担。
+
+## 容量与延迟实测（2026-11-10）
+
+此前容量只有定性描述，没有并发登录、刷新、退出、投递积压与会话清理的实测数据。本轮新增 `tests/cobotusr/routes/capacity.rs`，六项探针默认 `#[ignore]`，按需在目标环境跑：
+
+```text
+cargo test --release --test mod capacity -- --ignored --nocapture --test-threads=1
+```
+
+必须带 `--test-threads=1`：六个探针各自起一个数据库容器并打满 CPU，并行执行会互相抢占，同一台机器上得到的数字会低一半以上。
+
+测量环境：macOS 14.6，Apple M3 Pro（11 个逻辑核），Postgres 跑在 Docker 里，服务与压测客户端同机，因此数字只代表“单机 + 本地数据库”的上限，不能直接外推生产。每档固定 5 秒窗口。
+
+| 探针 | 并发 | 请求数 | req/s | P50 | P95 | 最大 | 状态分布 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 登录（32 个不同账户） | 1 | 21 | 4.2 | 222 ms | 231 ms | 695 ms | 200 × 21 |
+| 登录（32 个不同账户） | 4 | 76 | 15.2 | 264 ms | 337 ms | 365 ms | 200 × 76 |
+| 登录（32 个不同账户） | 8 | 128 | 25.6 | 306 ms | 386 ms | 476 ms | 200 × 128 |
+| 登录（32 个不同账户） | 16 | 131 | 26.2 | 624 ms | 761 ms | 789 ms | 200 × 131 |
+| 登录（同一账户） | 4 | 67 | 13.4 | 285 ms | 482 ms | 491 ms | 200 × 67 |
+| 登录（同一账户） | 16 | 124 | 24.8 | 694 ms | 853 ms | 892 ms | 200 × 124 |
+| 刷新轮换 | 1 | 376 | 75.2 | 9 ms | 35 ms | 68 ms | 200 × 376 |
+| 刷新轮换 | 4 | 872 | 174.4 | 17 ms | 49 ms | 254 ms | 200 × 872 |
+| 刷新轮换 | 8 | 929 | 185.8 | 38 ms | 77 ms | 169 ms | 200 × 929 |
+| 刷新轮换 | 16 | 939 | 187.8 | 84 ms | 137 ms | 226 ms | 200 × 939 |
+| 退出（一次性，32 个会话） | 4 | 32 | 149.8 | 10 ms | 54 ms | 83 ms | 200 × 32 |
+| 退出（一次性，32 个会话） | 16 | 32 | 181.9 | 48 ms | 131 ms | 141 ms | 200 × 32 |
+
+投递积压与清理：
+
+| 探针 | 规模 | 结果 |
+| --- | --- | --- |
+| 后通道投递（接收端固定成功） | 40 条待投递 | 5 个批次排空，264.0 条/秒，30.3 ms/批 |
+| 会话与审计清理（`limit=100`） | 2000 条审计事件 + 2000 条操作回执 | 21 次调用删除 4000 行，19641 行/秒，9.7 ms/次 |
+
+单机数字的抖动不小：同一份代码在负载不同的两次运行里，刷新 1 并发可以相差 40%（75 与 109 req/s），退出一次性 32 条可以相差一倍。表内数字用于判断量级和瓶颈位置，不作为容量承诺；上线前应在目标规格上重跑。
+
+探针同时暴露了一个真实缺陷：同一账户并发登录时，除首个请求外大量返回 409。原因是登录在 REPEATABLE READ 事务里取身份写屏障（`UPDATE "user" SET identity_revision=identity_revision`），后到者的快照早于先到者的提交，屏障返回 40001，而 `login_local` 只尝试一次。
+
+根因是屏障的粒度：会话发行和撤销共用同一把排他锁，于是两个互不相干的登录也会互相判为“陈旧快照”。修复分两处：
+
+- 会话发行改为对账户行取 `FOR SHARE`（`serialize_session_mint`）。共享锁之间兼容，同一账户的并发登录不再互相冲突；撤销仍取排他写屏障（`serialize_user_roots`），因此快照早于撤销的登录依旧以 40001 失败，不会把已撤销的资格重新发出去。
+- bcrypt 校验移出写事务，只做一次；写事务重新读取账户，密码哈希或启用状态变化就按 `InvalidCredential` 拒绝，保持“校验后账户被改”的语义。
+
+| 命令 | 实际结果 | 覆盖及限制 |
+| --- | --- | --- |
+| `cargo test --test mod security_t24_concurrent_logins_for_one_account_all_succeed` | 1 通过、0 失败 | 4 个线程用 `Barrier` 同时登录同一账户，断言四次登录都拿到各自的 refresh token；修复前该用例稳定失败。 |
+| `cargo test --test mod security_t25_application_revocation_prevents_stale_transaction_minting_fresh_roots` | 1 通过、0 失败 | 登录在签名后被暂停，期间提交一次应用级撤销；恢复后该事务仍以 `Conflict` 失败，证明共享锁没有放宽“陈旧快照不得建根”。 |
+| `cargo test --test mod security_t26_parallel_new_roots_cannot_exceed_quota` | 1 通过、0 失败 | MCP 发行仍走排他屏障，并发建根不会突破配额。 |
+| `cargo test --test mod security_t24_authentication_failures_and_signing_commit_failures_leave_no_session` | 1 通过、0 失败 | 未知用户、错误密码仍返回 `InvalidCredential`；签名失败与延迟约束触发器仍返回 `DependencyUnavailable` 且不留下会话，证明校验与写入拆分没有放宽失败语义。 |
+| `cargo test --release --test mod capacity_probe_login_same_user -- --ignored --nocapture --test-threads=1` | 通过 | 修复前 4 并发 36 次请求中 11 次 409、16 并发 65 次中 42 次 409；修复后 4 并发 67 次、16 并发 124 次全部 200。 |
+
+同一账户的登录不再因为彼此而失败，但仍受 bcrypt 与数据库插入约束：16 并发 24.8 req/s、P95 853 ms，与不同账户的 26.2 req/s 基本持平，说明瓶颈在 CPU 与写入，不在锁。真实流量按“登录（不同账户）”一行做容量规划。
+
+锁语义调整后的完整门禁在同一源码状态复跑：`cargo test --workspace --all-targets --all-features -- --test-threads=1` 全部通过，auth 50 项（3.10 秒）、root 集成 238 项（789.04 秒，6 项 ignored）、cobotusr 86 项（0.15 秒），退出码 0；含 Playwright 10 项（18.0 秒）与 WebKit 四组场景。`cargo fmt --all -- --check` 通过，`cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过（仅 `proc-macro-error2` future-incompat notice），`cargo machete` 未发现未使用依赖，`cargo audit` 退出码 0（1430 条 advisory、494 个 crate）。

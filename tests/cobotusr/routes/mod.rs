@@ -1,6 +1,7 @@
 mod auth;
 mod auth_center;
 mod authority;
+mod capacity;
 mod identity_account;
 mod identity_actions;
 mod identity_admin_application;

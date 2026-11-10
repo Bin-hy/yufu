@@ -104,7 +104,7 @@ pnpm test:examples
 pnpm build:examples
 ```
 
-生产演练还应覆盖：真实 HTTPS 后通道成功投递、跨站 TLS 三浏览器 SSO/退出（T95—T98）、旧库升级与冲突纳管。真实 HTTPS 投递与三引擎 SSO 已在测试环境取得证据，旧库升级演练与容量测量仍待完成，逐项状态见 `docs/specs/enterprise-sso-provider/gaps.md`。
+生产演练还应覆盖：真实 HTTPS 后通道成功投递、跨站 TLS 三浏览器 SSO/退出（T95—T98）、旧库升级与冲突纳管。真实 HTTPS 投递、三引擎 SSO 与容量测量已在测试环境取得证据，旧库升级与恢复演练仍待完成，逐项状态见 `docs/specs/enterprise-sso-provider/gaps.md`。
 
 ## 8. 备份与恢复
 
@@ -149,9 +149,9 @@ tar -czf identity-secrets-$(date +%Y%m%d).tar.gz conf/oidc_rsa_private.local.pem
 
 | 环节 | 成本特征 | 相关配置 |
 | --- | --- | --- |
-| 密码校验 | bcrypt cost 12，单次约几十毫秒且占满一个核；并发上限约等于可用核数 | 无（固定 cost） |
+| 密码校验 | bcrypt cost 12，单次约 200—300 毫秒且占满一个核；并发上限约等于可用核数，登录吞吐约等于核数 ÷ 单次耗时 | 无（固定 cost） |
 | 会话与内省 | 保护 API 缓存 2 秒、失败关闭窗口 5 秒，内省 QPS 上限约为活跃会话数 ÷ 2 | — |
-| 后通道投递 | 每秒租约 10 条、并发 4，单条受 `logout_timeout_millis` 约束，单波吞吐上限约 10 条/秒 | `logout_timeout_millis`、`logout_retry_seconds` |
+| 后通道投递 | 每秒租约 10 条、并发 4，单条受 `logout_timeout_millis` 约束；接收端即时返回时实测 260—420 条/秒、19—30 ms/批 | `logout_timeout_millis`、`logout_retry_seconds` |
 | 清理任务 | 每 60 秒一次，按保留期分批删除 | `audit_retention_seconds`、`operation_retention_seconds` |
 | 旧全范围治理 | 每个受影响用户约 6 次查询 × 2 轮，整体受 2 秒安全预算约束 | `legacy_governance_max_users` |
 
@@ -166,9 +166,25 @@ tar -czf identity-secrets-$(date +%Y%m%d).tar.gz conf/oidc_rsa_private.local.pem
 
 容量数据必须来自目标部署环境，不要用开发机数字外推：
 
-1. 用固定并发（如 1/4/8/16）对 `/login`、`/oidc/token`、`/oidc/introspect`、`/oidc/logout` 各压测 60 秒，记录 P50/P95 与错误码分布。
-2. 用 `EXPLAIN (ANALYZE, BUFFERS)` 记录全范围治理查询与内省查询的计划，确认走索引。
-3. 在投递积压场景（如 1000 条待投递）观察每秒完成数与重试分布。
-4. 记录清理任务单次耗时与删除行数，确认不会与业务高峰重叠。
+1. 跑仓库自带的探针：`cargo test --release --test mod capacity -- --ignored --nocapture --test-threads=1`，覆盖登录（不同账户与同账户）、刷新轮换、一次性退出、投递积压与清理；需要更长时间时把探针里的 5 秒窗口调大。`--test-threads=1` 不能省，六个探针并行会互相抢占 CPU 与数据库。
+2. 用固定并发（如 1/4/8/16）对 `/login`、`/oidc/token`、`/oidc/introspect`、`/oidc/logout` 各压测 60 秒，记录 P50/P95 与错误码分布。
+3. 用 `EXPLAIN (ANALYZE, BUFFERS)` 记录全范围治理查询与内省查询的计划，确认走索引。
+4. 在投递积压场景（如 1000 条待投递）观察每秒完成数与重试分布。
+5. 记录清理任务单次耗时与删除行数，确认不会与业务高峰重叠。
 
 把结果写入部署记录，并在升级或扩容后重测；数值变化超过 30% 时复查索引与连接池配置。
+
+### 9.4 单机基线（参考值，不是承诺）
+
+2026-11-10 在 macOS 14.6、Apple M3 Pro（11 逻辑核）、Postgres 运行于 Docker、服务与压测客户端同机的条件下，用上面的探针取得：
+
+| 路径 | 并发 | 吞吐 | P95 |
+| --- | --- | --- | --- |
+| 登录（不同账户） | 16 | 26.2 req/s | 761 ms |
+| 登录（同一账户） | 4 | 13.4 req/s | 482 ms |
+| 刷新轮换 | 8 | 185.8 req/s | 77 ms |
+| 退出 | 16 | 181.9 req/s | 131 ms |
+| 后通道投递（接收端即时成功） | 4 | 264.0 条/秒 | 30.3 ms/批 |
+| 清理（`limit=100`） | 1 | 19641 行/秒 | 9.7 ms/次 |
+
+登录是唯一被 CPU 卡住的路径：bcrypt cost 12 单次约 250 ms，吞吐约等于“可用核数 ÷ 单次耗时”。同一账户的并发登录彼此兼容（发行取共享行锁），但撤销与新登录仍互斥，因此同一账户的并发数不会带来额外吞吐；容量按不同账户的并发估算。刷新、退出、投递与清理都由数据库往返主导，扩连接池与数据库规格比加 CPU 更有效。单机数字抖动较大，同一份代码两次运行可相差 30%—50%，这些值用于判断量级，不作为承诺。

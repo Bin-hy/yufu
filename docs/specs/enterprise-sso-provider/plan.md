@@ -443,7 +443,7 @@ Logout Token 用既有 RSA/JWKS 签名，含 iss、aud=RP client_id、iat、jti�
 
 事务先读取用于定位的稳定 ID，再按统一顺序加锁并重检：application/environment → group → user（含 actor 与目标，按 ID）→ sso_session → flow/action/code → RP session → grant → security_session → refresh_family → credential。相同层按稳定 ID 排序，禁止批量途中逆序补锁；现有受影响安全路径使用共同 lock planner。只读有效性查询使用一致主库快照，不持锁进行外部网络。
 
-用户发行根沿用 `serialize_user_roots` 写屏障；新增环境/group revision 与 generation 屏障。失效动作和新签发都触达相同屏障行，使旧 REPEATABLE READ 快照在冲突后失败并重试，而不是批准已撤销资格。账号/环境 state、epoch、批准版本和 generation 必须在锁定后加载，不能复用 HTTP guard 的过期副本。
+会话发行根对账户行取 `FOR SHARE`（`serialize_session_mint`），失效动作对同一行取排他写屏障（`serialize_user_roots`）；新增环境/group revision 与 generation 屏障。共享锁让同一账户的并发登录彼此兼容，排他屏障让旧 REPEATABLE READ 快照在撤销后失败，而不是批准已撤销资格。账号/环境 state、epoch、批准版本和 generation 必须在锁定后加载，不能复用 HTTP guard 的过期副本。
 
 集合操作在同一事务内更新受影响 generation、撤销根和写 outbox，不以后台任务作为成功前置状态。大用户组操作如果无法在预算内提交则回滚并返回明确可重试错误；首版不承诺未经压测的组容量。后续如需分批治理，另行设计原子失效屏障，不能直接切碎本方案的生效边界。
 
