@@ -38,4 +38,5 @@ mod recording;
 mod role;
 mod security;
 mod sync_permissions;
+mod upgrade_drill;
 mod user;

@@ -281,3 +281,42 @@ cargo test --release --test mod capacity -- --ignored --nocapture --test-threads
 同一账户的登录不再因为彼此而失败，但仍受 bcrypt 与数据库插入约束：16 并发 24.8 req/s、P95 853 ms，与不同账户的 26.2 req/s 基本持平，说明瓶颈在 CPU 与写入，不在锁。真实流量按“登录（不同账户）”一行做容量规划。
 
 锁语义调整后的完整门禁在同一源码状态复跑：`cargo test --workspace --all-targets --all-features -- --test-threads=1` 全部通过，auth 50 项（3.10 秒）、root 集成 238 项（789.04 秒，6 项 ignored）、cobotusr 86 项（0.15 秒），退出码 0；含 Playwright 10 项（18.0 秒）与 WebKit 四组场景。`cargo fmt --all -- --check` 通过，`cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过（仅 `proc-macro-error2` future-incompat notice），`cargo machete` 未发现未使用依赖，`cargo audit` 退出码 0（1430 条 advisory、494 个 crate）。
+
+## 旧库升级与恢复演练（2026-11-10）
+
+G4 要求备份、预演、维护窗口迁移与失败恢复有实际记录。本轮新增 `tests/cobotusr/routes/upgrade_drill.rs`，一条 `#[ignore]` 用例完成完整闭环，默认不参与常规门禁：
+
+```text
+cargo test --release --test mod upgrade_drill -- --ignored --nocapture --test-threads=1
+```
+
+演练内容与断言：
+
+1. 用 `Migrator::up(db, Some(cut))` 重建 identity 改造前的旧版 schema（截断点为 `m20261107_000001_security_identity`），确认 `identity_subject`、`security_session` 不存在。
+2. 种入旧版业务数据：三个账户（其中一个占位 id=1，因为旧用户列表接口按 id 隐藏超级管理员）、一个 application、一个 oauth_client；账户带 bcrypt 哈希。
+3. `pg_dump` 自定义格式备份旧库。
+4. 执行与生产启动完全一致的迁移路径 `Migrator::up(db, None)`：`seaql_migrations` 计数等于迁移总数、`identity_policy_barrier` 有 id=1 行、三个业务表行数不变。
+5. 在升级后的库上启动真实服务（同一二进制路径 `serve_with_security_clock`），读取 discovery、JWKS、管理员 `/login`、带 access token 的 `/users` 分页（能看到旧账户）。
+6. `pg_dump` 升级后的库并 `pg_restore` 到全新数据库，再启动第二个服务实例：issuer 一致、JWKS 模数一致（同一私钥文件）、管理员登录成功、旧账户仍可见、`identity_audit_event` 行数与源库一致。
+7. 失败恢复路径：把第 3 步的升级前备份恢复到另一个全新数据库，确认 identity 表不存在、旧账户与 application 数量与升级前一致。
+
+演练还发现并固化了一条产品约束：`identity_provider` 的 issuer 是固定命名空间，恢复后的部署如果换了 issuer（例如端口变了），`initialize_provider` 会按 `issuer_mismatch` 记录冲突并拒绝启动。用例因此显式让第二个实例复用第一个实例的 issuer，运维指南第 2 节的“issuer 与备份时一致”要求与此一致。
+
+单机实测（macOS 14.6 / Apple M3 Pro / Postgres in Docker，测试数据规模 3 账户 + 1 应用 + 1 客户端）：
+
+| 步骤 | 结果 |
+| --- | --- |
+| 重建旧版 schema | 25 个迁移，0.12 秒 |
+| 升级前备份 | 85.20 ms，38491 字节 |
+| 维护窗口迁移 | 210.07 ms |
+| 升级后服务就绪 | 299.29 ms |
+| 升级后备份 + 恢复 | 96.96 ms + 235.59 ms |
+| 恢复库服务就绪 | 256.87 ms |
+| 失败恢复（升级前备份恢复到新库） | 67.70 ms |
+
+| 命令 | 实际结果 | 覆盖及限制 |
+| --- | --- | --- |
+| `cargo test --release --test mod upgrade_drill -- --ignored --nocapture --test-threads=1` | 1 通过、0 失败，4.03 秒 | 完整闭环见上表；数字来自单机小数据集，说明流程与断言可行，不作为生产 RTO 承诺。 |
+| `cargo fmt --all` / `cargo clippy --test mod --all-features -- -D warnings` | 均通过 | clippy 仅既有 `proc-macro-error2` future-incompat notice。 |
+
+据此关闭 G4。验收证据缺口 E-A—E-E 维持不变；C66 的实际演练记录可以引用本节，但 checklist 勾选仍按 E 系列证据流程处理。

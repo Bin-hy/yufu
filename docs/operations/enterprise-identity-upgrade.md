@@ -104,7 +104,7 @@ pnpm test:examples
 pnpm build:examples
 ```
 
-生产演练还应覆盖：真实 HTTPS 后通道成功投递、跨站 TLS 三浏览器 SSO/退出（T95—T98）、旧库升级与冲突纳管。真实 HTTPS 投递、三引擎 SSO 与容量测量已在测试环境取得证据，旧库升级与恢复演练仍待完成，逐项状态见 `docs/specs/enterprise-sso-provider/gaps.md`。
+生产演练还应覆盖：真实 HTTPS 后通道成功投递、跨站 TLS 三浏览器 SSO/退出（T95—T98）、旧库升级与冲突纳管。真实 HTTPS 投递、三引擎 SSO、容量测量与旧库升级/恢复演练均已在测试环境取得证据，逐项状态见 `docs/specs/enterprise-sso-provider/gaps.md`。
 
 ## 8. 备份与恢复
 
@@ -142,6 +142,18 @@ tar -czf identity-secrets-$(date +%Y%m%d).tar.gz conf/oidc_rsa_private.local.pem
 - 备份时间点之后的审计与投递记录会丢失，恢复后应在运维记录中标注时间窗。
 - 不要把新库直接交给旧版本写入，见第 4 节。
 - 恢复完成后重新执行一次退出与撤回，确认 outbox 能正常入队与投递。
+
+### 8.4 可复跑的演练与首次记录
+
+仓库提供与第 8.2 节对应的自动演练（`tests/cobotusr/routes/upgrade_drill.rs`，默认 `#[ignore]`）：
+
+```bash
+cargo test --release --test mod upgrade_drill -- --ignored --nocapture --test-threads=1
+```
+
+它会重建 identity 改造前的旧版 schema、种入旧版账户/应用/客户端，然后依次执行升级前备份、与生产启动一致的迁移、升级后服务与登录验证、升级后备份恢复到新库并二次启动、升级前备份的失败回退验证。2026-11-10 在 macOS 14.6 / Apple M3 Pro / Docker Postgres 上的首次记录：迁移 210.07 ms、升级后就绪 299.29 ms、备份+恢复 96.96 ms + 235.59 ms、恢复库就绪 256.87 ms。数字只证明流程与断言可行，生产 RTO 以目标环境重跑结果为准。
+
+演练同时固化了一条硬约束：`identity_provider` 的 issuer 是固定命名空间。恢复后的部署如果换了 issuer（例如端口变化），`initialize_provider` 会写入 `issuer_mismatch` 冲突并拒绝启动——恢复时必须按第 2 步保持 issuer 与备份时一致。
 
 ## 9. 容量规划
 
