@@ -172,7 +172,7 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 | `cargo machete` | 0.9.2，未发现未使用依赖 | — |
 | `cargo audit` | 退出码 0；载入 1430 条 advisory，扫描 492 个 crate | 剩余 5 条仍在 `.cargo/audit.toml` 中逐条记录理由。 |
 
-据此本轮勾选 C75—C82、C84、C85 共 10 项。C83 只取得 doctest 结果，“接入/升级说明按步骤复现”仍依赖 E7，因此保持未勾选；C86—C90 与 E1—E7 的全流程证据同样保持未勾选。剩余未交付项：真实 HTTPS 后通道成功投递（`HttpsLogoutTransport` 尚无自签 CA 注入，只有 mock）、旧隐藏管理页的 legacy Bearer 适配、旧全范围治理的 1001 行上限与逐用户加载、生产库升级/备份/容量演练、CI 三平台实际结果。
+据此本轮勾选 C75—C82、C84、C85 共 10 项。C83 只取得 doctest 结果，“接入/升级说明按步骤复现”仍依赖 E7，因此保持未勾选；C86—C90 与 E1—E7 的全流程证据同样保持未勾选。剩余未交付项：真实 HTTPS 后通道成功投递（`HttpsLogoutTransport` 尚无自签 CA 注入，只有 mock）、旧隐藏管理页的 legacy Bearer 适配、旧全范围治理的 1001 行上限与逐用户加载、生产库升级/备份/容量演练、CI 三平台实际结果。其中真实 HTTPS 后通道投递与旧隐藏管理页两项已在同日后续提交中关闭，见下文两节。
 
 上述未交付项已逐条整理到 [gaps.md](gaps.md)，含影响与下一步，作为阶段性交接清单。
 
@@ -193,3 +193,36 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 | `pnpm --filter @cobotweb/cobotusr build` | 通过，2.19 秒 | 主包 303.24 kB，旧管理页 chunk 不再产出。 |
 
 该变更只影响前端产品面，未改动后端协议与数据；C65 要求的“旧入口不能绕过治理”仍由后端测试覆盖，浏览器端不再提供旧入口。
+
+## 后通道投递的真实 HTTPS 证据（2026-11-10）
+
+此前 `HttpsLogoutTransport` 的成功路径只有 mock 与明文 HTTP 夹具，无法证明真实 TLS 下的投递、超时与重试行为。本轮补齐：
+
+- `HttpsLogoutTransport` 新增 `with_extra_roots`，为投递客户端追加信任根；生产装配仍只用内置根证书。
+- 新增 `with_loopback_fixture`，只有隔离测试策略能放行 loopback；`allowed_ip` 的 loopback 开关默认关闭，生产继续拒绝 loopback、链路本地与云元数据地址。
+- `tests/cobotusr/routes/identity_logout_transport.rs` 用 `rcgen` 现场签发 CA 与 `rp.example` 叶证书，`tokio-rustls` 在 loopback 起真实 HTTPS 接收端，投递仍经 `resolve_to_addrs` 固定解析地址，与生产同一条代码路径。
+
+| 命令 | 实际结果 | 覆盖及限制 |
+| --- | --- | --- |
+| `cargo test --test mod identity_logout_transport -- --test-threads=1` | 5 通过、0 失败，0.16 秒 | 204 连续两次投递各产生一条 `logout_token=token-value` 表单请求（重复投递）；不注入信任根时证书校验失败→`Retry network_error` 且接收端零请求；429 带 `Retry-After: 30`→`RetryAfter{http_429,30}`；503→`Retry http_5xx`；400→`PermanentFailure http_4xx`；302 不跟随→`PermanentFailure http_redirect`；接收端延迟 400ms 对 120ms 超时→`Retry timeout`；非 allowlist 主机解析到私网地址→`PermanentFailure ssrf_blocked`。 |
+| `cargo test -p cobotusr --lib logout_transport` | 3 通过、0 失败 | 地址策略：loopback、链路本地、元数据、文档与隧道地址默认拒绝；私网仅对显式 allowlist 放行；loopback 仅在隔离测试策略下可达。 |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | 通过 | 仅既有 `proc-macro-error2` future-incompat notice。 |
+
+该证据关闭 [gaps.md](gaps.md) 的 G1。C73 仍要求 E6 的完整退出矩阵（组成员移除、同意撤回、密码修改、账户停用、重启与内省故障），C86 仍要求三引擎实跑报告，因此两项保持未勾选。
+
+## 全范围治理上限可配置（2026-11-10）
+
+旧管理接口的全范围写入（如新增一条权限）会加载全部受影响账户，此前硬编码 `LIMIT 1001`：超过 1000 人的企业直接得到 `capacity_exceeded`，且该值无法按部署规模调整。现在：
+
+- `identity.legacy_governance_max_users` 取代硬编码上限，默认 1000，校验范围 1—10000，配置文件缺省时沿用默认值。
+- 查询按“上限 + 1”取样，超限在事务内、执行变更回调之前返回 `capacity_exceeded`（HTTP 503），不会留下部分写入。
+- 逐用户加载的成本仍在 2 秒安全预算内结算，运维指引据此给出容量建议，见 [enterprise-identity-upgrade.md](../../operations/enterprise-identity-upgrade.md) 第 9 节。
+
+| 命令 | 实际结果 | 覆盖及限制 |
+| --- | --- | --- |
+| `cargo test --test mod routes::authority -- --test-threads=1` | 5 通过、0 失败 | 新增 `authority_write_refuses_estates_above_the_configured_bound`：上限设为 1 并插入第二个用户后，`POST /api/v1/authority` 返回 503 `capacity_exceeded`，且 `authority` 表无残留行；原有增删改查用例不受影响。 |
+| `cargo test -p cobotusr --lib config_identity` | 2 通过、0 失败 | 默认值 1000；0 与 10001 均被校验拒绝。 |
+| `cargo test --workspace --all-targets --all-features -- --test-threads=1` | 全部通过：auth 50、root 集成 237（757.92 秒）、cobotusr 86，0 失败 | 本轮最终门禁。237 = 上轮 233 + 5 项 HTTPS 投递用例 + 1 项治理上限用例 − 2 项已删除的旧前端浏览器用例。 |
+| `cargo fmt --all -- --check` / `cargo clippy --workspace --all-targets --all-features -- -D warnings` / `cargo machete` / `cargo audit` | 全部通过 | audit 载入 1430 条 advisory、扫描 494 个 crate，退出码 0；machete 未发现未使用依赖（新增 `rcgen`、`rustls`、`tokio-rustls` 均被测试使用）。 |
+
+同时修正上一提交遗留的回归：`security_browser_real_frontend_login_refresh_logout_all_engines` 与 `security_browser_secure_http_rejection_is_actionable_in_webkit` 仍在调用已随旧前端删除的 `tests/e2e/real-auth.mjs`，全量套件因此失败。这两个用例只覆盖已退役的旧登录页浏览器流程，本轮连同 `run_browser_auth_test` 一并删除；浏览器证据由 `identity_browser_e2e` 与三引擎 SSO 套件承担。

@@ -8,12 +8,12 @@
 
 | 编号 | 缺口 | 当前状态 | 影响 | 下一步 |
 | --- | --- | --- | --- | --- |
-| G1 | 真实 HTTPS 后通道投递 | `HttpsLogoutTransport` 没有注入自签 CA 的入口，成功投递只有 mock 与明文 HTTP 夹具证据 | 无法证明对真实 HTTPS 接收端的投递、超时与重试行为；C73/C86 的 HTTPS 成功路径缺证 | 给 transport 增加仅测试可用的 CA 注入，用局部 CA 起一个 HTTPS 接收端，覆盖成功、超时、5xx 与重复投递 |
+| G1 | ~~真实 HTTPS 后通道投递~~ 已关闭 | `HttpsLogoutTransport` 增加额外信任根与隔离测试地址策略，用局部 CA 起真实 TLS 接收端 | 已取得 HTTPS 成功、超时、5xx、429、4xx、重定向、重复投递与证书不受信的实测证据 | 见“已关闭的缺口” |
 | G2 | ~~旧隐藏管理页仍走 legacy Bearer~~ 已关闭 | 旧 RBAC 页面、组件与旧 e2e 套件已删除，旧 URL 改为重定向到新控制台 | 已消除“路由可达但取数失败”的中间态；后端旧接口保留兼容，供既有客户端与 MCP 调用 | 见“已关闭的缺口” |
-| G3 | 旧全范围治理容量 | `legacy_governance.rs` 全范围发现最多 1000 用户（`LIMIT 1001`），逐用户加载 | 超过上限返回 `CapacityExceeded`，大企业库无法一次完成治理 | 改为分页/游标遍历并测量耗时，或把上限变成可配置并给出运维指引 |
+| G3 | ~~旧全范围治理容量~~ 已关闭 | 上限由 `identity.legacy_governance_max_users` 配置（默认 1000，范围 1—10000），超限在写入前返回 `capacity_exceeded` | 大企业可按实际规模调整；逐用户加载仍受 2 秒安全预算约束，运维指引给出容量建议 | 见“已关闭的缺口” |
 | G4 | 生产库升级与恢复演练 | 迁移与回滚只在隔离 fixture 验证 | C66 要求备份、预演、维护窗口迁移、失败恢复的实际记录 | 在隔离旧库按运维指南完整演练一次并记录样本恢复结果 |
 | G5 | 容量与延迟 | 未测量 | 没有并发登录、投递积压、会话清理的容量数据 | 用受控脚本测登录/刷新/退出/投递吞吐与 P95 |
-| G6 | 运维文档 | 只有 README 的开发与部署段落 | 缺备份恢复、密钥轮换、故障诊断、容量规划章节 | 补 `docs/` 下的运维指南并与 C66 演练互相引用 |
+| G6 | ~~运维文档~~ 已关闭 | `docs/operations/enterprise-identity-upgrade.md` 补齐备份与恢复、恢复边界、容量成本点与测量方法 | 运维可按文档执行备份、恢复演练与容量评估 | 见“已关闭的缺口” |
 
 ## 二、验收证据缺口
 
@@ -35,5 +35,8 @@
 
 | 编号 | 关闭方式 | 证据 |
 | --- | --- | --- |
+| G1 | 后通道投递接入真实 TLS 接收端：`HttpsLogoutTransport` 新增 `with_extra_roots`（额外信任根）与 `with_loopback_fixture`（仅隔离测试放行 loopback，生产仍拒绝）；`allowed_ip` 增加 loopback 开关，默认关闭。测试用 `rcgen` 现场签发 CA 与 `rp.example` 叶证书，`tokio-rustls` 在 127.0.0.1 起 HTTPS 接收端，经 `resolve_to_addrs` 固定解析地址走完整投递路径 | `cargo test --test mod identity_logout_transport` 5 项通过：204 两次投递各产生一条 `logout_token` 表单请求、无信任根时 `network_error`、429+`Retry-After: 30`→`RetryAfter`、503→`Retry http_5xx`、400→`PermanentFailure http_4xx`、302→`PermanentFailure http_redirect`、400ms 延迟对 120ms 超时→`Retry timeout`、非 allowlist 主机解析到私网→`ssrf_blocked`；`cargo test -p cobotusr --lib logout_transport` 3 项通过（含 loopback 默认拒绝、仅测试策略放行） |
+| G3 | 全范围治理上限改为部署配置：`identity.legacy_governance_max_users`（默认 1000，校验范围 1—10000）替代硬编码 `LIMIT 1001`，查询按 `上限+1` 取样，超限在事务内、执行变更前返回 `capacity_exceeded`，不留下部分写入；逐用户加载与 2 秒安全预算的关系写入运维指引 | `cargo test --test mod routes::authority` 5 项通过，其中新增用例把上限设为 1 并插入第二个用户，断言 503 `capacity_exceeded` 且 `authority` 表无残留；`cargo test -p cobotusr --lib config_identity` 2 项通过（含 0 与 10001 越界拒绝） |
+| G6 | 运维指南补齐第 8 节“备份与恢复”（四类备份对象、`pg_dump`/`pg_restore` 命令、六步恢复演练、恢复后的边界）与第 9 节“容量规划”（成本点表、配置建议、测量方法），并与 G3 的治理上限、G4 的恢复演练互相引用 | 文档评审：备份对象覆盖数据库、私钥、配置与不可还原的 secret；恢复步骤含 JWKS 指纹比对与冒烟；容量表逐项对应真实配置项与代码中的批量/并发参数 |
 | G2 | 旧 RBAC 管理面整体退役：删除 `pages/{users,roles,authority,permissions,recordings,applications,oauth,authorized-apps}`、`permission-catalog`/`permission-assignment` 组件、`use-permission-assignment` 与旧 e2e 套件；`/users`、`/roles`、`/authority`、`/permissions`、`/recordings` 及 `/legacy/*` 别名改为重定向到 `/admin/accounts`、`/admin/groups`、`/admin/apps`、`/admin/audit` | `pnpm --filter @cobotweb/cobotusr check`、`lint`、`build` 通过；单测 11 个文件 92 项通过，其中 `legacy-routes.test.ts` 断言旧路径只重定向、不再挂载组件 |
 

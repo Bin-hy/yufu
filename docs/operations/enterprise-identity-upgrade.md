@@ -104,4 +104,71 @@ pnpm test:examples
 pnpm build:examples
 ```
 
-生产演练还应覆盖：真实 HTTPS 后通道成功投递、跨站 TLS 三浏览器 SSO/退出（T95—T98）、旧库升级与冲突纳管。当前这些浏览器级证据尚未完成，94 项验收清单保持未勾选。
+生产演练还应覆盖：真实 HTTPS 后通道成功投递、跨站 TLS 三浏览器 SSO/退出（T95—T98）、旧库升级与冲突纳管。真实 HTTPS 投递与三引擎 SSO 已在测试环境取得证据，旧库升级演练与容量测量仍待完成，逐项状态见 `docs/specs/enterprise-sso-provider/gaps.md`。
+
+## 8. 备份与恢复
+
+### 8.1 备份对象
+
+一次完整备份必须同时包含四类内容，缺一项都会导致恢复后无法登录或无法验证已签发的 token：
+
+1. **数据库**：全部表，重点是 `user`、`identity_subject`、`identity_sso_session`、`identity_oidc_rp_session`、`identity_app_*`、`identity_access_generation`、`identity_audit_event`、`identity_logout_delivery` 与 `seaql_migrations`。
+2. **签名私钥**：`oidc.rsa_private_key_path` 指向的文件（默认 `conf/oidc_rsa_private.local.pem`，权限 0600）。恢复时不要重新生成，否则已签发的 ID Token 与 JWKS 全部失效。
+3. **配置文件**：issuer、回调白名单、CORS、`[identity]` 策略、数据库连接与时钟源。issuer 变化会让既有主体命名空间失配。
+4. **凭据**：Reader secret 与客户端 secret 在库中只存哈希，无法从备份还原明文。恢复后如需继续使用，按 5.3 重新签发；把新 secret 写入受管密钥库，不要写进备份目录。
+
+```bash
+# 逻辑备份，保留自定义格式便于选择性恢复
+pg_dump --format=custom --no-owner --file=identity-$(date +%Y%m%dT%H%M%S).dump "$DATABASE_URL"
+
+# 私钥与配置单独加密归档，和数据库备份分开存放
+tar -czf identity-secrets-$(date +%Y%m%d).tar.gz conf/oidc_rsa_private.local.pem config.toml
+```
+
+### 8.2 恢复演练
+
+在隔离环境按顺序执行，每一步都要记录耗时：
+
+1. 新建空库，`pg_restore --no-owner --clean --if-exists --dbname "$RESTORE_URL" identity-*.dump`。
+2. 恢复私钥与配置，确认私钥权限为 0600，issuer 与备份时一致。
+3. 启动服务，检查 `/.well-known/openid-configuration` 的 issuer、`/.well-known/jwks.json` 的公钥指纹与备份前一致。
+4. 用管理员账户登录三个入口，完成一次开发环境登录、code 兑换、UserInfo、内省与退出。
+5. 抽查审计与投递：`identity_audit_event` 最新记录时间、`identity_logout_delivery` 的待投递与失败计数。
+6. 记录恢复总耗时、迁移锁等待与首次登录延迟，作为 RTO 依据。
+
+### 8.3 恢复后的边界
+
+- 备份时间点之后签发的 token 仍然有效（签名密钥未变），但对应会话与授权可能已不存在；保护 API 会按内省结果拒绝，不需要额外清理。
+- 备份时间点之后的审计与投递记录会丢失，恢复后应在运维记录中标注时间窗。
+- 不要把新库直接交给旧版本写入，见第 4 节。
+- 恢复完成后重新执行一次退出与撤回，确认 outbox 能正常入队与投递。
+
+## 9. 容量规划
+
+### 9.1 已知成本点
+
+| 环节 | 成本特征 | 相关配置 |
+| --- | --- | --- |
+| 密码校验 | bcrypt cost 12，单次约几十毫秒且占满一个核；并发上限约等于可用核数 | 无（固定 cost） |
+| 会话与内省 | 保护 API 缓存 2 秒、失败关闭窗口 5 秒，内省 QPS 上限约为活跃会话数 ÷ 2 | — |
+| 后通道投递 | 每秒租约 10 条、并发 4，单条受 `logout_timeout_millis` 约束，单波吞吐上限约 10 条/秒 | `logout_timeout_millis`、`logout_retry_seconds` |
+| 清理任务 | 每 60 秒一次，按保留期分批删除 | `audit_retention_seconds`、`operation_retention_seconds` |
+| 旧全范围治理 | 每个受影响用户约 6 次查询 × 2 轮，整体受 2 秒安全预算约束 | `legacy_governance_max_users` |
+
+### 9.2 配置建议
+
+- `database.max_connections` 至少覆盖“请求并发 + 投递 worker 4 + 清理任务 1”，并留出迁移与运维连接。
+- `legacy_governance_max_users` 默认 1000 是保护上限，不是性能承诺。按 9.3 实测单用户耗时后，用 `2 秒 ÷ 单用户耗时` 反推可完成规模；超过该规模的治理操作应改用控制台按应用/环境维度执行。
+- `logout_timeout_millis` 越小，投递波次越快，但接收端慢时更容易判超时；企业内网建议 1000—2000。
+- 审计保留期直接决定表体积与清理压力；`audit_retention_seconds` 低于合规要求前先确认留存义务。
+
+### 9.3 测量方法
+
+容量数据必须来自目标部署环境，不要用开发机数字外推：
+
+1. 用固定并发（如 1/4/8/16）对 `/login`、`/oidc/token`、`/oidc/introspect`、`/oidc/logout` 各压测 60 秒，记录 P50/P95 与错误码分布。
+2. 用 `EXPLAIN (ANALYZE, BUFFERS)` 记录全范围治理查询与内省查询的计划，确认走索引。
+3. 在投递积压场景（如 1000 条待投递）观察每秒完成数与重试分布。
+4. 记录清理任务单次耗时与删除行数，确认不会与业务高峰重叠。
+
+把结果写入部署记录，并在升级或扩容后重测；数值变化超过 30% 时复查索引与连接池配置。
