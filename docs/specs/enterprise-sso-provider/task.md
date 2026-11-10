@@ -2,7 +2,7 @@
 
 日期：2026-11-09，Asia/Shanghai。
 
-状态：四份文档已于 2026-11-09 经用户确认，继续自主实现。账户、应用注册/版本/审批、管理员接入、组/分配、中心 SSO、标准授权/token/refresh/UserInfo/内省/撤销、RP 发起退出与持久投递 worker 已接入服务及 HTTP，并取得局部证据。T44 Reader 新增幂等安全回执及管理员精确操作；T66 旧管理写入共用注册凭据、Policy barrier、统一锁序和事务，仍需影响图性能及兼容流程竞态核验；T67 显式历史扫描/纳管已落盘并通过六项局部测试。本轮新增账户中心/管理控制台十项读取、撤回与投递重试接口，以及三入口 Vue 页面；前端 79 项单测、类型检查、lint、构建和 Rust fmt/clippy 已通过。第一次完整 workspace 测试 228 通过、1 失败，失败为新增种子迁移后的测试回滚位置假设，已按迁移名动态计算并单项复跑通过，完整复跑待追加。标准参考客户端、真实 HTTPS/三浏览器、真实后通道发送、UI 全场景和全部 94 项验收仍未完成。依据已确认的 [spec.md](spec.md)、[plan.md](plan.md) 和 [checklist.md](checklist.md)；实际命令、时点与限制见 [verification.md](verification.md)。
+状态：四份文档已于 2026-11-09 经用户确认，继续自主实现。账户、应用注册/版本/审批、管理员接入、组/分配、中心 SSO、标准授权/token/refresh/UserInfo/内省/撤销、RP 发起退出与持久投递 worker、账户中心/开发者/管理三入口均已接入服务及 HTTP。T44 Reader 幂等安全回执与管理员精确操作、T66 旧管理写入共用注册凭据/Policy barrier/统一锁序与事务、T67 显式历史扫描/纳管均已落盘；本轮补齐开发者本人按环境查看退出通知投递概况、Reader 与候选协作者游标分页，并修复 SPA nonce、浏览器同意页竞态、中心退出确认页 403 与 WebKit 驱动兼容。2026-11-10 同一源码状态下全 feature 门禁通过：workspace 测试 auth 50、root 集成 233、cobotusr 86 全部 0 失败，doctest、release 构建、fmt、clippy、machete、audit、中心前端 check/lint/test/build、两个参考示例 check/test/build 与 frozen lockfile 安装全部通过，据此勾选 C75—C82、C84、C85。仍未完成：真实 HTTPS 后通道成功投递、旧隐藏管理页的中心身份适配、旧全范围治理容量、生产升级/备份/容量演练、CI 三平台结果、E1—E7 完整流程与其余 84 项验收。依据已确认的 [spec.md](spec.md)、[plan.md](plan.md) 和 [checklist.md](checklist.md)；实际命令、时点与限制见 [verification.md](verification.md)。
 
 ## 1. 执行范围与规则
 

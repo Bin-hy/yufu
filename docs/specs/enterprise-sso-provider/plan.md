@@ -301,13 +301,15 @@ pub trait IdentityTransaction: SecurityTransaction {
 
 所有含秘密、身份、令牌和 flow 的响应使用 Cache-Control: no-store；交互页面增加 Referrer-Policy: no-referrer、禁止嵌入及必要 CSP。错误只返回固定原因代码和 request_id，日志禁记请求体、完整 query、Cookie、Authorization、令牌与 action secret。
 
-## 5. 关键交互与事务流程
-
 ### 4.4 控制台读取与本人撤回的实现契约
 
 新增 `domain/identity/console.rs` 定义闭合查询类别和最小 DTO；`service/identity/console.rs` 在同一主库快照中验证中心会话、管理员资格及精确读取权限，再调用共享事务的 `console_read`。查询使用游标分页，默认 25、最大 100，不接受调用方指定本人 user_id。账户应用候选还经过现行准入评估，展示不建立授权或同意。根会话与 RP 会话分别分页，响应只含资源 ID、应用名称、状态和时间，不含摘要、nonce 或协议 sid。
 
 补齐 `/account/apps`、`/account/consents`、`/account/sessions`、`/account/rp-sessions`、`/admin/accounts`、`/admin/audit-events`、`/admin/logout-deliveries`。本人 RP 撤销复用 `SessionService::revoke_personal`；同意撤回锁定 Policy、应用、环境和完整撤销图，锁后重检本人归属，删除该环境的本人同意并撤销该环境授权，审计与通知同事务。管理员手动重试只重新排队尚在通知期限内且未送达、未被有效租约占用的原投递，保留原 endpoint 与 jti；单独登记读取/重试权限，追加 seed 不恢复用户已编辑的授权。
+
+## 5. 关键交互与事务流程
+
+本轮补充开发者本人的环境投递概况：`GET /developer/apps/{id}/environments/{env}/logout-deliveries` 与管理员同路径 `/admin/...`。前者要求应用成员且资格启用，后者要求 `DeliveryRead`；两条路径都校验环境属于该应用，只返回该环境的投递状态、尝试次数、错误码与时间，不返回 endpoint、jti 或租约信息。前端在应用详情页按环境展示并提供游标翻页，文案明确 2xx 只表示对端接受通知。
 
 ### 5.1 邀请开户、密码与身份稳定
 

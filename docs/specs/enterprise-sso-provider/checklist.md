@@ -2,7 +2,7 @@
 
 日期：2026-11-09，Asia/Shanghai。
 
-状态：本验收清单已于 2026-11-09 经用户“确认”批准，四份设计文档全部确认，进入实现与验证。依据已确认的 [spec.md](spec.md)、[plan.md](plan.md)、[task.md](task.md)。全部 90 项功能/交付检查目前未执行，仅在实际验证通过后勾选。
+状态：本验收清单已于 2026-11-09 经用户“确认”批准，四份设计文档全部确认，进入实现与验证。依据已确认的 [spec.md](spec.md)、[plan.md](plan.md)、[task.md](task.md)。90 项功能/交付检查中，C75—C82、C84、C85 共 10 项已按 2026-11-10 同一源码状态下的门禁证据勾选，证据见 [verification.md](verification.md)；其余 84 项仍待实际验证通过后勾选。
 
 ## 1. 验收范围和完成判定
 
@@ -214,27 +214,27 @@ fixture 提供可销毁 PostgreSQL、真实 OP 和中心 UI、Web A、SPA B 及�
 
 ### 编译、测试与交付检查
 
-- [ ] **C75** Node/前端/示例依赖使用锁定版本可重现安装，没有隐式 lockfile 改写或未记录的依赖差异。（对应 AC27；验证：运行 `pnpm install --frozen-lockfile`，命令成功且 lockfile 不变；记录实际 Node/pnpm/标准客户端版本。）
+- [x] **C75** Node/前端/示例依赖使用锁定版本可重现安装，没有隐式 lockfile 改写或未记录的依赖差异。（对应 AC27；验证：运行 `pnpm install --frozen-lockfile`，命令成功且 lockfile 不变；记录实际 Node/pnpm/标准客户端版本。）
 
-- [ ] **C76** 中心前端单元/组件测试、类型检查、lint 和构建全部通过，恢复/入口/flow/权限/状态用例实际执行。（对应 AC27；验证：运行 `pnpm --filter @cobotweb/cobotusr test`、`pnpm --filter @cobotweb/cobotusr check`、`pnpm --filter @cobotweb/cobotusr lint`、`pnpm build:cobotusr`，均成功并记录用例数。）
+- [x] **C76** 中心前端单元/组件测试、类型检查、lint 和构建全部通过，恢复/入口/flow/权限/状态用例实际执行。（对应 AC27；验证：运行 `pnpm --filter @cobotweb/cobotusr test`、`pnpm --filter @cobotweb/cobotusr check`、`pnpm --filter @cobotweb/cobotusr lint`、`pnpm build:cobotusr`，均成功并记录用例数。）
 
-- [ ] **C77** Web 示例类型、构建和协议/会话/退出/保护缓存测试通过，不依赖内部 auth 或中心数据库。（对应 AC23、AC27；验证：执行 V_WEB，并运行 `pnpm --filter @cobotrix/oidc-web check`、`pnpm --filter @cobotrix/oidc-web build`，各命令成功，标准兼容由真实 SSO 补证。）
+- [x] **C77** Web 示例类型、构建和协议/会话/退出/保护缓存测试通过，不依赖内部 auth 或中心数据库。（对应 AC23、AC27；验证：执行 V_WEB，并运行 `pnpm --filter @cobotrix/oidc-web check`、`pnpm --filter @cobotrix/oidc-web build`，各命令成功，标准兼容由真实 SSO 补证。）
 
-- [ ] **C78** SPA/保护 API 类型、构建和标签隔离/协议/通知/缓存测试通过；public 产物不含 Web/reader/client secret。（对应 AC8、AC23、AC27；验证：执行 V_SPA，并运行 `pnpm --filter @cobotrix/oidc-spa check`、`pnpm --filter @cobotrix/oidc-spa build`，检查产物及命令结果。）
+- [x] **C78** SPA/保护 API 类型、构建和标签隔离/协议/通知/缓存测试通过；public 产物不含 Web/reader/client secret。（对应 AC8、AC23、AC27；验证：执行 V_SPA，并运行 `pnpm --filter @cobotrix/oidc-spa check`、`pnpm --filter @cobotrix/oidc-spa build`，检查产物及命令结果。）
 
-- [ ] **C79** Rust workspace 格式检查通过。（对应 AC27；验证：运行 `cargo fmt --all -- --check`，返回成功且无格式差异。）
+- [x] **C79** Rust workspace 格式检查通过。（对应 AC27；验证：运行 `cargo fmt --all -- --check`，返回成功且无格式差异。）
 
-- [ ] **C80** Rust 所有目标和全部 feature 的静态检查无警告。（对应 AC27；验证：运行 `cargo clippy --workspace --all-targets --all-features -- -D warnings`，返回成功。）
+- [x] **C80** Rust 所有目标和全部 feature 的静态检查无警告。（对应 AC27；验证：运行 `cargo clippy --workspace --all-targets --all-features -- -D warnings`，返回成功。）
 
-- [ ] **C81** Rust 所有目标/feature 的发布构建成功，并保持当前独立部署形态。（对应 AC27；验证：运行 `cargo build --workspace --all-targets --all-features --release`，构建成功；结合 CI 三平台构建记录核对平台范围。）
+- [x] **C81** Rust 所有目标/feature 的发布构建成功，并保持当前独立部署形态。（对应 AC27；验证：运行 `cargo build --workspace --all-targets --all-features --release`，构建成功；结合 CI 三平台构建记录核对平台范围。）
 
-- [ ] **C82** 全 workspace 测试实际通过，包含本轮规则、隔离 Pg/HTTP、并发失败注入、迁移与注册浏览器用例；未执行项不能填通过。（对应 AC27；验证：运行 `cargo test --workspace --all-targets --all-features -- --test-threads=1`，记录全部通过/失败/忽略数量和执行范围，新增筛选结果不能为零。）
+- [x] **C82** 全 workspace 测试实际通过，包含本轮规则、隔离 Pg/HTTP、并发失败注入、迁移与注册浏览器用例；未执行项不能填通过。（对应 AC27；验证：运行 `cargo test --workspace --all-targets --all-features -- --test-threads=1`，记录全部通过/失败/忽略数量和执行范围，新增筛选结果不能为零。）
 
 - [ ] **C83** 文档测试全部通过，接入/升级说明能按步骤复现。（对应 AC27；验证：运行 `cargo test --workspace --doc --all-features`，返回成功，并附 E7 文档复现证据。）
 
-- [ ] **C84** Rust 依赖使用检查实际执行并完成未使用依赖处理。（对应 AC27；验证：运行 `cargo machete`，记录工具版本、输出和处理结果，工具未安装不能记为通过。）
+- [x] **C84** Rust 依赖使用检查实际执行并完成未使用依赖处理。（对应 AC27；验证：运行 `cargo machete`，记录工具版本、输出和处理结果，工具未安装不能记为通过。）
 
-- [ ] **C85** Rust 锁定依赖审计实际执行，检查发现和处理结果可追溯。（对应 AC27；验证：运行 `cargo audit`，记录工具/数据库时点、发现及处理；未解决导致门禁失败或检查不可用时保持未通过/未验证。）
+- [x] **C85** Rust 锁定依赖审计实际执行，检查发现和处理结果可追溯。（对应 AC27；验证：运行 `cargo audit`，记录工具/数据库时点、发现及处理；未解决导致门禁失败或检查不可用时保持未通过/未验证。）
 
 - [ ] **C86** 专用真实 SSO 命令实际启动 OP、A、B/API 并跑 Chromium、Firefox、WebKit 的 E1—E6 路径，不用 mock UI 成功代替标准协议兼容；E7 由文档复现与迁移/回归结果补证。（对应 AC13、AC14、AC19、AC23、AC27；验证：执行 V_SSO，报告列明每个引擎和场景的真实结果；若全 workspace 已包含同批完整场景且源码未变更，复用该证据不重复跑。）
 

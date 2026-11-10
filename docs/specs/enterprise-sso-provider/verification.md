@@ -143,3 +143,35 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 | `pnpm --filter @cobotweb/cobotusr build` | 通过，2.71 秒 | 生成 `assets/cobotusr` 产物。 |
 
 本轮之后仍未交付的部分保持不变：`examples/` 参考客户端、真实跨站 TLS 与三浏览器 A→B SSO/新标签页/退出验收、真实 HTTPS 后通道成功发送、开发者本人应用投递概况、旧隐藏管理页的中心身份适配，以及 Reader/候选/历史扫描的完整分页遍历。94 个复选框继续保持未勾选。
+
+## 本人应用投递概况与最终门禁复核（2026-11-10）
+
+本节记录上一节列出的四项待办中已关闭的三项，以及在同一源码状态下的完整门禁复跑。
+
+1. 开发者本人应用投递概况：`ConsoleKind::AppDeliveries` 与 `ConsoleQuery::AppDeliveries` 进入闭合查询枚举，通用 `list()` 对该种类返回 `InvalidInput`，只能经 `ConsoleService::list_app_deliveries` 进入——管理员要求 `DeliveryRead` 精确权限，普通用户走 `require_membership`（成员 + 资格启用），并校验环境属于该应用。HTTP 入口为 `GET /developer/apps/{id}/environments/{env}/logout-deliveries` 与 `GET /admin/apps/{id}/environments/{env}/logout-deliveries`，共用同一 handler，由 Dispatcher 按路径前缀区分管理面。开发者页新增“退出通知投递”区块，展示状态中文名、尝试次数、错误码、时间与游标翻页，文案明确 2xx 只表示对端接受通知、本地撤销先于通知生效。
+2. 前端分页补齐：`useCursorPage` 支持复合 key 与额外 active 条件；应用详情页的 Reader 列表由草稿首屏改为游标翻页，候选协作者改为首页 + “加载更多候选账户”累积，避免只取第一页造成的漏选。
+3. 参考示例与 SPA nonce：SPA 在每次 `signinRedirect` 前生成 32 字节 CSPRNG 的 base64url（43 字符）nonce；浏览器夹具的同意页改成轮询两种结果以消除竞态；中心退出确认页补 `Referrer-Policy: same-origin` 并将 `protect_response()` 改为 `entry().or_insert()`，使处理函数显式设置的响应头优先，修复确认页 POST 403。WebKit 在 macOS 14 以下与 Playwright 1.65 不兼容，改为 Darwin major < 24 时使用 `externalWebkit`，由 `playwright-webkit@1.61` 单独跑四组场景。
+4. `legacy_client` 先校验客户端凭据再解析 `app_key`，消除按错误差异判断 app_key 是否存在的侧信道。
+
+| 命令 | 实际结果 | 覆盖及限制 |
+| --- | --- | --- |
+| `cargo test -p cobotrix-root --all-features identity_console_app_deliveries -- --test-threads=1` | 1 通过、0 失败，3.94 秒 | 同应用同环境的两次撤回产生 ≥2 条投递；limit=1 连翻两页 id 递增；生产环境空列表；非成员 `OwnerRequired`；跨应用环境 `Forbidden`；limit=0 与非法游标 `InvalidInput`；`/developer` 与 `/admin` 均 200、`Cache-Control: no-store`、无敏感键、未登录 401。 |
+| `cargo test -p cobotrix-root --all-features identity_legacy -- --test-threads=1` | 8 通过、0 失败 | 含先凭据后 app_key 的 401 行为。 |
+| `cargo test -p cobotrix-root --all-features sync_permissions -- --test-threads=1` | 2 通过、0 失败 | 错误 secret 与不存在 app_key 均 401。 |
+| `pnpm --filter @cobotweb/cobotusr test` | 10 个文件、91 项通过、0 失败 | 含投递概况映射、虚假候选分页与 `getAppDeliveries` 桩。 |
+| `pnpm --filter @cobotweb/cobotusr check` / `lint` / `build` | 均通过，构建 2.47 秒 | `vue-tsc -b`、ESLint、产物落 `assets/cobotusr`。 |
+| `cargo test --workspace --all-targets --all-features -- --test-threads=1` | 全部通过：auth 50（3.62 秒）、root 集成 233（776.85 秒）、cobotusr 86（0.21 秒），0 失败、0 新增 ignored，退出码 0 | 含三引擎 SSO 用例（Chromium+Firefox 10 项 17.0 秒、WebKit 四组场景通过）与本人投递概况用例；此为本轮最终门禁，早期被中断的运行不计入。 |
+| `cargo test --workspace --doc --all-features` | auth 8 通过 / 1 ignored、cobotusr 1 通过（compile fail 用例），0 失败 | 文档示例编译与运行。 |
+| `cargo build --workspace --all-targets --all-features --release` | 通过，1 分 27 秒 | release 全目标构建，独立部署形态未变。 |
+| `cargo fmt --all -- --check` | 退出码 0 | 当前工作区格式。 |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | 通过 | 仅既有 `proc-macro-error2` future-incompat notice。 |
+| `pnpm install --frozen-lockfile` | 通过，46 毫秒，`pnpm-lock.yaml` 无改动 | Node v24.21.0、pnpm 12.10.1、Rust 1.99.1；示例标准客户端 `oidc-client-ts ^3.5.0`、`vite ^7.1.7`、`vitest ^5.1.0`。 |
+| `pnpm --filter './examples/*' check` | 两个示例 `tsc --noEmit` 通过 | oidc-web 与 oidc-spa。 |
+| `pnpm --filter './examples/*' test` | oidc-web 4 文件 54 项、oidc-spa 4 文件 59 项，全部通过 | 标准客户端协议/会话/退出/保护缓存与标签隔离。 |
+| `pnpm --filter './examples/*' build` | 均通过 | SPA 产物 75.58 kB；产物中 `VITE_CLIENT_SECRET`/`VITE_READER_*`/`VITE_SESSION_SECRET` 只作为禁止暴露的校验名单出现，无秘密值；`dist` 与 `.env.local` 均被 `.gitignore` 忽略。 |
+| `cargo machete` | 0.9.2，未发现未使用依赖 | — |
+| `cargo audit` | 退出码 0；载入 1430 条 advisory，扫描 492 个 crate | 剩余 5 条仍在 `.cargo/audit.toml` 中逐条记录理由。 |
+
+据此本轮勾选 C75—C82、C84、C85 共 10 项。C83 只取得 doctest 结果，“接入/升级说明按步骤复现”仍依赖 E7，因此保持未勾选；C86—C90 与 E1—E7 的全流程证据同样保持未勾选。剩余未交付项：真实 HTTPS 后通道成功投递（`HttpsLogoutTransport` 尚无自签 CA 注入，只有 mock）、旧隐藏管理页的 legacy Bearer 适配、旧全范围治理的 1001 行上限与逐用户加载、生产库升级/备份/容量演练、CI 三平台实际结果。
+
+上述未交付项已逐条整理到 [gaps.md](gaps.md)，含影响与下一步，作为阶段性交接清单。
