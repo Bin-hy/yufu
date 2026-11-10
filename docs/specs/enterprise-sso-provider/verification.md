@@ -320,3 +320,37 @@ cargo test --release --test mod upgrade_drill -- --ignored --nocapture --test-th
 | `cargo fmt --all` / `cargo clippy --test mod --all-features -- -D warnings` | 均通过 | clippy 仅既有 `proc-macro-error2` future-incompat notice。 |
 
 据此关闭 G4。验收证据缺口 E-A—E-E 维持不变；C66 的实际演练记录可以引用本节，但 checklist 勾选仍按 E 系列证据流程处理。
+
+## E1 企业目录建立与访问边界（C68，2026-11-10）
+
+C68 要求不预置已认证浏览器状态，由真实管理员从中心登录开始，走完邀请、开户、建组、授权和入口核对。本轮新增 `cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-enterprise-onboarding.spec.ts`，并在 `enterprise-sso-webkit.mjs` 中维护同一场景，因为本机 macOS 14 的 WebKit 走外部 1.61 驱动。
+
+场景全程使用真实 HTTP：管理员在 `/login` 输入用户名密码后落到 `/account`；每个受邀账户使用独立 browser context，先 `POST /identity/actions/exchange` 兑换邀请，再 `POST /identity/invitations/accept` 自设用户名密码；所有中心写请求都带精确 `Origin` 和当次 `GET /identity/csrf` 取得的令牌，组变更另带 `idempotency-key`。第二名管理员通过既有 legacy 管理面授予 `identity.uri:*` 的 `/admin/` 权限，不提升 Superadmin。
+
+```text
+cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
+```
+
+结果：退出码 0。Playwright 12 项通过（Chromium、Firefox 各 6 项，43.4 秒），外部 WebKit 脚本的准入、C68、跨客户端 SSO、本地/中心退出与后通道投递全部通过，总计 71.25 秒。三引擎的 C68 脱敏输出一致：
+
+```json
+{"engine":"chromium","accounts":{"secondAdministrator":"c68-admin-chromium-…","employee":"c68-employee-chromium-…","developers":["c68-developer-a-chromium-…","c68-developer-b-chromium-…"],"collaborator":"c68-partner-chromium-…"},"group":{"name":"Employees chromium-…","members":4,"collaboratorIncluded":false},"grantedAuthorities":33,"boundaries":{"ordinaryApplications":0,"collaboratorDeveloperAccess":403,"collaboratorAdministration":403,"secondAdministratorAccounts":200}}
+{"engine":"firefox",…}
+{"engine":"webkit-1.61",…}
+```
+
+断言覆盖：
+
+- 账户目录中五个新账户的 `person_kind`、`developer_enabled`、`enabled` 与邀请参数一致；两名开发者带 `developer_grant`，合作方为 `collaborator`。
+- 员工组包含第二名管理员、普通员工和两名开发者共 4 人，合作方不在组内。
+- 所有账户登录中心后 `/api/v1/account/apps` 返回 200 且列表为空，说明新账户没有自动获得应用投递。
+- 普通员工与合作方的导航只有“账户中心”“快捷工作流”，`/developer/apps` 与 `/admin/apps` 均为 403。
+- 开发者导航有“开发者控制台”无“企业管理”，`/developer/apps` 200、`/admin/apps` 403。
+- 第二名管理员导航有“企业管理”无“开发者控制台”，`/admin/accounts`、`/admin/groups`、`/admin/apps` 均为 200。
+
+过程中确认了两条既有产品语义，测试按实际行为断言而不是按直觉断言：
+
+- `GET /admin/groups` 的 `limit` 上限是 50，超过返回 `invalid_input`；`/admin/accounts` 允许到 100。
+- 管理员可以读 `/developer/apps`（`read_center_actor` 放行 `administrator`，用于查看自己作为负责人的应用），因此该接口对第二名管理员返回 200 和空列表；开发者控制台的入口仍由 `developer_enabled` 控制，导航中不出现。
+
+测试代理还暴露了一个与产品无关的宿主限制：legacy 管理 bearer 携带全部 96 条权限，单个请求头超过 Node `https` 服务默认的 16 KiB 头上限，代理直接以 431 拒绝。`enterprise-sso-fixture.ts` 因此把 OP 代理的 `maxHeaderSize` 调到 128 KiB 并注明原因；这只影响测试宿主，不改变产品行为。legacy 管理面本身按计划退役，新控制台不依赖这类超大令牌。

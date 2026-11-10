@@ -337,7 +337,12 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     const a = new URL(cfg.aOrigin)
     const b = new URL(cfg.bOrigin)
     servers.push(
-      createServer({ cert: certificate, key }, proxy(new URL(cfg.opUpstream), 'op')),
+      // The legacy governance token carries every registered permission, so an
+      // authorized admin request exceeds Node's 16 KiB default header budget.
+      createServer(
+        { cert: certificate, key, maxHeaderSize: 128 * 1024 },
+        proxy(new URL(cfg.opUpstream), 'op'),
+      ),
       createServer({ cert: certificate, key }, proxy(new URL(cfg.aUpstream), 'web')),
       createServer({ cert: certificate, key }, spaServer(cfg.spaDist, new URL(cfg.apiUpstream))),
     )
