@@ -334,6 +334,12 @@ pub(crate) struct PgSecurityTransaction {
     pub(crate) identity_locks: std::sync::Mutex<
         std::collections::BTreeSet<crate::service::identity::repository::IdentityLockKey>,
     >,
+    /// Account rows held with `FOR SHARE` while minting new roots. Mints are
+    /// compatible with each other and still conflict with the exclusive write
+    /// barrier that revocations take.
+    pub(crate) identity_shared_locks: std::sync::Mutex<
+        std::collections::BTreeSet<crate::service::identity::repository::IdentityLockKey>,
+    >,
 }
 #[async_trait::async_trait]
 impl SecurityRepository for PgSecurityRepository {
@@ -385,6 +391,7 @@ impl PgSecurityRepository {
             clock: self.clock.clone(),
             checked_at,
             identity_locks: Default::default(),
+            identity_shared_locks: Default::default(),
         })
     }
 }
@@ -856,7 +863,7 @@ impl SecurityTransaction for PgSecurityTransaction {
     }
     async fn register_session_pair(&mut self, r: SessionRegistration) -> Result<(), SecurityError> {
         if r.new_roots {
-            self.serialize_user_roots(&PrincipalRef::new(
+            self.serialize_session_mint(&PrincipalRef::new(
                 &r.claims.iss,
                 r.claims.principal_kind,
                 &r.claims.sub,

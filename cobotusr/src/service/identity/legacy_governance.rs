@@ -97,6 +97,9 @@ fn retryable(error: &AppError) -> bool {
             }
     )
 }
+// The bound, the scope and the mutation callback are all part of the same
+// governance contract; bundling them into a struct would only rename the list.
+#[allow(clippy::too_many_arguments)]
 async fn apply<T, F>(
     tx: &mut PgSecurityTransaction,
     manager: &AuthenticatedContext,

@@ -590,18 +590,11 @@ impl PgSecurityTransaction {
         &self,
         scope: &IdentityLockScope,
     ) -> Result<(), IdentityError> {
-        {
-            let held = self
-                .identity_locks
-                .lock()
-                .map_err(|_| IdentityError::DependencyUnavailable)?;
-            if let Some(last) = held.last()
-                && scope
-                    .keys()
-                    .iter()
-                    .any(|key| !held.contains(key) && key < last)
-            {
-                return Err(IdentityError::Conflict);
+        if let Some(last) = self.last_identity_lock()? {
+            for key in scope.keys() {
+                if !self.identity_lock_held(key)? && key < &last {
+                    return Err(IdentityError::Conflict);
+                }
             }
         }
         for key in scope.keys() {
@@ -613,6 +606,11 @@ impl PgSecurityTransaction {
             {
                 continue;
             }
+            // A shared hold is upgraded to the exclusive barrier below.
+            self.identity_shared_locks
+                .lock()
+                .map_err(|_| IdentityError::DependencyUnavailable)?
+                .remove(key);
             let (sql, values): (&str, Vec<sea_orm::Value>) = match key {
                 IdentityLockKey::Policy => (
                     "UPDATE identity_policy_barrier SET revision=revision+1 WHERE id=1 RETURNING id",
@@ -706,6 +704,70 @@ impl PgSecurityTransaction {
                 .map_err(|_| IdentityError::DependencyUnavailable)?
                 .insert(key.clone());
         }
+        Ok(())
+    }
+    fn identity_lock_held(&self, key: &IdentityLockKey) -> Result<bool, IdentityError> {
+        Ok(self
+            .identity_locks
+            .lock()
+            .map_err(|_| IdentityError::DependencyUnavailable)?
+            .contains(key)
+            || self
+                .identity_shared_locks
+                .lock()
+                .map_err(|_| IdentityError::DependencyUnavailable)?
+                .contains(key))
+    }
+    fn last_identity_lock(&self) -> Result<Option<IdentityLockKey>, IdentityError> {
+        let exclusive = self
+            .identity_locks
+            .lock()
+            .map_err(|_| IdentityError::DependencyUnavailable)?
+            .last()
+            .cloned();
+        let shared = self
+            .identity_shared_locks
+            .lock()
+            .map_err(|_| IdentityError::DependencyUnavailable)?
+            .last()
+            .cloned();
+        Ok(exclusive.max(shared))
+    }
+    /// Mints hold the account row with `FOR SHARE`: concurrent logins for one
+    /// account no longer collide with each other, while a revocation that
+    /// commits after this snapshot still fails the lock with 40001 because it
+    /// takes the exclusive write barrier on the same row.
+    pub(crate) async fn acquire_shared_user_scope(
+        &self,
+        user_id: crate::IdType,
+    ) -> Result<(), IdentityError> {
+        let key = IdentityLockKey::User(user_id);
+        if self.identity_lock_held(&key)? {
+            return Ok(());
+        }
+        if let Some(last) = self.last_identity_lock()?
+            && key < last
+        {
+            return Err(IdentityError::Conflict);
+        }
+        if self
+            .run(
+                self.transaction
+                    .query_one_raw(Statement::from_sql_and_values(
+                        DbBackend::Postgres,
+                        "SELECT id FROM \"user\" WHERE id=$1 FOR SHARE",
+                        vec![user_id.into()],
+                    )),
+            )
+            .await?
+            .is_none()
+        {
+            return Err(IdentityError::NotFound);
+        }
+        self.identity_shared_locks
+            .lock()
+            .map_err(|_| IdentityError::DependencyUnavailable)?
+            .insert(key);
         Ok(())
     }
     pub(crate) async fn current_identity_admission(

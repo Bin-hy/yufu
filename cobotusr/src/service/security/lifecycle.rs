@@ -201,12 +201,62 @@ impl CredentialLifecycle {
         budget: &SecurityBudget,
     ) -> Result<LocalSession, SecurityError> {
         validate_local_username(request.username)?;
+        let verified = self
+            .verify_local_password(request.username, request.password, budget)
+            .await?;
+        budget.remaining()?;
         let mut txn = self.repository.begin(budget).await?;
-        let session = self
-            .login_local_in_transaction(txn.as_mut(), request, config, signer, budget)
+        // The account may have changed while the password was being checked.
+        let current = txn
+            .local_user(request.username)
+            .await?
+            .ok_or(SecurityError::InvalidCredential)?;
+        if !(current.enabled && current.id == verified.id && current.password == verified.password)
+        {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let tokens = self
+            .mint_local_session(txn.as_mut(), verified.id, config, signer, budget)
             .await?;
         txn.commit().await?;
-        Ok(session)
+        Ok(LocalSession {
+            tokens,
+            user: current.into(),
+        })
+    }
+    /// Password verification is the expensive step (bcrypt cost 12), so it runs
+    /// once, outside the write transaction. The caller re-reads the account
+    /// before minting and refuses when the hash or the enabled flag changed.
+    async fn verify_local_password(
+        &self,
+        username: &str,
+        password: &LocalPassword,
+        budget: &SecurityBudget,
+    ) -> Result<crate::entity::user::Model, SecurityError> {
+        let mut txn = self.repository.begin(budget).await?;
+        let user = txn.local_user(username).await?;
+        txn.rollback().await?;
+        let user = user.ok_or(SecurityError::InvalidCredential)?;
+        if !user.enabled {
+            return Err(SecurityError::InvalidCredential);
+        }
+        let password_hash = user
+            .password
+            .clone()
+            .ok_or(SecurityError::InvalidCredential)?;
+        let password = password.0.clone();
+        let valid = budget
+            .run(tokio::task::spawn_blocking(move || {
+                bcrypt::verify(password, &password_hash)
+            }))
+            .await?
+            .map_err(|_| SecurityError::DependencyUnavailable)?
+            .map_err(|_| SecurityError::InvalidCredential)?;
+        if !valid {
+            return Err(SecurityError::InvalidCredential);
+        }
+        budget.remaining()?;
+        Ok(user)
     }
     /// Identity orchestration owns the commit when a browser root and the
     /// existing management credential pair must be created atomically.

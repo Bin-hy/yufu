@@ -26,6 +26,26 @@ impl PgSecurityTransaction {
         .await
         .map_err(Into::into)
     }
+    /// Session roots take the account row with `FOR SHARE` instead of the
+    /// write barrier: several logins for one account stay compatible, while a
+    /// revocation that commits after this snapshot still fails the lock with
+    /// 40001 because it takes the exclusive barrier on the same row.
+    pub(super) async fn serialize_session_mint(
+        &self,
+        principal: &PrincipalRef,
+    ) -> Result<(), SecurityError> {
+        if principal.kind() != PrincipalKind::User {
+            return Err(SecurityError::Forbidden);
+        }
+        let id = principal
+            .subject()
+            .parse::<crate::IdType>()
+            .map_err(|_| SecurityError::InvalidResource)?;
+        if id <= 0 || id.to_string() != principal.subject() {
+            return Err(SecurityError::InvalidResource);
+        }
+        self.acquire_shared_user_scope(id).await.map_err(Into::into)
+    }
     pub(super) async fn lock_revocation_credential(
         &mut self,
         reference: &CredentialRef,

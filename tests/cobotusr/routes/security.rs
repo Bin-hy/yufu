@@ -2416,6 +2416,47 @@ async fn security_t24_authentication_failures_and_signing_commit_failures_leave_
     .unwrap();
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn security_t24_concurrent_logins_for_one_account_all_succeed() {
+    use cobotusr::service::security::lifecycle::{LocalLoginRequest, LocalPassword};
+    let (_container, _db, clock, lifecycle) = local_fixture().await;
+    let signer = std::sync::Arc::new(SessionTestSigner::new());
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(4));
+    let mut jobs = vec![];
+    for _ in 0..4 {
+        let lifecycle = lifecycle.clone();
+        let signer = signer.clone();
+        let clock = clock.clone();
+        let barrier = barrier.clone();
+        jobs.push(tokio::spawn(async move {
+            let password = LocalPassword::new(LOCAL_PASSWORD.into()).unwrap();
+            barrier.wait().await;
+            lifecycle
+                .login_local(
+                    LocalLoginRequest {
+                        username: "session-user",
+                        password: &password,
+                    },
+                    &session_config(),
+                    &*signer,
+                    &security_budget(&clock),
+                )
+                .await
+                .map(|session| session.tokens.refresh_token.expose_secret().to_owned())
+        }));
+    }
+    let mut refresh = vec![];
+    for job in jobs {
+        refresh.push(
+            job.await
+                .unwrap()
+                .expect("a concurrent login for the same account still mints"),
+        );
+    }
+    refresh.sort();
+    refresh.dedup();
+    assert_eq!(refresh.len(), 4, "each login mints its own session");
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn security_t24_concurrent_registration_and_local_refresh_have_one_replacement() {
     use auth::security::{error::SecurityError, identity::SecretToken};
     let (_container, db, clock, lifecycle) = local_fixture().await;
