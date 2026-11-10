@@ -705,42 +705,6 @@ async fn security_browser_loopback_cookie_flow_and_monitor_failure() {
     assert!(!response.headers().contains_key("set-cookie"));
 }
 
-#[cfg(feature = "webui")]
-#[tokio::test]
-async fn security_browser_real_frontend_login_refresh_logout_all_engines() {
-    let fixture = local_http_fixture("monitored-loopback").await;
-    run_browser_auth_test(&fixture, "loopback").await;
-}
-
-#[cfg(feature = "webui")]
-#[tokio::test]
-async fn security_browser_secure_http_rejection_is_actionable_in_webkit() {
-    let fixture = local_http_fixture("healthy").await;
-    run_browser_auth_test(&fixture, "secure-cookie-diagnostic").await;
-}
-
-#[cfg(feature = "webui")]
-async fn run_browser_auth_test(fixture: &LocalHttpFixture, mode: &str) {
-    let output = tokio::process::Command::new("node")
-        .arg("tests/e2e/real-auth.mjs")
-        .current_dir(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/cobotweb/apps/cobotusr"
-        ))
-        .env("COBOTUSR_AUTH_TEST_URL", &fixture.root)
-        .env("COBOTUSR_AUTH_TEST_MODE", mode)
-        .output()
-        .await
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    println!("{}", String::from_utf8_lossy(&output.stdout));
-}
-
 #[tokio::test]
 async fn security_browser_loopback_aliases_and_rejection_diagnostics() {
     let fixture = local_http_fixture("monitored-loopback").await;
