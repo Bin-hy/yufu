@@ -6,7 +6,6 @@ import UiButton from '@/components/ui/button/button.vue'
 import UiSelect from '@/components/ui/select/select.vue'
 import Pagination from '@/components/ui/pagination/pagination.vue'
 import { useFormDraft } from '@/composables/use-form-draft'
-import { usePermissionAssignment } from '@/composables/use-permission-assignment'
 import { createStepWorkflow } from '@/composables/use-step-workflow'
 import { disposeTheme, initializeTheme, useTheme } from '@/composables/use-theme'
 const router = createRouter({
@@ -67,52 +66,18 @@ describe('表单值与分页', () => {
         wrapper.unmount()
     })
 })
-describe('部分成功的业务写入', () => {
-    it('权限新增成功、删除失败后核对实际状态，只重试剩余删除', async () => {
-        const actual = new Set([1, 2]),
-            add = vi.fn(async (ids: number[]) => ids.forEach((id) => actual.add(id))),
-            remove = vi
-                .fn()
-                .mockRejectedValueOnce(Error('delete failed'))
-                .mockImplementation(async (ids: number[]) => ids.forEach((id) => actual.delete(id)))
-        const assignment = usePermissionAssignment({ read: async () => [...actual], add, remove })
-        assignment.initialize([1, 2])
-        assignment.desired.value = [2, 3]
-        await assignment.save()
-        expect(assignment.actual.value).toEqual([1, 2, 3])
-        expect(assignment.error.value).toContain('delete failed')
-        await assignment.save()
-        expect(add).toHaveBeenCalledTimes(1)
-        expect(remove).toHaveBeenCalledTimes(2)
-        expect(assignment.actual.value).toEqual([2, 3])
-        expect(assignment.dirty.value).toBe(false)
-    })
-    it('授权读取失败时禁止差异写入，恢复读取后可以继续', async () => {
-        const add = vi.fn(),
-            read = vi.fn().mockRejectedValueOnce(Error('read failed')).mockResolvedValue([1])
-        const assignment = usePermissionAssignment({ read, add, remove: vi.fn() })
-        assignment.initialize([1])
-        assignment.desired.value = [2]
-        await assignment.reconcile()
-        expect(assignment.ready.value).toBe(false)
-        await assignment.save()
-        expect(add).not.toHaveBeenCalled()
-        await assignment.reconcile()
-        expect(assignment.ready.value).toBe(true)
-    })
-    it('应用分步创建/更新/删除第二步失败后不重复第一步', async () => {
-        const first = vi.fn().mockResolvedValue(undefined),
-            second = vi.fn().mockRejectedValueOnce(Error('failed')).mockResolvedValue(undefined),
-            flow = createStepWorkflow([
-                { id: 'first', label: 'first', run: first },
-                { id: 'second', label: 'second', run: second },
-            ])
-        await expect(flow.run()).rejects.toThrow('failed')
-        expect(flow.completed.value).toEqual(['first'])
-        await flow.run()
-        expect(first).toHaveBeenCalledTimes(1)
-        expect(second).toHaveBeenCalledTimes(2)
-    })
+it('应用分步创建/更新/删除第二步失败后不重复第一步', async () => {
+    const first = vi.fn().mockResolvedValue(undefined),
+        second = vi.fn().mockRejectedValueOnce(Error('failed')).mockResolvedValue(undefined),
+        flow = createStepWorkflow([
+            { id: 'first', label: 'first', run: first },
+            { id: 'second', label: 'second', run: second },
+        ])
+    await expect(flow.run()).rejects.toThrow('failed')
+    expect(flow.completed.value).toEqual(['first'])
+    await flow.run()
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenCalledTimes(2)
 })
 it('主题可启动、恢复、切换；监听可释放且不会重复', async () => {
     disposeTheme()

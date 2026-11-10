@@ -175,3 +175,21 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 据此本轮勾选 C75—C82、C84、C85 共 10 项。C83 只取得 doctest 结果，“接入/升级说明按步骤复现”仍依赖 E7，因此保持未勾选；C86—C90 与 E1—E7 的全流程证据同样保持未勾选。剩余未交付项：真实 HTTPS 后通道成功投递（`HttpsLogoutTransport` 尚无自签 CA 注入，只有 mock）、旧隐藏管理页的 legacy Bearer 适配、旧全范围治理的 1001 行上限与逐用户加载、生产库升级/备份/容量演练、CI 三平台实际结果。
 
 上述未交付项已逐条整理到 [gaps.md](gaps.md)，含影响与下一步，作为阶段性交接清单。
+
+## 旧 RBAC 管理面退役（2026-11-10）
+
+按新的产品定位，旧 RBAC 管理面整体从产品中移除，而不是继续以 `hidden: true` 的中间态存在：
+
+- 删除 `pages/users`、`pages/roles`、`pages/authority`、`pages/permissions`、`pages/recordings`、`pages/applications`、`pages/oauth`、`pages/authorized-apps`，以及只被它们使用的 `permission-catalog`、`permission-assignment` 组件、`use-permission-assignment` 组合式函数和 `pages/login/api`。
+- `/users`、`/users/create` 重定向到 `/admin/accounts`，`/roles` 到 `/admin/groups`，`/authority`、`/authority/assign`、`/permissions`、`/permissions/assign` 到 `/admin/apps`，`/recordings` 到 `/admin/audit`；`/legacy/*` 别名同样直接指向新入口。旧 URL 不再挂载任何页面组件。
+- 删除围绕旧管理接口的 e2e 套件（`fixture.ts`、`serve.mjs`、`real-auth.mjs` 与 7 个旧 spec）及其 `playwright.config.ts`，`test:e2e` 改为运行企业 SSO 套件；旧套件依赖的 `/user`、`/login`、`/refresh` mock 与中心 Cookie 会话不兼容，已无法反映当前产品。
+- 后端旧 `/api/v1/{user,role,authority,permission}` 与旧 `/login` 保留，供既有客户端、MCP 与历史数据兼容；写入仍经身份治理。
+
+| 命令 | 实际结果 | 覆盖及限制 |
+| --- | --- | --- |
+| `pnpm --filter @cobotweb/cobotusr check` | 通过 | `vue-tsc -b`，删除后无悬空引用。 |
+| `pnpm --filter @cobotweb/cobotusr lint` | 通过 | ESLint 覆盖 `src`、`tests` 与配置。 |
+| `pnpm --filter @cobotweb/cobotusr test` | 11 个文件、92 项通过 | 新增 `legacy-routes.test.ts` 断言旧路径只重定向、不挂载组件；移除 2 项只针对已删除组合式函数的用例。 |
+| `pnpm --filter @cobotweb/cobotusr build` | 通过，2.19 秒 | 主包 303.24 kB，旧管理页 chunk 不再产出。 |
+
+该变更只影响前端产品面，未改动后端协议与数据；C65 要求的“旧入口不能绕过治理”仍由后端测试覆盖，浏览器端不再提供旧入口。

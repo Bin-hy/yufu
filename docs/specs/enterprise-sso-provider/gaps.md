@@ -9,7 +9,7 @@
 | 编号 | 缺口 | 当前状态 | 影响 | 下一步 |
 | --- | --- | --- | --- | --- |
 | G1 | 真实 HTTPS 后通道投递 | `HttpsLogoutTransport` 没有注入自签 CA 的入口，成功投递只有 mock 与明文 HTTP 夹具证据 | 无法证明对真实 HTTPS 接收端的投递、超时与重试行为；C73/C86 的 HTTPS 成功路径缺证 | 给 transport 增加仅测试可用的 CA 注入，用局部 CA 起一个 HTTPS 接收端，覆盖成功、超时、5xx 与重复投递 |
-| G2 | 旧隐藏管理页仍走 legacy Bearer | `/users`、`/roles`、`/authority`、`/permissions`、`/recordings` 路由保留但 `hidden: true`；页面调用旧 `/api/v1/{user,role,authority,permission}` 并依赖 `getToken()` 的 Bearer | 中心登录只签发 Cookie 会话，不产生 legacy token，这些页面在正常登录后实际不可用；旧入口的读写边界只有后端测试证据 | 二选一：把这些页面迁到中心 Cookie API，或明确下线并从路由表移除；迁移前需要在 README 与运维说明里写清“不可用” |
+| G2 | ~~旧隐藏管理页仍走 legacy Bearer~~ 已关闭 | 旧 RBAC 页面、组件与旧 e2e 套件已删除，旧 URL 改为重定向到新控制台 | 已消除“路由可达但取数失败”的中间态；后端旧接口保留兼容，供既有客户端与 MCP 调用 | 见“已关闭的缺口” |
 | G3 | 旧全范围治理容量 | `legacy_governance.rs` 全范围发现最多 1000 用户（`LIMIT 1001`），逐用户加载 | 超过上限返回 `CapacityExceeded`，大企业库无法一次完成治理 | 改为分页/游标遍历并测量耗时，或把上限变成可配置并给出运维指引 |
 | G4 | 生产库升级与恢复演练 | 迁移与回滚只在隔离 fixture 验证 | C66 要求备份、预演、维护窗口迁移、失败恢复的实际记录 | 在隔离旧库按运维指南完整演练一次并记录样本恢复结果 |
 | G5 | 容量与延迟 | 未测量 | 没有并发登录、投递积压、会话清理的容量数据 | 用受控脚本测登录/刷新/退出/投递吞吐与 P95 |
@@ -30,4 +30,10 @@
 - 单企业独立部署、固定 issuer，不做多租户与公开应用市场；外部开发者不开放自助注册，接入走企业邀约与审批。
 - 不实现 SAML、LDAP、SCIM 与 MFA，按 Spec 留给后续。
 - 旧 RBAC 数据与旧客户端保留兼容读取，写入统一经身份治理；旧 `/login` 仍按兼容返回原管理 token set，但中心 UI 不再使用。
+
+## 四、已关闭的缺口
+
+| 编号 | 关闭方式 | 证据 |
+| --- | --- | --- |
+| G2 | 旧 RBAC 管理面整体退役：删除 `pages/{users,roles,authority,permissions,recordings,applications,oauth,authorized-apps}`、`permission-catalog`/`permission-assignment` 组件、`use-permission-assignment` 与旧 e2e 套件；`/users`、`/roles`、`/authority`、`/permissions`、`/recordings` 及 `/legacy/*` 别名改为重定向到 `/admin/accounts`、`/admin/groups`、`/admin/apps`、`/admin/audit` | `pnpm --filter @cobotweb/cobotusr check`、`lint`、`build` 通过；单测 11 个文件 92 项通过，其中 `legacy-routes.test.ts` 断言旧路径只重定向、不再挂载组件 |
 

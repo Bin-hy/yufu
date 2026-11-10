@@ -10,7 +10,7 @@
         "check": "vue-tsc -b --pretty false",
         "lint": "eslint src tests *.config.*",
         "test": "vitest run",
-        "test:e2e": "playwright test"
+        "test:e2e": "node tests/e2e/enterprise-sso-runner.mjs"
     },
     "dependencies": {
         "@lucide/vue": "1.70.0",

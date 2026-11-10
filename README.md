@@ -10,6 +10,8 @@ Rust workspace 包含根 CLI、`cobotusr` 和 `libs/auth`，唯一二进制是 `
 
 标准协议入口是 `/.well-known/openid-configuration` 与 `/oidc/*`（授权、token、userinfo、内省、撤销、RP 发起退出），浏览器登录、同意与继续流程在 `/identity/*`。对已登记回调的应用，中心退出会按环境能力投递 back-channel logout；`2xx` 只表示对端接受通知，本地授权撤销在此之前已经生效。
 
+旧 RBAC 管理页已退役：`/users`、`/roles`、`/authority`、`/permissions`、`/recordings` 会重定向到新控制台的账户、用户组、应用与审计页面，后端旧管理接口仅为既有客户端保留兼容。
+
 `examples/oidc-web` 是 `openid-client` 服务端 Web 参考实现（含独立保护 API），`examples/oidc-spa` 是 `oidc-client-ts` 浏览器 SPA 参考实现；两者可作为第三方接入的起点。
 
 ## 本机开发
