@@ -21,6 +21,7 @@ mod identity_governance;
 mod identity_introspection;
 mod identity_legacy;
 mod identity_logout;
+mod identity_logout_transport;
 mod identity_migration;
 mod identity_protocol;
 mod identity_reader;
