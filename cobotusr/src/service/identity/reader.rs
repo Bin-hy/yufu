@@ -7,7 +7,7 @@ use super::{
     transaction::{IdentityUnitOfWork, execute_identity},
 };
 use crate::{
-    domain::identity::{account::IssuedSecret, application::ClientKind, error::IdentityError},
+    domain::identity::{account::IssuedSecret, error::IdentityError},
     service::security::repository::now,
 };
 use auth::security::{
@@ -383,7 +383,7 @@ impl IdentityUnitOfWork for ReaderMutation<'_> {
         let (write, action, id, revision) = match self.change {
             Change::Create { id, audience, hash } => {
                 if !current.enabled
-                    || current.config.client_kind != ClientKind::BrowserSpa
+                    || !current.config.client_kind.permits_introspection_reader()
                     || current.config.access_audience.as_str() != audience
                 {
                     return Err(IdentityError::AccessDenied);
@@ -418,7 +418,7 @@ impl IdentityUnitOfWork for ReaderMutation<'_> {
                 }
                 if enabled
                     && (!current.enabled
-                        || current.config.client_kind != ClientKind::BrowserSpa
+                        || !current.config.client_kind.permits_introspection_reader()
                         || current.config.access_audience.as_str() != reader.approved_audience)
                 {
                     return Err(IdentityError::AccessDenied);

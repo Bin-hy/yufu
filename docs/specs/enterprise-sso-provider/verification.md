@@ -354,3 +354,52 @@ cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_s
 - 管理员可以读 `/developer/apps`（`read_center_actor` 放行 `administrator`，用于查看自己作为负责人的应用），因此该接口对第二名管理员返回 200 和空列表；开发者控制台的入口仍由 `developer_enabled` 控制，导航中不出现。
 
 测试代理还暴露了一个与产品无关的宿主限制：legacy 管理 bearer 携带全部 96 条权限，单个请求头超过 Node `https` 服务默认的 16 KiB 头上限，代理直接以 431 拒绝。`enterprise-sso-fixture.ts` 因此把 OP 代理的 `maxHeaderSize` 调到 128 KiB 并注明原因；这只影响测试宿主，不改变产品行为。legacy 管理面本身按计划退役，新控制台不依赖这类超大令牌。
+
+## E2 开发者接入与两个示例应用（C69，2026-11-11）
+
+C69 要求开发者只通过中心控制台完成 Web A 与 SPA B 的注册，取得各自接入配置，再完成维护者协作、负责人交接和指定测试用户登录。本轮新增 `cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-developer-onboarding.spec.ts`，在 `enterprise-sso-webkit.mjs` 中维护同一场景，因为本机 macOS 14 的 WebKit 必须使用外部 1.61 驱动。
+
+场景全程使用真实接口与界面：管理员邀请开发者 A、开发者 B 和测试用户；管理员显式授予 A→B 的候选可见性；A 在控制台一次完成基础资料、开发环境与生产环境草稿；Web A 的 client secret 只在建立回执中出现一次，刷新详情后接口响应不再包含该值；SPA B 不交付 secret，接口响应中也没有 `client_secret`；两个应用分别创建绑定当前生效 audience 的后端内省 reader，并在界面隐藏 secret；A 将 B 加为维护者，B 修改资料后由 A 交接负责人，交接后 B 拥有负责人控件而 A 变为维护者；管理员把测试用户加入两个开发环境的测试访问。
+
+两个示例由 `startGeneratedExamples` 使用控制台生成的 client、reader 与独立 session secret 启动，示例进程只收到自己的环境变量，不接收中心数据库 URL，也不共享会话存储。Web 与 SPA 使用随机分配的不同 origin 和端口；测试用户先登录 Web A，再在同一浏览器 context 的新标签进入 SPA B。
+
+```text
+cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
+```
+
+结果：退出码 0。Playwright 14 项通过（Chromium、Firefox 各 7 项，1.7 分钟），外部 WebKit 1.61 的准入、C68、C69、跨客户端 SSO、本地/中心退出与后通道投递全部通过；Rust 验收 1 项通过，总计 152.52 秒。三引擎 C69 脱敏证据如下：
+
+| 引擎 | Web client / reader | SPA client / reader | Web / SPA origin | 测试用户 | 结果 |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | `app_880dd154-adee-4447-973f-06cbc0b4e951` / `reader_76cf34f5-4892-477d-9f46-4553c8d9c72a` | `app_238e48d9-fd7c-482a-adb2-eae35164a3dc` / `reader_1ece7c7c-5c19-4dd2-aa8b-f6918c219f81` | `https://127.0.0.1:52427` / `https://[::1]:52428` | 4 | Web 200、SPA accepted、无共享 Cookie |
+| Firefox | `app_5fd6f08d-c608-48ff-a11c-2799e318cc50` / `reader_ffb50c0b-aa93-46af-8c01-7ce1f6d433f2` | `app_fb3fb76a-6fc3-4571-a78a-63c86d160dd9` / `reader_3d3df860-30ef-45d2-acb8-2c0db6308ed5` | `https://127.0.0.1:52875` / `https://[::1]:52876` | 12 | Web 200、SPA accepted、无共享 Cookie |
+| WebKit 1.61 | `app_5ff634c2-4666-46c7-b9d8-5739f089d7da` / `reader_2ac88559-d5dc-461b-a60e-7776d106b999` | `app_e0c948d1-170a-4c23-ba8f-d80f1cb92cab` / `reader_0ffe70f7-8a41-4e30-9443-94781e11eca3` | `https://127.0.0.1:53821` / `https://[::1]:53822` | 25 | Web 200、SPA accepted、无共享 Cookie |
+
+断言覆盖：
+
+- Web A 为 `server_web`、SPA B 为 `browser_spa`，两者 client ID 与站点 origin 均不同；Web A 的 secret 只交付一次且详情 API 不再包含，SPA B 无 secret。
+- 两个环境均存在生效配置；reader 只绑定当前 application/environment 的生效 audience，secret 在界面展示后立即隐藏。
+- A→B 维护者协作、B 修改应用资料、A→B 负责人交接均经真实 UI 与 API 完成，刷新后状态保持。
+- 测试用户在 Web A 通过中心登录完成授权回调，服务端持有 `cobotrix_session` Cookie，页面 `sessionStorage` 为空，保护操作返回 200。
+- 同一测试用户进入 SPA B 时不再输入密码，身份 subject 与 Web A 相同；SPA 使用 `sessionStorage`，无 `cobotrix_session` Cookie，保护操作显示 `Operation accepted.`。
+- Web A 与 SPA B 之间没有共享 `cobotrix_session` Cookie；`distinctClients`、`distinctSites`、`webSessionCookie`、`spaSessionStorage`、`webSessionStorageEmpty` 为 true，`sharedSessionCookie` 为 false。
+
+这轮场景暴露并修复了两个实现缺口：
+
+- 后端内省 reader 原先只允许 `BrowserSpa`。`ClientKind::permits_introspection_reader()` 现在允许 `ServerWeb` 与 `BrowserSpa`，内省状态也允许机密 Web 客户端；reader 仍只能绑定精确 application/environment 与当前生效 audience，停用环境不能创建或重新启用，跨应用/跨环境拒绝，且不能调用 `/oidc/token` 或 `/oidc/revoke`。
+- 应用详情页存在重复 `#detail-candidate`，导致浏览器按 strict mode 解析到两个元素；“加载更多候选账户”也被放在 `v-else` 链中，会与候选选择框同时渲染。现在候选 ID 唯一，加载更多按钮位于条件链外，管理员视图使用数字输入，开发者视图使用候选下拉。
+
+当前源码下的补充门禁：
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `cargo fmt --all -- --check` | 通过 |
+| `node --check cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-webkit.mjs`、`git diff --check` | 均通过 |
+| `pnpm --filter @cobotweb/cobotusr check` | 通过 |
+| `pnpm --filter @cobotweb/cobotusr lint` | 通过 |
+| `pnpm build:cobotusr` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
+| `cargo clippy -p cobotrix-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
+| `cargo test -p cobotrix-root --features webui --test mod identity_protocol_reader_allows_confidential_web_for_its_own_audience_only -- --nocapture` | 1 通过、0 失败，7.07 秒 |
+| `cargo test -p cobotrix-root --features webui --test mod identity_protocol_reader_is_bound_rotatable_and_not_a_token_or_revocation_client -- --nocapture` | 1 通过、0 失败，11.47 秒 |
+
+C69 已勾选。C70 仍要求生产配置提交、另一管理员审核、用户组分配、自批/无分配拒绝和 LocalOnly 退出限制的完整三引擎证据，因此保持未勾选。

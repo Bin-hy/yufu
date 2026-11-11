@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::identity::{application::ClientKind, introspection::Introspection};
+use crate::domain::identity::introspection::Introspection;
 use auth::{
     security::{credential::CredentialRef, error::SecurityError, identity::SecretToken},
     token_manager::IdTokenSigner,
@@ -79,8 +79,7 @@ async fn authenticate(
     };
     if !target.enabled
         || client.management_state != "managed"
-        || !client.public_client
-        || target.config.client_kind != ClientKind::BrowserSpa
+        || !target.config.client_kind.permits_introspection_reader()
         || target.config.access_audience.as_str() != reader.approved_audience
     {
         return Err(IdentityError::Unauthenticated);

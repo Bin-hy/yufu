@@ -200,21 +200,32 @@ async fn identity_protocol_reader_is_bound_rotatable_and_not_a_token_or_revocati
         .unwrap()
         .active
     );
+    let web_reader = reader_service
+        .create(
+            &evidence,
+            ReaderLocation {
+                application_id: web.app,
+                environment_id: web.development,
+            },
+            "urn:test:Development",
+            "reader-service-1",
+            Uuid::new_v4(),
+            &budget(&f),
+        )
+        .await
+        .unwrap();
+    let web_reader_id = web_reader.reader_id;
+    let web_reader_secret = SecretToken::new(web_reader.secret.unwrap().into_response()).unwrap();
     assert!(
-        reader_service
-            .create(
-                &evidence,
-                ReaderLocation {
-                    application_id: web.app,
-                    environment_id: web.development
-                },
-                "urn:test:Development",
-                "reader-service-1",
-                Uuid::new_v4(),
-                &budget(&f)
-            )
-            .await
-            .is_err()
+        svc.introspect(
+            client(&web_reader_id, &web_reader_secret),
+            &web_tokens.access_token,
+            f.signer.as_ref(),
+            &budget(&f)
+        )
+        .await
+        .unwrap()
+        .active
     );
     assert!(
         reader_service
@@ -399,7 +410,7 @@ async fn identity_protocol_reader_is_bound_rotatable_and_not_a_token_or_revocati
         root
     );
     tx.rollback().await.unwrap();
-    assert_eq!(scalar(&f,"SELECT COUNT(*)::bigint AS value FROM identity_audit_event WHERE action LIKE 'reader.%'").await,3);
+    assert_eq!(scalar(&f,"SELECT COUNT(*)::bigint AS value FROM identity_audit_event WHERE action LIKE 'reader.%'").await,4);
     f.close().await;
 }
 

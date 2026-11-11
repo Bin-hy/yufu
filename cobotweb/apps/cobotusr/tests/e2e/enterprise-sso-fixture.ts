@@ -1,12 +1,15 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createSign } from 'node:crypto'
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
 import {
   request as httpRequest,
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http'
 import { createServer, type Server } from 'node:https'
+import { createServer as createNetServer } from 'node:net'
+import { tmpdir } from 'node:os'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
 import type { Page } from '@playwright/test'
@@ -261,6 +264,25 @@ function spaBuildEnvironment(cfg: SsoConfig): NodeJS.ProcessEnv {
   }
 }
 
+function spaBuildEnvironmentFor(
+  cfg: SsoConfig,
+  clientId: string,
+  redirectUri: string,
+  postLogoutRedirectUri: string,
+  apiBaseUrl: string,
+  scope: string,
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    VITE_ISSUER: cfg.opOrigin,
+    VITE_CLIENT_ID: clientId,
+    VITE_REDIRECT_URI: redirectUri,
+    VITE_POST_LOGOUT_REDIRECT_URI: postLogoutRedirectUri,
+    VITE_API_BASE_URL: apiBaseUrl,
+    VITE_SCOPE: scope,
+  }
+}
+
 async function buildSpa(cfg: SsoConfig): Promise<void> {
   const cwd = join(cfg.repoRoot, 'examples/oidc-spa')
   const child = spawn(
@@ -288,6 +310,183 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<void> {
     await new Promise((resolveWait) => setTimeout(resolveWait, 200))
   }
   throw new Error(`${url} did not become ready: ${last}`)
+}
+
+export interface ExampleOrigins {
+  webOrigin: string
+  spaOrigin: string
+  webPort: number
+  spaPort: number
+  webUpstreamPort: number
+  apiUpstreamPort: number
+}
+
+export interface GeneratedWebConfig {
+  clientId: string
+  clientSecret: string
+  readerClientId: string
+  readerClientSecret: string
+  sessionSecret: string
+  scope?: string
+}
+
+export interface GeneratedSpaConfig {
+  clientId: string
+  apiAudience: string
+  readerClientId: string
+  readerClientSecret: string
+  scope?: string
+}
+
+export interface GeneratedExamples {
+  webOrigin: string
+  spaOrigin: string
+  stop(): Promise<void>
+}
+
+function freePortOn(host: string): Promise<number> {
+  return new Promise((resolvePort, reject) => {
+    const server = createNetServer()
+    server.once('error', reject)
+    server.listen(0, host, () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address ? address.port : 0
+      server.close(() => resolvePort(port))
+    })
+  })
+}
+
+/** Reserves the four loopback ports used by one generated example pair. */
+export async function allocateExampleOrigins(): Promise<ExampleOrigins> {
+  const [webPort, spaPort, webUpstreamPort, apiUpstreamPort] = await Promise.all([
+    freePortOn('127.0.0.1'),
+    freePortOn('::1'),
+    freePortOn('127.0.0.1'),
+    freePortOn('127.0.0.1'),
+  ])
+  return {
+    webOrigin: `https://127.0.0.1:${webPort}`,
+    spaOrigin: `https://[::1]:${spaPort}`,
+    webPort,
+    spaPort,
+    webUpstreamPort,
+    apiUpstreamPort,
+  }
+}
+
+/**
+ * Starts fresh copies of both examples with the client ids, secrets and
+ * reader credentials that came out of the developer console. The examples get
+ * only their own environment and never a database URL or shared session store.
+ */
+export async function startGeneratedExamples(
+  cfg: SsoConfig,
+  origins: ExampleOrigins,
+  web: GeneratedWebConfig,
+  spa: GeneratedSpaConfig,
+): Promise<GeneratedExamples> {
+  const dist = await mkdtemp(join(tmpdir(), 'cobot-e2-spa-'))
+  const processes: ManagedProcess[] = []
+  const servers: Server[] = []
+  const stop = async (): Promise<void> => {
+    await Promise.all(processes.map((process) => process.stop()))
+    await Promise.all(servers.map(close))
+    await rm(dist, { recursive: true, force: true })
+  }
+  try {
+    const spaRoot = join(cfg.repoRoot, 'examples/oidc-spa')
+    const build = spawn(
+      join(spaRoot, 'node_modules/.bin/vite'),
+      ['build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'warn'],
+      {
+        cwd: spaRoot,
+        env: spaBuildEnvironmentFor(
+          cfg,
+          spa.clientId,
+          origins.spaOrigin + '/callback',
+          origins.spaOrigin + '/',
+          origins.spaOrigin,
+          spa.scope ?? 'openid profile email',
+        ),
+        stdio: ['ignore', 'inherit', 'inherit'],
+      },
+    )
+    const code = await new Promise<number | null>((resolveExit) =>
+      build.once('exit', resolveExit),
+    )
+    if (code !== 0) throw new Error(`generated SPA build failed with exit code ${code}`)
+
+    processes.push(
+      startProcess(
+        'e2-oidc-web',
+        join(cfg.repoRoot, 'examples/oidc-web'),
+        join(cfg.repoRoot, 'examples/oidc-web/node_modules/.bin/tsx'),
+        ['src/server.ts'],
+        {
+          ...process.env,
+          PORT: String(origins.webUpstreamPort),
+          ISSUER: cfg.opOrigin,
+          CLIENT_ID: web.clientId,
+          CLIENT_SECRET: web.clientSecret,
+          REDIRECT_URI: origins.webOrigin + '/callback',
+          POST_LOGOUT_REDIRECT_URI: origins.webOrigin + '/',
+          SESSION_SECRET: web.sessionSecret,
+          READER_CLIENT_ID: web.readerClientId,
+          READER_CLIENT_SECRET: web.readerClientSecret,
+          SCOPE: web.scope ?? 'openid profile email',
+          ALLOW_INSECURE_LOOPBACK: 'true',
+          NODE_EXTRA_CA_CERTS: cfg.ca,
+        },
+      ),
+    )
+    processes.push(
+      startProcess(
+        'e2-oidc-spa-api',
+        spaRoot,
+        join(spaRoot, 'node_modules/.bin/tsx'),
+        ['server/server.ts'],
+        {
+          ...process.env,
+          PORT: String(origins.apiUpstreamPort),
+          ISSUER: cfg.opOrigin,
+          API_AUDIENCE: spa.apiAudience,
+          SPA_CLIENT_ID: spa.clientId,
+          READER_CLIENT_ID: spa.readerClientId,
+          READER_CLIENT_SECRET: spa.readerClientSecret,
+          ALLOWED_ORIGIN: origins.spaOrigin,
+          ALLOW_INSECURE_LOOPBACK: 'true',
+          NODE_EXTRA_CA_CERTS: cfg.ca,
+        },
+      ),
+    )
+    await Promise.all([
+      waitForHttp(`http://127.0.0.1:${origins.webUpstreamPort}/`, 30_000),
+      waitForHttp(`http://127.0.0.1:${origins.apiUpstreamPort}/healthz`, 30_000),
+    ])
+
+    const certificate = readFileSync(cfg.cert)
+    const key = readFileSync(cfg.key)
+    servers.push(
+      createServer(
+        { cert: certificate, key },
+        proxy(new URL(`http://127.0.0.1:${origins.webUpstreamPort}`), 'e2-web'),
+      ),
+    )
+    servers.push(
+      createServer(
+        { cert: certificate, key },
+        spaServer(dist, new URL(`http://127.0.0.1:${origins.apiUpstreamPort}`)),
+      ),
+    )
+    await Promise.all([
+      listen(servers[0]!, origins.webPort, '127.0.0.1'),
+      listen(servers[1]!, origins.spaPort, '::1'),
+    ])
+    return { webOrigin: origins.webOrigin, spaOrigin: origins.spaOrigin, stop }
+  } catch (error) {
+    await stop()
+    throw error
+  }
 }
 
 /**

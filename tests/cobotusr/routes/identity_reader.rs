@@ -148,6 +148,76 @@ async fn identity_protocol_reader_idempotency_returns_only_safe_receipts_after_l
 }
 
 #[tokio::test]
+async fn identity_protocol_reader_allows_confidential_web_for_its_own_audience_only() {
+    let f = IdentityFixture::start().await;
+    let web = app_kind(&f, "reader-web", false, ClientKind::ServerWeb).await;
+    let other = app_kind(&f, "reader-web-other", false, ClientKind::ServerWeb).await;
+    let (_, root) = center_secret(&f, web.owner).await;
+    let browser = cobotusr::domain::identity::account::IssuedSecret::from_entropy(rand::random())
+        .into_response();
+    let evidence = write_evidence(&f, Some(&root), &browser);
+    let service = ReaderService::new(Arc::new(repository(&f)), f.clock.clone());
+    let location = ReaderLocation {
+        application_id: web.app,
+        environment_id: web.development,
+    };
+
+    let issued = service
+        .create(
+            &evidence,
+            location,
+            "urn:test:Development",
+            "web-reader",
+            Uuid::new_v4(),
+            &budget(&f),
+        )
+        .await
+        .unwrap();
+    assert!(issued.secret.is_some());
+
+    assert_eq!(
+        service
+            .create(
+                &evidence,
+                location,
+                "urn:unapproved",
+                "web-reader-wrong-audience",
+                Uuid::new_v4(),
+                &budget(&f)
+            )
+            .await
+            .err(),
+        Some(IdentityError::AccessDenied)
+    );
+    assert_eq!(
+        service
+            .create(
+                &evidence,
+                ReaderLocation {
+                    application_id: web.app,
+                    environment_id: other.development,
+                },
+                "urn:test:Development",
+                "web-reader-other-environment",
+                Uuid::new_v4(),
+                &budget(&f)
+            )
+            .await
+            .err(),
+        Some(IdentityError::Forbidden)
+    );
+    assert_eq!(
+        scalar(
+            &f,
+            "SELECT COUNT(*)::bigint AS value FROM identity_introspection_reader"
+        )
+        .await,
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test]
 async fn identity_protocol_reader_administrator_requires_exact_operation_without_membership() {
     let f = IdentityFixture::start().await;
     let a = app_kind(&f, "admin-reader", false, ClientKind::BrowserSpa).await;

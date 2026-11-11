@@ -1,6 +1,6 @@
 use super::repository::pg::{get, one_row, signed};
 use super::repository::*;
-use crate::domain::identity::{application::ClientKind, error::IdentityError};
+use crate::domain::identity::error::IdentityError;
 use crate::service::security::repository::{PgSecurityTransaction, now, refresh_digest};
 use auth::security::{credential::CredentialRef, identity::SecretToken};
 
@@ -59,7 +59,7 @@ impl PgSecurityTransaction {
                     .ok_or(IdentityError::NotFound)?;
                 let target = self.authorization_target(&client.client_id, None).await?;
                 if !target.enabled
-                    || target.config.client_kind != ClientKind::BrowserSpa
+                    || !target.config.client_kind.permits_introspection_reader()
                     || target.config.access_audience.as_str() != approved_audience
                 {
                     return Err(IdentityError::AccessDenied);

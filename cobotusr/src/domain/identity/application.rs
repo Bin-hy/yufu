@@ -30,6 +30,11 @@ pub enum ClientKind {
     ServerWeb,
     BrowserSpa,
 }
+impl ClientKind {
+    pub fn permits_introspection_reader(self) -> bool {
+        matches!(self, Self::ServerWeb | Self::BrowserSpa)
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConsentPolicy {
