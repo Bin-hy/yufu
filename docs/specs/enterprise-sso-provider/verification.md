@@ -402,4 +402,50 @@ cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_s
 | `cargo test -p cobotrix-root --features webui --test mod identity_protocol_reader_allows_confidential_web_for_its_own_audience_only -- --nocapture` | 1 通过、0 失败，7.07 秒 |
 | `cargo test -p cobotrix-root --features webui --test mod identity_protocol_reader_is_bound_rotatable_and_not_a_token_or_revocation_client -- --nocapture` | 1 通过、0 失败，11.47 秒 |
 
-C69 已勾选。C70 仍要求生产配置提交、另一管理员审核、用户组分配、自批/无分配拒绝和 LocalOnly 退出限制的完整三引擎证据，因此保持未勾选。
+C69 已勾选。
+
+## E3 生产治理（C70，2026-11-11）
+
+C70 要求开发者提交 Web A 与第三方 SPA B 的生产配置，另一企业管理员完成审核；管理员先把用户组分配到两个应用，开发者不能自批，LocalOnly 申请必须在审核方明确接受能力限制后才能生效，未分配用户不能登录，已分配用户的第三方同意与退出能力按批准配置执行。本轮新增 `cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-production-governance.spec.ts` 与共享场景 `enterprise-sso-production-governance.ts`，并把该场景接入外部 WebKit 1.61 脚本。
+
+场景使用真实邀请、登录、控制台和 API：根管理员邀请开发者、审核管理员、已分配用户与未分配用户，为两位员工授予企业管理权限；开发者在一次注册中提交 Web A 与第三方 SPA B 的生产配置；管理员将包含已分配用户的组授予两个应用；开发者提交 `online` 生产版本后由另一管理员批准，随后开发者为两个应用提交 `local_only` 提案。旧生效配置保持 `online`，界面同时显示当前值与提案值；开发者调用审批接口返回 403，审核者未勾选“接受并记录退出能力限制”时返回 400 且申请保持 pending，勾选后申请变为 approved、pending 清空、生效配置切换为 `local_only`。
+
+```text
+cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
+```
+
+结果：退出码 0。Playwright 16 项通过（Chromium、Firefox 各 8 项，2.4 分钟），外部 WebKit 1.61 的准入、C68、C69、C70、跨客户端 SSO、本地/中心退出与后通道投递全部通过；Rust 验收 1 项通过，总计 220.09 秒。三引擎 C70 脱敏证据如下：
+
+| 引擎 | Web client / reader | SPA client / reader | 分配组 | 自批 / 未接受限制 | 未分配用户 | 已分配用户 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Chromium | `app_2e33c885-0b8d-45dc-835f-17c5fa699bab` / `reader_02cc4aa4-7289-4ae3-9816-19e39802f0e1` | `app_e27c8664-f5dd-4734-a163-e47f785387bf` / `reader_4d0129a3-f5ca-43e0-9252-a47f29a5c37d` | `4800db65-b90d-492b-beb1-676b9b34c51a` | 403/403、400/400 | 登录拒绝，无应用会话 Cookie | Web 200、SPA accepted、两处同意页均出现 |
+| Firefox | `app_73978ebd-5d6e-43b9-bd07-3ac654f423a8` / `reader_e85e44fe-df2f-4c50-b8b1-70e31d49db68` | `app_2bb7a0a8-0952-4e82-902e-768469fdffff` / `reader_d6fa7195-c32f-4ddd-8e4b-b8540e286994` | `64c4480c-fc91-4452-9271-71989139d68b` | 403/403、400/400 | 登录拒绝，无应用会话 Cookie | Web 200、SPA accepted、两处同意页均出现 |
+| WebKit 1.61 | `app_e8837cef-c320-44a5-bd96-33273b26158f` / `reader_3d504a67-8526-4b0e-9d7a-1d62a657e183` | `app_7083d4b9-e62b-48c9-81a0-ef4a5d2205ae` / `reader_5c747128-0ed8-4824-947c-dbcbfe602a1c` | `0dec62bc-e704-4d4a-ad7a-8e8f0fde7ec5` | 403/403、400/400 | 登录拒绝，无应用会话 Cookie | Web 200、SPA accepted、两处同意页均出现 |
+
+断言覆盖：
+
+- 生产申请必须返回 approval id；开发环境与生产环境的 client、origin、audience 和 reader 分别创建，Web secret 只在注册回执交付一次，SPA 不交付 secret。
+- 用户组分配经管理员界面完成，未分配用户不在组内；两个生产环境均对该组开放。
+- 第一版 `online` 由另一管理员批准；第二版 `local_only` 提交后，旧 active 仍为 `online`，最新提案为 `local_only`，pending approval 保留。
+- 开发者自批返回 403；审核者未接受 LocalOnly 能力限制返回 400，申请和 active 状态不变；接受后申请 approved，限制确认记录为 true，active 切换为 `local_only`，pending 清空。
+- 未分配用户在 relying party 发起登录后看到 `Sign-in failed` 与 `access_denied`，没有获得应用会话 Cookie；已分配用户先在 Web A 登录并同意，再在同一浏览器 context 进入第三方 SPA B，复用中心会话并再次同意，两个保护操作分别返回 200 和 `Operation accepted.`。
+
+这轮场景暴露并修复了一个真实产品缺陷：未分配用户登录后，中心原先把准入拒绝渲染成中心页 403，没有把拒绝按 OAuth 协议带回 relying party。现在 `inspect()` 会在用户已登录时执行初始准入检查，仅把 `AccessDenied` 映射为 `interaction: "denied"`；授权页自动提交拒绝，`complete` 在重放 flow 证明、浏览器绑定、版本、target、可信回调、请求与范围等安全校验后完成拒绝、记录 `authorization.deny` 审计，并携带原 `state` 返回 `error=access_denied`。其他服务错误仍正常传播，不会伪装成用户拒绝。
+
+对应 HTTP 回归：
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `cargo test -p cobotrix-root --features webui identity_authorization_http -- --nocapture` | 3 通过、0 失败，4.68 秒；新增用例覆盖登录后 `interaction=denied`、complete false、回调 `error=access_denied&state=...`、flow completed、无 code/RP session/consent |
+
+当前源码下的补充门禁：
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `cargo fmt --all -- --check` | 通过 |
+| `cargo clippy -p cobotrix-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
+| `pnpm --filter @cobotweb/cobotusr check` | 通过 |
+| `pnpm --filter @cobotweb/cobotusr lint` | 通过 |
+| `pnpm build:cobotusr` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
+
+C70 已勾选。C71 开始的 E4 仍待按 checklist 逐项取证。

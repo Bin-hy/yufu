@@ -42,6 +42,7 @@ pub enum FlowInteraction {
     Login,
     Consent,
     Ready,
+    Denied,
 }
 #[derive(Serialize)]
 pub struct AuthorizationFlowSummary {
@@ -162,13 +163,32 @@ impl AuthorizationService {
                 if flow.bound_sso_session_id.is_some_and(|id| id != root.id) {
                     return Err(IdentityError::Forbidden);
                 }
-                transaction
+                let admission_denied = match transaction
                     .evaluate_initial_admission(&AdmissionQuery {
                         sso_session_id: root.id,
                         environment_id: target.environment_id,
                         requested_scopes: request.scopes.clone(),
                     })
-                    .await?;
+                    .await
+                {
+                    Ok(_) => false,
+                    Err(IdentityError::AccessDenied) => true,
+                    Err(error) => return Err(error),
+                };
+                if admission_denied {
+                    let username = transaction
+                        .load_profile(root.user_id)
+                        .await?
+                        .and_then(|profile| profile.preferred_username);
+                    return Ok(AuthorizationFlowSummary {
+                        flow_id: proof.id,
+                        application_name: target.application_name,
+                        scopes: request.scopes.as_protocol_string(),
+                        interaction: FlowInteraction::Denied,
+                        expires_at: flow.handle.expires_at / 1000,
+                        username,
+                    });
+                }
             }
             let consent =
                 consent_current(transaction.as_mut(), &target, &request, root.as_ref()).await?;
@@ -342,6 +362,31 @@ impl IdentityUnitOfWork for AuthorizationUnit<'_> {
                 Some(current)
             }
         };
+        if let Input::Complete {
+            approved: false, ..
+        } = &self.input
+        {
+            let flow = flow.as_ref().ok_or(IdentityError::NotFound)?;
+            let root = root.as_ref().ok_or(IdentityError::Unauthenticated)?;
+            transaction
+                .apply(IdentityWrite::CompleteFlow {
+                    flow_id: flow.handle.id(),
+                })
+                .await?;
+            self.audit(
+                transaction,
+                root.user_id,
+                "authorization.deny",
+                flow.handle.id(),
+                None,
+            )
+            .await?;
+            return Ok(protocol_error(
+                redirect,
+                Some(request.state),
+                "access_denied",
+            ));
+        }
         let admission = if let Some(root) = &root {
             match transaction
                 .evaluate_initial_admission(&AdmissionQuery {
@@ -449,29 +494,9 @@ impl IdentityUnitOfWork for AuthorizationUnit<'_> {
                     _ => Err(IdentityError::InvalidInput),
                 }
             }
-            Input::Complete { approved, .. } => {
+            Input::Complete { .. } => {
                 let flow = flow.ok_or(IdentityError::NotFound)?;
                 let root = root.as_ref().ok_or(IdentityError::Unauthenticated)?;
-                if !approved {
-                    transaction
-                        .apply(IdentityWrite::CompleteFlow {
-                            flow_id: flow.handle.id(),
-                        })
-                        .await?;
-                    self.audit(
-                        transaction,
-                        root.user_id,
-                        "authorization.deny",
-                        flow.handle.id(),
-                        None,
-                    )
-                    .await?;
-                    return Ok(protocol_error(
-                        redirect,
-                        Some(request.state),
-                        "access_denied",
-                    ));
-                }
                 if matches!(
                     decision,
                     InteractionDecision::Login | InteractionDecision::LoginRequired

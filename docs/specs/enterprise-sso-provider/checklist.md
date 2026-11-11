@@ -202,7 +202,7 @@ fixture 提供可销毁 PostgreSQL、真实 OP 和中心 UI、Web A、SPA B 及�
 
 - [x] **C69** E2：开发者通过控制台一次注册 Web A 与 SPA B，维护者协作、负责人交接和指定测试用户登录可完成；两示例按生成配置启动，不直接读取中心数据库或共享会话存储。（对应 AC5、AC6、AC7、AC8、AC18、AC23；验证：按接入说明执行 V_SSO 的开发接入路径，记录两个不同 client/site、Web secret 一次性交付、SPA 无 secret 与 reader 服务端配置。）
 
-- [ ] **C70** E3：提交 A/B 生产配置，由另一管理员审核并给用户组分配；旧 active 与 pending 显示正确，第三方同意和 LocalOnly 退出限制按批准策略执行，自批/无分配不能上线或登录。（对应 AC9、AC10、AC11、AC16、AC22、AC24；验证：执行 V_SSO，所有批准/分配经真实 API/界面；比较申请/active 状态、首访交互、拒绝与审计，三引擎各自完成。）
+- [x] **C70** E3：提交 A/B 生产配置，由另一管理员审核并给用户组分配；旧 active 与 pending 显示正确，第三方同意和 LocalOnly 退出限制按批准策略执行，自批/无分配不能上线或登录。（对应 AC9、AC10、AC11、AC16、AC22、AC24；验证：执行 V_SSO，所有批准/分配经真实 API/界面；比较申请/active 状态、首访交互、拒绝与审计，三引擎各自完成。）
 
 - [ ] **C71** E4：用户从 A 发起授权、接受邀请并完成标准回调，再在不同站点的新标签进入 B；两应用映射同一身份而使用独立 token/sid，刷新/并发/清标签 token 后恢复及 prompt/max_age/none 均符合要求。（对应 AC2、AC4、AC13、AC14、AC15、AC17、AC23；验证：执行 V_SSO 的完整登录路径；两个标准客户端验证 state/nonce/issuer/audience；三引擎禁用共享 storage/iframe 依赖仍完成跨站 SSO。）
 

@@ -5,7 +5,7 @@ use super::{
 };
 use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use cobotusr::domain::identity::account::SecretDigest;
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use uuid::Uuid;
 
 fn authorization_url(f: &IdentityFixture, client: &str, prompt: Option<&str>) -> reqwest::Url {
@@ -31,12 +31,18 @@ fn authorization_url(f: &IdentityFixture, client: &str, prompt: Option<&str>) ->
     url
 }
 async fn begin(f: &IdentityFixture, cookies: &mut BrowserCookies) -> Uuid {
-    let mut request = f.client.get(authorization_url(f, "http-auth-dev", None));
+    begin_client(f, cookies, "http-auth-dev").await
+}
+async fn begin_client(f: &IdentityFixture, cookies: &mut BrowserCookies, client: &str) -> Uuid {
+    let mut request = f.client.get(authorization_url(f, client, None));
     if !cookies.0.is_empty() {
         request = request.header("cookie", cookies.header());
     }
     let response = request.send().await.unwrap();
-    assert_eq!(response.status(), 303);
+    if response.status() != 303 {
+        let body = response.text().await.unwrap();
+        panic!("authorization begin failed with {}", body);
+    }
     assert_eq!(response.headers()[CACHE_CONTROL], "no-store");
     assert_eq!(response.headers()["referrer-policy"], "no-referrer");
     let uri = reqwest::Url::parse(&format!(
@@ -201,6 +207,116 @@ async fn identity_authorization_http_login_consent_and_recovery_use_only_flow_id
         .await,
         2
     );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn identity_authorization_http_unassigned_user_receives_oauth_access_denied() {
+    let f = IdentityFixture::start().await;
+    app(&f, "http-deny", false).await;
+    let password_hash = bcrypt::hash("fixture-unassigned-password", 4).unwrap();
+    let row =
+        f.db.query_one_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO \"user\" (username,password,role_id,create_time,update_time)
+             VALUES ($1,$2,1,NOW(),NOW()) RETURNING id",
+            ["http-unassigned".into(), password_hash.into()],
+        ))
+        .await
+        .unwrap();
+    let unassigned_id: i32 = row.unwrap().try_get("", "id").unwrap();
+    f.db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "INSERT INTO identity_subject (issuer,sub,user_id,created_at)
+             VALUES ($1,$2,$3,0)",
+        [
+            f.base_url.clone().into(),
+            unassigned_id.to_string().into(),
+            unassigned_id.into(),
+        ],
+    ))
+    .await
+    .unwrap();
+    let mut cookies = BrowserCookies::default();
+    let id = begin_client(&f, &mut cookies, "http-deny-dev").await;
+    let login_summary = inspect(&f, &mut cookies, id).await;
+    assert_eq!(login_summary["interaction"], "login");
+    let response = f
+        .client
+        .post(format!("{}/api/v1/identity/login", f.base_url))
+        .header("cookie", cookies.header())
+        .header("origin", &f.base_url)
+        .header(
+            "x-csrf-token",
+            login_summary["csrf_token"].as_str().unwrap(),
+        )
+        .json(&serde_json::json!({
+            "username": "http-unassigned",
+            "password": "fixture-unassigned-password",
+            "flow_id": id
+        }))
+        .send()
+        .await
+        .unwrap();
+    if response.status() != 200 {
+        let body = response.text().await.unwrap();
+        panic!("unassigned login failed with {}", body);
+    }
+    cookies.absorb(response.headers());
+    let denied_summary = inspect(&f, &mut cookies, id).await;
+    assert_eq!(denied_summary["interaction"], "denied");
+    let response = f
+        .client
+        .post(format!(
+            "{}/api/v1/identity/flows/{id}/complete",
+            f.base_url
+        ))
+        .header("cookie", cookies.header())
+        .header("origin", &f.base_url)
+        .header(
+            "x-csrf-token",
+            denied_summary["csrf_token"].as_str().unwrap(),
+        )
+        .json(&serde_json::json!({"approved": false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let receipt = response.json::<serde_json::Value>().await.unwrap();
+    let uri = reqwest::Url::parse(receipt["redirect_url"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        uri.query_pairs().find(|(key, _)| key == "error").unwrap().1,
+        "access_denied"
+    );
+    assert_eq!(
+        uri.query_pairs().find(|(key, _)| key == "state").unwrap().1,
+        "state & +"
+    );
+    assert_eq!(
+        scalar(
+            &f,
+            &format!(
+                "SELECT COUNT(*)::bigint AS value FROM identity_authorization_flow
+                 WHERE id='{id}' AND completed_at IS NOT NULL"
+            )
+        )
+        .await,
+        1
+    );
+    for table in [
+        "oauth_authorization_code",
+        "identity_oidc_rp_session",
+        "oauth_consent",
+    ] {
+        assert_eq!(
+            scalar(
+                &f,
+                &format!("SELECT COUNT(*)::bigint AS value FROM {table}")
+            )
+            .await,
+            0
+        );
+    }
     f.close().await;
 }
 

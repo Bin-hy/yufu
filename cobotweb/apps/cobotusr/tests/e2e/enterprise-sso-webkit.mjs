@@ -16,6 +16,7 @@ import setup, {
   signToken,
   startGeneratedExamples,
 } from './enterprise-sso-fixture.ts'
+import { runProductionGovernanceScenario } from './enterprise-sso-production-governance.ts'
 
 const cfg = config()
 
@@ -905,6 +906,7 @@ try {
   await assertAdmission(browser)
   await assertEnterpriseOnboarding(browser)
   await assertDeveloperOnboarding(browser)
+  await runProductionGovernanceScenario(browser, 'webkit-1.61')
   await assertLoginAndSso(browser)
   await assertLocalAndCentralLogout(browser)
   await assertBackchannelLogout(browser)

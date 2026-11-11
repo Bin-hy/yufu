@@ -26,7 +26,10 @@ async function submit(approved: boolean) {
         window.location.assign(url.href)
     })
 }
-watch(data, value => { if (value?.interaction === 'ready') void submit(true) })
+watch(data, value => {
+    if (value?.interaction === 'ready') void submit(true)
+    if (value?.interaction === 'denied') void submit(false)
+})
 </script>
 <template>
     <LoginForm v-if="data?.interaction === 'login'" oidc :flow-id="flowId" />
