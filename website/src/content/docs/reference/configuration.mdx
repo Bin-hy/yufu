@@ -1,0 +1,110 @@
+---
+title: 配置项
+description: cobotusr 配置文件字段、默认值与命令行参数。
+---
+
+配置文件使用 TOML，通过 `--config <path>` 指定。未填写的字段使用默认值。
+
+## 命令行参数
+
+| 参数 | 说明 |
+| --- | --- |
+| `--config <path>` | 配置文件路径 |
+| `--allow-insecure-loopback-cookies` | 本机 HTTP 开发模式，要求监听地址与 issuer 都是 loopback |
+| `--check-security-clock` | 只做认证时钟诊断，不打开数据库或 HTTP 服务 |
+
+## `[http]`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `listen` | `0.0.0.0:4000`（可由 `PORT` 覆盖） | HTTP 监听地址 |
+| `public` | 空 | 对外基址；`oidc.issuer` 为空时用于推导 issuer |
+| `api_prefix` | `/api/v1` | 管理 API 前缀 |
+
+## `[auth]`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `secret` | 内置默认值 | JWT / CSRF 签名密钥，生产必须替换 |
+| `tokens` | `[]` | 静态调试令牌，仅用于本地排查 |
+| `exp_seconds` | `7200` | access token 有效期（秒） |
+| `refresh_exp_seconds` | `604800` | refresh token 有效期（秒） |
+| `origins` | 本地开发地址 | 允许的 CORS origin 列表 |
+| `allow_insecure_loopback_cookies` | `false` | 等价于命令行开关 |
+| `rsa_private_key_path` | `conf/oidc_rsa_private.local.pem` | 兼容字段，`[oidc]` 中同名字段优先 |
+
+### `[auth.super_admin]`
+
+| 字段 | 说明 |
+| --- | --- |
+| `username` | 超级管理员用户名 |
+| `password` | 超级管理员密码 |
+
+### `[[auth.accounts]]`
+
+可重复的静态账户条目，字段同为 `username` 与 `password`。
+
+## `[oidc]`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `issuer` | 由 `http.public` 或 `http.listen` 推导 | 公开 issuer，生产必须为 HTTPS |
+| `rsa_private_key_path` | `conf/oidc_rsa_private.local.pem` | RS256 签名私钥路径 |
+| `access_token_expire_seconds` | 跟随 `auth.exp_seconds` | access token 有效期 |
+| `refresh_token_expire_seconds` | 跟随 `auth.refresh_exp_seconds` | refresh token 有效期 |
+| `email_domain` | `cobotrix.local` | 用户无邮箱时 UserInfo 使用的域名 |
+| `signing_algorithm` | `RS256` | `RS256` 或测试用 `HS256` |
+| `mcp_token_max_ttl_days` | `90` | MCP 长期令牌最大有效天数 |
+
+### `[[oidc.bootstrap_clients]]`
+
+启动时自动登记的客户端。已存在的 `client_id` 不会被覆盖，secret 也不会被配置静默轮换。
+
+```toml
+[[oidc.bootstrap_clients]]
+client_id = "example-spa"
+name = "Example application"
+redirect_uris = ["http://localhost:5174/oauth/callback"]
+allowed_scopes = ["openid", "profile", "email"]
+grant_types = ["authorization_code", "refresh_token"]
+public_client = true
+```
+
+## `[database]`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `url` | `DATABASE_URL` 或本机 PostgreSQL | 连接串 |
+| `max_connections` | `10` | 连接池上限 |
+| `connect_timeout` | `30` | 连接超时（秒） |
+
+## `[security_clock]`
+
+认证入口只接受时钟健康时的请求；检查只测量宿主时间，不修改系统时钟。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `servers` | Apple / Cloudflare / 阿里云 NTP | 受信时间来源 |
+| `min_agreeing_sources` | `2` | 至少多少个来源一致 |
+| `poll_interval_seconds` | `10` | 轮询间隔 |
+| `sample_ttl_seconds` | `30` | 样本有效期 |
+| `timeout_millis` | `1500` | 单次查询超时 |
+
+:::caution
+普通 NTP 没有传输认证。生产应使用受信网络中的 NTP 来源，或由宿主注入具备可信健康证据的时钟。
+不要用公共来源替代部署信任策略。
+:::
+
+## `[log]`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `level` | `info` | `off` / `error` / `warn` / `info` / `debug` / `trace`，可由 `LOG_LEVEL` 覆盖 |
+
+## 环境变量
+
+| 变量 | 作用 |
+| --- | --- |
+| `DATABASE_URL` | `[database].url` 的默认值 |
+| `PORT` | `[http].listen` 的默认端口 |
+| `LOG_LEVEL` | 日志级别 |

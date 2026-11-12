@@ -1,0 +1,60 @@
+---
+title: 机密 Web 应用
+description: 服务端会话 + 服务端持有令牌的 OIDC 接入方式。
+---
+
+机密 Web 客户端在服务端完成 code 兑换并持有令牌，浏览器只保存 HttpOnly 会话 Cookie。
+这是内网管理后台、BFF 与需要调用下游服务的应用的首选方式。
+
+## 配置
+
+复制 `examples/oidc-web/.env.example` 并填写：
+
+```dotenv
+ISSUER=https://id.example.com
+CLIENT_ID=your-web-client
+CLIENT_SECRET=issued-secret
+REDIRECT_URI=https://app.example.com/callback
+POST_LOGOUT_REDIRECT_URI=https://app.example.com/
+SCOPE=openid profile email
+SESSION_SECRET=at-least-32-random-characters
+READER_CLIENT_ID=your-reader
+READER_CLIENT_SECRET=issued-reader-secret
+ALLOW_INSECURE_LOOPBACK=false
+PORT=3000
+```
+
+`ALLOW_INSECURE_LOOPBACK=true` 仅用于 `127.0.0.1` / `localhost` 本地联调，生产必须为 `false`。
+
+## 运行示例
+
+```bash
+pnpm install
+pnpm --filter @cobotrix/oidc-web build
+pnpm --filter @cobotrix/oidc-web start
+```
+
+## 流程
+
+1. `GET /login` 生成 state、nonce、PKCE verifier，写入待处理 Cookie 后 302 到 `/oidc/authorize`。
+2. 回调校验 state、nonce、code、issuer、audience 与 ID Token 签名，服务端兑换 token。
+3. 本地会话只保存业务资料与服务端 token；浏览器 Cookie 为 HttpOnly。
+4. `POST /api/operation` 先校验同源与 CSRF，再做在线内省，最后执行受保护写入。
+5. `POST /logout` 只清本应用会话并尽力撤销本应用授权；`GET /logout/central` 走 RP 发起的中心退出。
+6. `POST /oidc/backchannel-logout` 校验 logout token，按 `sid` / `sub` 清理本地会话与授权缓存，
+   重复 `jti` 幂等确认。
+
+## 关键约束
+
+- 回调地址必须与注册值逐字符一致。
+- `client_secret` 只存在于服务端环境变量，不进入前端产物。
+- 会话 Cookie 使用 `HttpOnly`、`Secure`、`SameSite`，并绑定 CSRF 校验。
+- 保护写操作时，先完成在线内省再执行副作用；内省不可用时失败关闭。
+
+## 检查清单
+
+- [ ] 生产 `ALLOW_INSECURE_LOOPBACK=false`
+- [ ] `SESSION_SECRET` 至少 32 字符且不进版本库
+- [ ] 回调与退出回调已在应用配置中登记
+- [ ] 后通道退出端点已实现并按 `jti` 幂等
+- [ ] 令牌校验覆盖 `iss`、`aud`、`typ`、`exp`

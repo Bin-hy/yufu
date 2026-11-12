@@ -5,7 +5,11 @@
   "description": "Authentication center (Rust + Vue) with standard OIDC examples",
   "scripts": {
     "dev:cobotusr": "pnpm --filter @cobotweb/cobotusr dev",
+    "dev:website": "pnpm --filter @cobotrix/website dev",
     "build:cobotusr": "pnpm --filter @cobotweb/cobotusr build",
+    "build:website": "pnpm --filter @cobotrix/website build",
+    "preview:website": "pnpm --filter @cobotrix/website preview",
+    "check:website": "pnpm --filter @cobotrix/website check",
     "build": "pnpm build:cobotusr",
     "check:examples": "pnpm --filter './examples/*' check",
     "test:examples": "pnpm --filter './examples/*' test",

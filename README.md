@@ -62,3 +62,16 @@ cargo audit
 ```
 
 集成测试使用 testcontainers 创建隔离 PostgreSQL，需要可用的 Docker 兼容容器运行时，不连接本地业务数据库。企业 SSO 的定位、实现计划与逐项验收见 `docs/specs/enterprise-sso-provider/`，尚未完成的缺口集中在 `docs/specs/enterprise-sso-provider/gaps.md`，早期精简验收见 `docs/specs/auth-center-only/`。
+
+## 官网与文档站
+
+`website/` 是使用 Astro + Starlight 构建的中英双语官网与使用文档，静态输出可直接部署到 Cloudflare Pages。
+
+```sh
+pnpm dev:website      # http://localhost:4321
+pnpm build:website    # 输出 website/dist
+pnpm check:website
+```
+
+Cloudflare Pages 的构建命令为 `pnpm --filter @cobotrix/website build`，输出目录为 `website/dist`，
+并设置 `SITE_URL` 为公开域名。完整说明见 `website/README.md`。

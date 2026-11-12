@@ -1,0 +1,61 @@
+---
+title: Endpoints and tokens
+description: OIDC protocol endpoints, management APIs, and token semantics.
+---
+
+## Protocol endpoints
+
+All paths are relative to the issuer. Discovery and JWKS do not use the API prefix.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/.well-known/openid-configuration` | Endpoints and capabilities |
+| GET | `/.well-known/jwks.json` | RS256 public keys |
+| GET | `/oidc/authorize` | Authorization code with PKCE `S256` |
+| POST | `/oidc/token` | `authorization_code` / `refresh_token` |
+| GET, POST | `/oidc/userinfo` | Bearer access token |
+| POST | `/oidc/introspect` | Introspection with Reader credentials |
+| POST | `/oidc/revoke` | Revoke access / refresh tokens |
+| GET, POST | `/oidc/end-session` | RP-initiated logout |
+| POST | `/oidc/logout` | Compatible RP logout entry point |
+| POST | `/oidc/backchannel-logout` | Receiver endpoint implemented by applications |
+
+## Management API
+
+Default prefix `/api/v1`, using same-origin cookies plus CSRF.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/api/v1/login` | Password login |
+| POST | `/api/v1/refresh` | Refresh tokens |
+| POST | `/api/v1/logout` | Log out the current session |
+| GET | `/api/v1/csrf` | Obtain a CSRF challenge |
+| GET | `/api/v1/health/ready` | Authentication clock readiness |
+| POST | `/api/v1/enforce` | PDP policy decision |
+| POST | `/api/v1/application/sync-permissions` | Synchronize application permissions |
+
+## Token semantics
+
+| Token | `typ` | `aud` | Key claims |
+| --- | --- | --- | --- |
+| ID Token | `JWT` or absent | client id | `nonce`, `auth_time`, `sid` |
+| Access Token | `at+jwt` | application access audience | `scope`, `session_id`, `sub` |
+| Logout Token | `logout+jwt` | client id | `jti`, `sid` or `sub`, `events` |
+
+### Validation requirements
+
+- Access Token: signature, `iss`, `aud`, `typ=at+jwt`, `exp`, `nbf`.
+- ID Token: signature, `iss`, `aud=client_id`, `nonce`, `exp`.
+- Logout Token: signature, `iss`, `aud=client_id`, back-channel event, `jti`, `sid` or `sub`,
+  no `nonce`, and `exp-iat ≤ 120` seconds.
+
+### Introspection response
+
+Returns `active`, `scope`, `client_id`, `username`, `token_type`, `exp`, and `sub`. The protocol
+`sid` is not guaranteed; clear caches by both `sid` and `sub`.
+
+## Error conventions
+
+- Browser entry points return HTML or redirects with a `request_id`.
+- API failures return JSON with `code`, `message`, and `request_id`.
+- Clock or dependency failures return 503; callers must fail closed rather than allow access.

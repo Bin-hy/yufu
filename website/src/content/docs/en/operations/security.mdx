@@ -1,0 +1,78 @@
+---
+title: Security and backup
+description: Security model, key rotation, backup and restore, and failure handling.
+---
+
+## Security model
+
+- Browser sessions use `HttpOnly`, `Secure`, `SameSite` cookies bound to CSRF validation.
+- Console and account APIs use same-origin cookies; legacy Bearer tokens are not management credentials.
+- Authentication fails closed (503) when the clock check fails, so stale or skewed tokens are never accepted.
+- Every administrative write passes access generations and audit; identity governance cannot be bypassed.
+- Access Tokens use `typ=at+jwt`, clearly separated from ID Tokens.
+
+## Key rotation
+
+### RSA signing key
+
+1. Generate a new RSA private key at a new path.
+2. Update `oidc.rsa_private_key_path`.
+3. Roll the instances; JWKS publishes the new public key.
+4. Old tokens remain verifiable until they expire, then remove the old key.
+
+### Reader credentials
+
+Reader credentials are used for introspection. Add the new credential and migrate callers before
+revoking the old one, so no window exists where every protected API fails closed.
+
+### Client secrets
+
+Rotate explicitly in the admin console. Bootstrap entries never overwrite an existing secret.
+
+## Backup
+
+### What to back up
+
+- PostgreSQL logical backups (custom format for selective restore)
+- RSA private key and configuration (encrypted separately from database backups)
+
+```bash
+pg_dump -Fc -d cobotusr > cobotusr-$(date +%F).dump
+```
+
+### Restore drills
+
+Restore into an isolated environment and verify:
+
+- Discovery and JWKS are reachable
+- An administrator can sign in
+- Registered clients and grants are intact
+- Sessions and revocation state match expectations
+
+## Monitoring
+
+- `/api/v1/health/ready`: authentication clock readiness
+- Login failure rate, introspection failure rate, back-channel delivery failures
+- Database pool usage and slow queries
+- Clock sample agreement and skew
+
+## Failure handling
+
+### Back-channel delivery failures
+
+A `2xx` only means the peer accepted the notification; local revocation already happened. Retry and
+record failures, but never roll back the local revocation.
+
+### Introspection unavailable
+
+Protected APIs must fail closed. After recovery, rebuild caches under the 2-second / 5-second rule
+instead of extending old TTLs.
+
+### Clock failure
+
+When authentication returns 503, fix NTP reachability and source agreement. Do not disable the check.
+
+### Database failure
+
+Keep failing closed while authentication cannot complete. After recovery, confirm the migration
+version and session state before routing traffic again.

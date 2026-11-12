@@ -1,0 +1,61 @@
+---
+title: 端点与令牌
+description: OIDC 协议端点、管理 API 与令牌语义。
+---
+
+## 协议端点
+
+所有路径相对于 issuer。Discovery 与 JWKS 不带 API 前缀。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/.well-known/openid-configuration` | 端点与能力声明 |
+| GET | `/.well-known/jwks.json` | RS256 公钥 |
+| GET | `/oidc/authorize` | 授权码 + PKCE `S256` |
+| POST | `/oidc/token` | `authorization_code` / `refresh_token` |
+| GET, POST | `/oidc/userinfo` | Bearer access token |
+| POST | `/oidc/introspect` | Reader 凭据内省 |
+| POST | `/oidc/revoke` | 撤销 access / refresh token |
+| GET, POST | `/oidc/end-session` | RP 发起退出 |
+| POST | `/oidc/logout` | 兼容的 RP 退出入口 |
+| POST | `/oidc/backchannel-logout` | 由应用实现的接收端点 |
+
+## 管理 API
+
+默认前缀 `/api/v1`，使用同源 Cookie + CSRF。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/v1/login` | 密码登录 |
+| POST | `/api/v1/refresh` | 刷新令牌 |
+| POST | `/api/v1/logout` | 退出当前会话 |
+| GET | `/api/v1/csrf` | 获取 CSRF 挑战 |
+| GET | `/api/v1/health/ready` | 认证时钟就绪状态 |
+| POST | `/api/v1/enforce` | PDP 策略判断 |
+| POST | `/api/v1/application/sync-permissions` | 同步应用权限 |
+
+## 令牌语义
+
+| 令牌 | `typ` | `aud` | 关键声明 |
+| --- | --- | --- | --- |
+| ID Token | `JWT` 或无 | client id | `nonce`、`auth_time`、`sid` |
+| Access Token | `at+jwt` | 应用 access audience | `scope`、`session_id`、`sub` |
+| Logout Token | `logout+jwt` | client id | `jti`、`sid` 或 `sub`、`events` |
+
+### 校验要求
+
+- Access Token：签名、`iss`、`aud`、`typ=at+jwt`、`exp`、`nbf`。
+- ID Token：签名、`iss`、`aud=client_id`、`nonce`、`exp`。
+- Logout Token：签名、`iss`、`aud=client_id`、后通道事件、`jti`、`sid` 或 `sub`、
+  无 `nonce`、`exp-iat ≤ 120` 秒。
+
+### 内省响应
+
+包含 `active`、`scope`、`client_id`、`username`、`token_type`、`exp`、`sub`。
+不保证返回协议 `sid`；按会话清理缓存时应同时使用 `sid` 与 `sub`。
+
+## 错误约定
+
+- 浏览器入口失败返回 HTML 或重定向，并带 `request_id`。
+- API 失败返回 JSON，包含 `code`、`message`、`request_id`。
+- 认证时钟异常、依赖不可用时返回 503，调用方应失败关闭而不是放行。

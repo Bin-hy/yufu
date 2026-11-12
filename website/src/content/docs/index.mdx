@@ -1,0 +1,168 @@
+---
+title: cobotusr
+description: 单企业统一身份与 SSO 平台：标准 OIDC、细粒度授权、自托管部署。
+template: splash
+head:
+  - tag: title
+    content: cobotusr — 单企业统一身份与 SSO 平台
+hero:
+  tagline: 为内网应用提供统一登录、授权与审计。一个 Rust 二进制加 PostgreSQL，按标准 OIDC 接入。
+  actions:
+    - text: 快速开始
+      link: /getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: OIDC 接入指南
+      link: /guides/oidc-integration/
+      icon: open-book
+      variant: secondary
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import dashboard from '../../assets/console-dashboard.png';
+import consent from '../../assets/console-consent.png';
+
+<div class="landing">
+
+<p class="hero-badges">
+  <span>Rust</span>
+  <span>OIDC / OAuth 2.0</span>
+  <span>PKCE</span>
+  <span>Vue 3</span>
+  <span>PostgreSQL</span>
+  <span>Go SDK</span>
+</p>
+
+<div class="shot-wrap">
+  <Image src={dashboard} alt="cobotusr 企业管理控制台" />
+</div>
+<p class="shot-caption">企业管理控制台：账户、应用、组、分配、审批与审计</p>
+
+<section>
+
+## 一个 issuer，覆盖全部身份入口
+
+<p class="lead">
+  cobotusr 是单企业独立部署的统一身份与 SSO 平台。账户中心、开发者控制台和企业管理控制台属于同一个产品，
+  应用接入采用企业邀约与审批制，不提供公开应用市场。
+</p>
+
+<CardGrid>
+  <Card title="标准 OIDC / OAuth 2.0" icon="approve-check">
+    Discovery、Authorization Code + PKCE、UserInfo、Introspection、Revocation、RP 发起退出与后通道退出。
+  </Card>
+  <Card title="单企业 SSO" icon="lock">
+    一个 issuer 服务全部内部应用。登录一次，在授权范围内跨应用免登录，退出按会话联动。
+  </Card>
+  <Card title="细粒度授权" icon="setting">
+    角色、URI 权限、应用权限与 PDP 策略判断。应用访问必须显式分配，不会默认放行。
+  </Card>
+  <Card title="会话与撤销" icon="refresh">
+    刷新令牌轮换、撤销代次、设备与会话管理，所有管理写入进入审计。
+  </Card>
+  <Card title="自托管" icon="server">
+    单个 Rust 二进制加 PostgreSQL。Docker Compose 起步，systemd 或容器长期运行。
+  </Card>
+  <Card title="参考实现" icon="puzzle">
+    Go Runtime SDK、机密 Web 示例与公共 SPA 示例，覆盖登录、保护 API 与退出联动。
+  </Card>
+</CardGrid>
+
+</section>
+
+<section>
+
+## 三步接入
+
+<div class="steps">
+  <div class="step">
+    <h3>部署身份中心</h3>
+    <p>启动 PostgreSQL，配置 issuer 与 RSA 签名密钥，运行 cobotusr 并完成首次管理员登录。</p>
+  </div>
+  <div class="step">
+    <h3>注册并审批应用</h3>
+    <p>开发者在控制台登记回调地址与 scope，生产配置经管理员审批后才能用于真实登录。</p>
+  </div>
+  <div class="step">
+    <h3>按 OIDC 接入</h3>
+    <p>使用 Discovery 自动发现端点，按客户端类型选择服务端兑换或 PKCE，接入后即可获得 SSO 与退出联动。</p>
+  </div>
+</div>
+
+</section>
+
+<section>
+
+<div class="split">
+<div>
+
+## 五分钟跑起来
+
+本机开发只需要 Docker、Rust 与 pnpm。数据库由 compose 提供，服务启动时自动执行版本化迁移。
+
+首次启动后访问 `http://127.0.0.1:4000`，用配置中的超级管理员账号登录。
+
+完整的配置项、生产部署与接入流程见[快速开始](/getting-started/)。
+
+</div>
+<div>
+
+```bash
+git clone https://github.com/Bin-hy/cobot-for.git
+cd cobot-for
+
+pnpm install
+docker compose up -d
+
+cp conf/cobotusr.example.toml conf/cobotusr.local.toml
+cargo run --bin cobotusr --features webui -- \
+  --config conf/cobotusr.local.toml \
+  --allow-insecure-loopback-cookies
+```
+
+</div>
+</div>
+
+</section>
+
+<section>
+
+## 标准协议，边界清晰
+
+<p class="lead">
+  只实现经过验证的协议子集：授权码、PKCE S256、刷新令牌轮换与标准退出。不提供多租户、
+  外部 IdP 联邦、SAML/LDAP/SCIM 或 MFA。
+</p>
+
+| 端点 | 路径 | 说明 |
+| --- | --- | --- |
+| Authorization | `/oidc/authorize` | 仅 `response_type=code`、PKCE `S256` |
+| Token | `/oidc/token` | `authorization_code` 与 `refresh_token` |
+| UserInfo | `/oidc/userinfo` | Bearer access token |
+| Introspection | `/oidc/introspect` | Reader 凭据 |
+| Revocation | `/oidc/revoke` | access / refresh token |
+| End session | `/oidc/end-session` | RP 发起退出，RS256 时发布 |
+| Discovery | `/.well-known/openid-configuration` | 端点与能力声明 |
+
+</section>
+
+<section>
+
+<div class="shot-wrap">
+  <Image src={consent} alt="cobotusr 授权同意页" />
+</div>
+<p class="shot-caption">授权同意页：按请求的 scope 逐项披露</p>
+
+</section>
+
+<div class="cta-band">
+  <h2>准备好接入第一个应用了吗？</h2>
+  <p>从本机启动到生产部署，文档覆盖配置、协议、SDK 与运维。</p>
+  <div class="cta-actions">
+    <a class="cta-primary" href="/getting-started/">快速开始</a>
+    <a class="cta-secondary" href="/guides/oidc-integration/">阅读接入指南</a>
+  </div>
+</div>
+
+</div>

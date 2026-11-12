@@ -1,0 +1,115 @@
+---
+title: 快速开始
+description: 在本机启动 cobotusr，完成首次登录并验证 OIDC Discovery。
+---
+
+本页用最短路径在本机跑起 cobotusr：启动数据库、写入配置、运行服务、登录管理控制台，
+最后用 Discovery 文档确认协议端点可用。
+
+## 前置要求
+
+- Rust 工具链（使用 workspace 的 edition 与依赖）
+- Node.js 22+ 与 pnpm 10+
+- Docker 兼容的容器运行时（用于 PostgreSQL）
+- 生产部署需要 HTTPS 与受信 NTP 来源
+
+## 1. 获取代码与依赖
+
+```bash
+git clone https://github.com/Bin-hy/cobot-for.git
+cd cobot-for
+pnpm install
+```
+
+## 2. 启动数据库
+
+`compose.yaml` 只提供鉴权 PostgreSQL，默认映射到本机 `5433`：
+
+```bash
+docker compose up -d
+```
+
+默认库名为 `cobotusr`，用户名与密码均为 `postgres`。生产环境必须替换这些凭据。
+
+## 3. 准备配置
+
+```bash
+cp conf/cobotusr.example.toml conf/cobotusr.local.toml
+```
+
+至少确认以下字段：
+
+```toml
+[http]
+listen = "127.0.0.1:4000"
+
+[auth]
+secret = "替换为足够长的随机字符串"
+
+[auth.super_admin]
+username = "admin"
+password = "替换为强密码"
+
+[oidc]
+issuer = "http://127.0.0.1:4000"
+rsa_private_key_path = "conf/oidc_rsa_private.local.pem"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5433/cobotusr"
+
+[security_clock]
+servers = ["time.apple.com:123", "time.cloudflare.com:123"]
+min_agreeing_sources = 2
+```
+
+:::caution
+`--allow-insecure-loopback-cookies` 只适用于本机 HTTP。它要求监听地址与 issuer 都是 loopback；
+生产环境必须使用 HTTPS 和默认的 Secure Cookie。
+:::
+
+## 4. 启动服务
+
+```bash
+cargo run --bin cobotusr --features webui -- \
+  --config conf/cobotusr.local.toml \
+  --allow-insecure-loopback-cookies
+```
+
+`--features webui` 会嵌入 `assets/cobotusr` 的前端产物，因此首次运行前需要执行 `pnpm build:cobotusr`。
+启动时会自动执行版本化数据库迁移。
+
+## 5. 首次登录
+
+浏览器打开：
+
+```text
+http://127.0.0.1:4000
+```
+
+使用 `[auth.super_admin]` 中的账号登录。登录后可进入：
+
+- `/account/*`：本人资料、授权应用、同意、会话
+- `/developer/*`：本人应用的注册、配置、版本与审批
+- `/admin/*`：账户、应用、组、分配、审批与审计
+
+## 6. 验证 Discovery
+
+```bash
+curl -s http://127.0.0.1:4000/.well-known/openid-configuration | jq .
+curl -s http://127.0.0.1:4000/.well-known/jwks.json | jq .
+```
+
+健康检查：
+
+```bash
+curl -s http://127.0.0.1:4000/api/v1/health/ready | jq .
+```
+
+响应中的 `security_clock_synchronized` 为 `true` 才表示认证时钟就绪。时钟异常时认证入口返回 503。
+
+## 7. 下一步
+
+- [注册第一个应用并接入 OIDC](/guides/oidc-integration/)
+- [机密 Web 应用接入](/guides/web-app/)
+- [公共 SPA 接入](/guides/spa/)
+- [生产部署](/operations/deployment/)

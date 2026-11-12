@@ -1,0 +1,128 @@
+---
+title: Go SDK
+description: Install the cobotusr runtime SDK, run the code flow, verify tokens, and handle back-channel logout.
+---
+
+`github.com/Bin-hy/cobot-sdk-go` is the Go reference implementation of the cobotusr runtime SDK:
+a thin, dependency-free HTTP / OIDC client.
+
+:::note
+This is a v0.1 reference SDK. The module path is provisional until the SDK moves out of the server repository.
+:::
+
+## Scope
+
+Included: discovery with issuer validation, authorization code + PKCE (S256), state and nonce
+generation, code exchange and refresh-token rotation with single-flight, UserInfo, JWKS caching and
+RS256 verification, access-token verification (`typ=at+jwt`, `iss`, `aud`, `exp`, `nbf`), ID Token
+verification, introspection, revocation, RP-initiated logout URLs, back-channel logout token
+verification, and typed OAuth/HTTP errors with `request_id` and `Retry-After`.
+
+Not included: M2M / `client_credentials`, permission synchronization, `/enforce`, legacy RBAC, and
+console APIs.
+
+## Install
+
+```bash
+go get github.com/Bin-hy/cobot-sdk-go
+```
+
+While the SDK lives in the server repository, use a `replace` directive:
+
+```go
+require github.com/Bin-hy/cobot-sdk-go v0.0.0
+
+replace github.com/Bin-hy/cobot-sdk-go => /path/to/cobot-for/sdk/go
+```
+
+## Quickstart
+
+```go
+client, err := cobotusr.New(cobotusr.Config{
+    Issuer:       "https://id.example.com",
+    ClientID:     "web",
+    ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
+    RedirectURI:  "https://app.example.com/callback",
+    Scopes:       []string{"openid", "profile", "email"},
+})
+if err != nil {
+    return err
+}
+defer client.Close()
+
+auth, err := client.AuthorizeURL(cobotusr.AuthorizeOptions{})
+if err != nil {
+    return err
+}
+// Store auth.State, auth.Nonce, and auth.CodeVerifier in the user's session,
+// then redirect the browser to auth.URL.
+
+tokens, err := client.ExchangeCode(ctx, code, auth.CodeVerifier)
+if err != nil {
+    return err
+}
+idClaims, err := client.VerifyIDToken(ctx, tokens.IDToken, auth.Nonce)
+if err != nil {
+    return err
+}
+accessClaims, err := client.VerifyAccessToken(ctx, tokens.AccessToken, "urn:app:production")
+if err != nil {
+    return err
+}
+profile, err := client.UserInfo(ctx, tokens.AccessToken)
+```
+
+The access-token audience is the application's registered access audience, not the OIDC client id.
+A resource server must pass the expected audience to `VerifyAccessToken`.
+
+## Resource server
+
+```go
+reader, err := cobotusr.New(cobotusr.Config{
+    Issuer:       "https://id.example.com",
+    ClientID:     os.Getenv("READER_CLIENT_ID"),
+    ClientSecret: os.Getenv("READER_CLIENT_SECRET"),
+})
+if err != nil {
+    return err
+}
+
+claims, err := reader.VerifyAccessToken(ctx, bearerToken, "urn:app:production")
+if err != nil {
+    return err
+}
+introspection, err := reader.Introspect(ctx, bearerToken, cobotusr.TokenTypeAccessToken)
+if err != nil {
+    return err
+}
+if !introspection.Active || introspection.Subject != claims.Subject {
+    return errors.New("token is not active or subject changed")
+}
+```
+
+The SDK verifies JWTs locally; introspection is an additional online check whose freshness policy
+belongs to the application.
+
+## Back-channel logout
+
+```go
+claims, err := client.VerifyLogoutToken(ctx, logoutToken)
+if err != nil {
+    http.Error(w, err.Error(), http.StatusBadRequest)
+    return
+}
+// Delete local sessions by claims.SID and claims.Subject.
+// Persist claims.JTI to make delivery idempotent.
+```
+
+`VerifyLogoutToken` enforces `typ=logout+jwt`, `aud=client_id`, the back-channel event, `jti`,
+`sid` or `sub`, no `nonce`, and a lifetime of at most 120 seconds.
+
+## Security defaults
+
+- RS256 only; RSA keys smaller than 2048 bits are rejected.
+- `kid` is required, and JWKS is refreshed when an unknown `kid` appears.
+- Access tokens must use `typ=at+jwt`; ID tokens use `typ=JWT` or no `typ`; logout tokens use
+  `typ=logout+jwt`.
+- `iss` must match the configured issuer exactly.
+- The access-token `aud` is mandatory and must match the caller's expected value.

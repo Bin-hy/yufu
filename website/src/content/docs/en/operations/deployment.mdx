@@ -1,0 +1,96 @@
+---
+title: Production deployment
+description: Build, configure, run under systemd, reverse proxy, upgrade, and roll back.
+---
+
+## Build
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build:cobotusr
+cargo build --bin cobotusr --features webui --release
+```
+
+The artifact is a single binary at `target/release/cobotusr` with the frontend embedded. Deployment
+needs only the binary, configuration, RSA private key, and database.
+
+## Production configuration
+
+- `oidc.issuer` must be the public HTTPS base URL and must match the browser-facing origin exactly.
+- `auth.secret` must be a long random value, unique per environment.
+- `oidc.rsa_private_key_path` must point at a persistent key; production never generates one.
+- Never enable `--allow-insecure-loopback-cookies`.
+- `security_clock.servers` must use trusted NTP sources.
+- Use a dedicated database account with a strong password and restricted network access.
+
+## systemd
+
+The repository ships `conf/cobotusr.service` as a template:
+
+```ini
+[Unit]
+Description=cobotusr identity provider
+After=network-online.target
+
+[Service]
+User=cobotusr
+Group=cobotusr
+WorkingDirectory=/opt/cobotusr
+ExecStart=/opt/cobotusr/cobotusr --config /etc/cobotusr/cobotusr.toml
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now cobotusr
+sudo systemctl status cobotusr
+```
+
+## Reverse proxy
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name id.example.com;
+
+    ssl_certificate     /etc/ssl/id.example.com.pem;
+    ssl_certificate_key /etc/ssl/id.example.com.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+The proxy must preserve the original `Host` and scheme, or cookie and Origin validation will fail.
+
+## Health check
+
+```bash
+curl -fsS https://id.example.com/api/v1/health/ready
+```
+
+Only route traffic when it returns 200 with `security_clock_synchronized=true`. A 503 during clock
+failure is expected; do not bypass it with retries.
+
+## Upgrade
+
+1. Back up the database and the RSA private key.
+2. Build the new binary and frontend.
+3. Stop the service and replace the binary.
+4. Start the service; versioned migrations run automatically.
+5. Verify discovery, the health check, and one real login.
+
+## Rollback boundaries
+
+Migrations are versioned. Before rolling back a binary, confirm the new version did not run an
+irreversible migration. Historical data, registered clients, and grants are never deleted
+automatically, and a rollback does not restore revoked sessions.

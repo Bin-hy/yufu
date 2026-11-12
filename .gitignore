@@ -71,6 +71,7 @@ node_modules
 **/node_modules
 **/dist
 **/dist-ssr
+**/.astro
 **/*.local
 
 # Local configuration overrides (root-level only, not conf/ templates)

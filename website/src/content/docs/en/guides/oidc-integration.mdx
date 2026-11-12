@@ -1,0 +1,136 @@
+---
+title: OIDC integration
+description: Application registration, approval, protocol endpoints, token semantics, and logout linkage.
+---
+
+This guide is for developers integrating an internal application. It covers application registration
+and approval, standard OIDC parameters, token semantics, logout linkage, and common mistakes.
+
+## Scope and boundaries
+
+cobotusr is a **single-tenant, self-hosted** identity and SSO provider. One process exposes three consoles:
+
+- Account center: `/account/*` for profile, authorized applications, consent, sessions, and RP sessions
+- Developer console: `/developer/*` for application registration, configuration, versions, and approvals
+- Enterprise admin console: `/admin/*` for accounts, applications, groups, assignments, approvals, and audit
+
+Onboarding is **invitation and approval based**; there is no public marketplace. Multi-tenancy,
+external IdP federation, public developer self-registration, and strong authentication (WebAuthn)
+are explicitly out of scope. Integrators must not depend on them.
+
+## Prerequisites
+
+1. An administrator grants the developer role. Without it, `/developer/*` is denied.
+2. The developer registers an application in `/developer/apps` with separate `development` and
+   `production` environments.
+3. Production configuration is submitted for approval and reviewed by an administrator at
+   `/admin/apps/:id`.
+4. An administrator assigns the application to accounts or groups at `/admin/apps/:id/assignments`.
+5. On first login the user confirms the requested scopes. Requests that are unassigned, unapproved,
+   or unconsented never receive a code.
+
+Development is for integration testing; production serves real users. The two environments have
+separate clients, redirect allowlists, access audiences, secrets, and configuration versions.
+Never move development credentials into production.
+
+## Discovery and endpoints
+
+The issuer is the public base URL of the deployment (HTTPS in production). Discovery lives at:
+
+```text
+GET {issuer}/.well-known/openid-configuration
+GET {issuer}/.well-known/jwks.json
+```
+
+| Endpoint | Path | Notes |
+| --- | --- | --- |
+| Authorization | `/oidc/authorize` | `response_type=code`, `response_mode=query`, PKCE `S256` only |
+| Token | `/oidc/token` | `authorization_code` and `refresh_token` |
+| UserInfo | `/oidc/userinfo` | Bearer access token |
+| Introspection | `/oidc/introspect` | Reader credentials (`client_secret_basic` / `post`) |
+| Revocation | `/oidc/revoke` | Access and refresh tokens |
+| End session | `/oidc/end-session` | Published only with RS256 signing |
+| JWKS | `/.well-known/jwks.json` | RS256 public keys |
+
+Supported scopes are `openid`, `profile`, and `email`; `openid` is required. The signing algorithm
+depends on deployment configuration; the reference examples verify RS256.
+
+## Client types
+
+### Confidential web client
+
+- The server holds `client_secret` and exchanges the code with `client_secret_basic` or `client_secret_post`.
+- Redirect URIs must match the registered value **character by character**, including scheme, host,
+  port, and path. Wildcards and prefix matching are not allowed.
+- The browser only sees the issuer, client id, redirect URI, and scopes. Secrets and Reader
+  credentials must never reach the frontend.
+
+### Public SPA client
+
+- No `client_secret`; authorization code with PKCE `S256`.
+- The SPA or a same-site BFF exchanges the code. The reference example exchanges it in the SPA.
+- The callback must be registered for the SPA client; do not reuse a web client callback.
+
+### CORS and Origin
+
+- Protected APIs accept only registered SPA origins. Requests carrying `Origin` must match
+  scheme/host/port exactly; mismatches are rejected with 403 before any token is read.
+- Preflight allows only the `authorization` and `content-type` headers with `POST, OPTIONS`.
+- Console and account APIs use same-origin cookies plus CSRF, not legacy Bearer tokens.
+
+## Identity mapping and token semantics
+
+- `sub` is the stable subject identifier. The same `(iss, sub)` is consistent across applications.
+  Use `iss + sub` as the local user key, never email or username.
+- The `profile` scope discloses `name` and `preferred_username`; `email` discloses `email` and
+  `email_verified`. Ungranted scopes disclose nothing.
+- The ID Token has the client id as `aud` and includes `nonce`, `auth_time`, and `sid`. `sid` is the
+  protocol session identifier used for logout linkage.
+- Access Tokens use `typ=at+jwt`; `aud` is the application environment's access audience
+  (for example `urn:app:production`), **not the client id**. Resource servers must verify signature,
+  issuer, audience, `typ`, and expiry.
+- Introspection returns `active`, `scope`, `client_id`, `username`, `token_type`, `exp`, and `sub`.
+  It does not guarantee the protocol `sid`. Clear caches by both `sid` and `sub`.
+- `session_id` inside an access token is a credential session id, not the protocol `sid`.
+
+## Online checks for protected APIs
+
+The reference implementations share one policy:
+
+- Positive results are cached for **2 seconds**; after that, introspect again.
+- Any result, including forwarded ones, must be at most **5 seconds** old; otherwise fail closed.
+- Age is measured from the monotonic start of the introspection request; a slow introspection does
+  not earn a fresh 2-second window.
+- Forwarding preserves the original `verifiedAt`; receivers must not reset the TTL.
+- Expired tokens, unavailable introspection, `active=false`, client mismatch, and subject mismatch
+  are rejected without executing protected side effects.
+
+Five seconds is a hard ceiling, not a refresh interval. Writes that need stronger freshness should
+shorten the cache or introspect directly.
+
+## Logout semantics
+
+- **Local logout**: clears only the application session.
+- **Current root logout**: clears the current central browser session and its derived RP sessions.
+- **All roots logout**: clears every central root and RP session for the user.
+- **RP-initiated logout**: uses `id_token_hint` and `post_logout_redirect_uri`; the endpoint is
+  published by discovery.
+- **Back-channel logout**: `typ=logout+jwt`, RS256, `aud=client_id`, only the back-channel event,
+  `jti` plus `sid` or `sub`, no `nonce`, and `exp-iat ≤ 120` seconds. Receivers must verify
+  signature, issuer, audience, event, and freshness, and be idempotent by `jti`.
+
+:::tip
+If users are signed in again immediately after logout, the application probably did not configure
+`end_session_endpoint` as its logout URL. Clearing only the local session leaves the central browser
+session alive. See the [FAQ](/en/faq/).
+:::
+
+## Common mistakes
+
+- Using the client id as the access-token `aud` rejects every protected request; use the registered
+  access audience instead.
+- Putting `client_secret` or Reader credentials in a SPA leaks them into the browser bundle.
+- Wildcard redirect URIs or trailing-slash mismatches are rejected.
+- Clearing caches only by `sid` misses introspection responses without `sid`; also clear by `sub`.
+- Using an ID Token as an access token fails because `typ` is not `at+jwt`.
+- Calling console APIs with legacy Bearer tokens fails; the console uses cookies plus CSRF.

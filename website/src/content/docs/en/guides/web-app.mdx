@@ -1,0 +1,65 @@
+---
+title: Confidential web app
+description: Server-side sessions with server-held tokens.
+---
+
+A confidential web client exchanges the code on the server and holds tokens there. The browser only
+keeps an HttpOnly session cookie. This is the preferred pattern for internal admin backends, BFFs,
+and applications that call downstream services.
+
+## Configuration
+
+Copy `examples/oidc-web/.env.example` and fill it in:
+
+```dotenv
+ISSUER=https://id.example.com
+CLIENT_ID=your-web-client
+CLIENT_SECRET=issued-secret
+REDIRECT_URI=https://app.example.com/callback
+POST_LOGOUT_REDIRECT_URI=https://app.example.com/
+SCOPE=openid profile email
+SESSION_SECRET=at-least-32-random-characters
+READER_CLIENT_ID=your-reader
+READER_CLIENT_SECRET=issued-reader-secret
+ALLOW_INSECURE_LOOPBACK=false
+PORT=3000
+```
+
+`ALLOW_INSECURE_LOOPBACK=true` is only for `127.0.0.1` / `localhost`; production must use `false`.
+
+## Run the example
+
+```bash
+pnpm install
+pnpm --filter @cobotrix/oidc-web build
+pnpm --filter @cobotrix/oidc-web start
+```
+
+## Flow
+
+1. `GET /login` generates state, nonce, and a PKCE verifier, stores them in a pending cookie, and
+   redirects to `/oidc/authorize`.
+2. The callback verifies state, nonce, code, issuer, audience, and the ID Token signature, then
+   exchanges the code server-side.
+3. The local session stores business profile data and server-held tokens; the browser cookie is HttpOnly.
+4. `POST /api/operation` checks same-origin and CSRF, performs an online introspection, then executes
+   the protected write.
+5. `POST /logout` clears only the local session and best-effort revokes the local grant;
+   `GET /logout/central` performs RP-initiated central logout.
+6. `POST /oidc/backchannel-logout` verifies the logout token and clears local sessions and caches by
+   `sid` / `sub`, treating repeated `jti` values idempotently.
+
+## Key constraints
+
+- Redirect URIs must match the registered value exactly.
+- `client_secret` lives only in server environment variables.
+- Session cookies are `HttpOnly`, `Secure`, and `SameSite`, bound to CSRF validation.
+- Protected writes introspect online before side effects and fail closed when introspection is unavailable.
+
+## Checklist
+
+- [ ] `ALLOW_INSECURE_LOOPBACK=false` in production
+- [ ] `SESSION_SECRET` is at least 32 characters and never committed
+- [ ] Redirect and post-logout redirect URIs are registered
+- [ ] Back-channel logout is implemented and idempotent by `jti`
+- [ ] Token validation covers `iss`, `aud`, `typ`, and `exp`

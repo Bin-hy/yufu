@@ -1,0 +1,117 @@
+---
+title: Quick start
+description: Run cobotusr locally, sign in for the first time, and verify OIDC discovery.
+---
+
+This page takes the shortest path to a running cobotusr: start the database, write a configuration,
+run the service, sign in to the admin console, and confirm the protocol endpoints through discovery.
+
+## Requirements
+
+- A Rust toolchain (matching the workspace edition and dependencies)
+- Node.js 22+ and pnpm 10+
+- A Docker-compatible container runtime for PostgreSQL
+- HTTPS and trusted NTP sources for production
+
+## 1. Get the code and dependencies
+
+```bash
+git clone https://github.com/Bin-hy/cobot-for.git
+cd cobot-for
+pnpm install
+```
+
+## 2. Start the database
+
+`compose.yaml` only provides the identity PostgreSQL instance, mapped to local port `5433`:
+
+```bash
+docker compose up -d
+```
+
+The default database is `cobotusr`, with `postgres` as both user and password.
+Replace these credentials in production.
+
+## 3. Prepare the configuration
+
+```bash
+cp conf/cobotusr.example.toml conf/cobotusr.local.toml
+```
+
+At minimum, review these fields:
+
+```toml
+[http]
+listen = "127.0.0.1:4000"
+
+[auth]
+secret = "replace with a long random value"
+
+[auth.super_admin]
+username = "admin"
+password = "replace with a strong password"
+
+[oidc]
+issuer = "http://127.0.0.1:4000"
+rsa_private_key_path = "conf/oidc_rsa_private.local.pem"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5433/cobotusr"
+
+[security_clock]
+servers = ["time.apple.com:123", "time.cloudflare.com:123"]
+min_agreeing_sources = 2
+```
+
+:::caution
+`--allow-insecure-loopback-cookies` is for local HTTP only. It requires both the listener and the
+issuer to be loopback. Production must use HTTPS and the default secure cookies.
+:::
+
+## 4. Start the service
+
+```bash
+cargo run --bin cobotusr --features webui -- \
+  --config conf/cobotusr.local.toml \
+  --allow-insecure-loopback-cookies
+```
+
+`--features webui` embeds the frontend build from `assets/cobotusr`, so run `pnpm build:cobotusr`
+first. Versioned database migrations run automatically at startup.
+
+## 5. Sign in for the first time
+
+Open:
+
+```text
+http://127.0.0.1:4000
+```
+
+Sign in with the account from `[auth.super_admin]`. After signing in you can reach:
+
+- `/account/*`: your profile, authorized applications, consent, and sessions
+- `/developer/*`: registration, configuration, versions, and approvals for your applications
+- `/admin/*`: accounts, applications, groups, assignments, approvals, and audit
+
+## 6. Verify discovery
+
+```bash
+curl -s http://127.0.0.1:4000/.well-known/openid-configuration | jq .
+curl -s http://127.0.0.1:4000/.well-known/jwks.json | jq .
+```
+
+Health check:
+
+```bash
+curl -s http://127.0.0.1:4000/api/v1/health/ready | jq .
+```
+
+Authentication is ready only when `security_clock_synchronized` is `true`. When the clock check fails,
+authentication endpoints return 503.
+
+## 7. Next steps
+
+- [Register your first application and integrate OIDC](/en/guides/oidc-integration/)
+- [Confidential web application](/en/guides/web-app/)
+- [Public SPA](/en/guides/spa/)
+- [Production deployment](/en/operations/deployment/)

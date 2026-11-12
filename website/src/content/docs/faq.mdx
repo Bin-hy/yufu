@@ -1,0 +1,56 @@
+---
+title: 常见问题
+description: 接入与运维中的高频问题。
+---
+
+## 退出后再次登录没有跳转身份中心，直接进入应用
+
+应用只清了本地会话，没有结束中心浏览器会话。RP 发起退出必须使用 Discovery 发布的
+`end_session_endpoint`，并带上 `id_token_hint` 与已登记的 `post_logout_redirect_uri`。
+
+例如 Outline 需要配置：
+
+```dotenv
+OIDC_LOGOUT_URI=https://id.example.com/oidc/end-session
+```
+
+否则应用退出只会 302 回首页，中心会话仍然有效。
+
+## 授权请求被拒绝，提示回调地址不匹配
+
+回调地址必须与注册值逐字符一致，包括 scheme、host、port、path 与结尾斜杠。
+`http://localhost:3000` 与 `http://localhost:3000/` 是两个不同的值。
+
+## 保护 API 全部返回 401
+
+优先检查 access token 的 `aud`。它是应用环境注册的 access audience（例如 `urn:app:production`），
+不是 OIDC client id。同时确认 `typ=at+jwt`，ID Token 不能当 access token 使用。
+
+## 浏览器请求返回 403，日志提示 origin 不允许
+
+带 `Origin` 的跨站请求必须精确匹配注册的 SPA origin。检查 scheme、host、port 是否一致，
+以及预检请求的方法与请求头是否在允许范围内。
+
+## 登录返回 503，健康检查未就绪
+
+认证时钟未通过校验。检查 `security_clock.servers` 的可达性与一致性，
+确认至少 `min_agreeing_sources` 个来源在有效期内一致。不要通过关闭检查绕过。
+
+## 生产环境 Cookie 不生效
+
+生产必须使用 HTTPS 与默认 Secure Cookie。`--allow-insecure-loopback-cookies` 只允许
+loopback 地址，不能用于线上域名。
+
+## 如何重置超级管理员密码
+
+修改配置中的 `[auth.super_admin]` 后重启服务。已有账户数据不会被自动覆盖，
+需要按部署的账户治理流程同步。
+
+## 是否支持多租户、SAML、LDAP、SCIM 或 MFA
+
+当前不支持。cobotusr 按单企业独立部署交付，明确不做多租户、外部 IdP 联邦、
+SAML/LDAP/SCIM 与强认证。接入方不应依赖这些能力。
+
+## 如何查看审计记录
+
+管理员在 `/admin/*` 的审计页面查看。所有管理写入都会记录操作者、目标与结果。

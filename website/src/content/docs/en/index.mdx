@@ -1,0 +1,169 @@
+---
+title: cobotusr
+description: A single-tenant identity and SSO platform with standard OIDC, fine-grained authorization, and self-hosting.
+template: splash
+head:
+  - tag: title
+    content: cobotusr — Single-tenant identity and SSO platform
+hero:
+  tagline: Unified login, authorization, and audit for internal applications. One Rust binary plus PostgreSQL, integrated over standard OIDC.
+  actions:
+    - text: Quick start
+      link: /en/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: OIDC integration guide
+      link: /en/guides/oidc-integration/
+      icon: open-book
+      variant: secondary
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import dashboard from '../../../assets/console-dashboard.png';
+import consent from '../../../assets/console-consent.png';
+
+<div class="landing">
+
+<p class="hero-badges">
+  <span>Rust</span>
+  <span>OIDC / OAuth 2.0</span>
+  <span>PKCE</span>
+  <span>Vue 3</span>
+  <span>PostgreSQL</span>
+  <span>Go SDK</span>
+</p>
+
+<div class="shot-wrap">
+  <Image src={dashboard} alt="cobotusr enterprise admin console" />
+</div>
+<p class="shot-caption">Enterprise admin console: accounts, applications, groups, assignments, approvals, and audit</p>
+
+<section>
+
+## One issuer for every identity entry point
+
+<p class="lead">
+  cobotusr is a single-tenant identity and SSO platform that you deploy yourself. The account center,
+  developer console, and enterprise admin console are one product. Application onboarding is
+  invitation and approval based; there is no public application marketplace.
+</p>
+
+<CardGrid>
+  <Card title="Standard OIDC / OAuth 2.0" icon="approve-check">
+    Discovery, Authorization Code + PKCE, UserInfo, Introspection, Revocation, RP-initiated logout, and back-channel logout.
+  </Card>
+  <Card title="Single-tenant SSO" icon="lock">
+    One issuer serves every internal application. Sign in once, move across applications within your grants, and log out with session linkage.
+  </Card>
+  <Card title="Fine-grained authorization" icon="setting">
+    Roles, URI permissions, application permissions, and PDP decisions. Application access is never granted by default.
+  </Card>
+  <Card title="Sessions and revocation" icon="refresh">
+    Refresh-token rotation, revocation generations, device and session management, with every administrative write audited.
+  </Card>
+  <Card title="Self-hosted" icon="server">
+    One Rust binary plus PostgreSQL. Start with Docker Compose, then run it under systemd or a container platform.
+  </Card>
+  <Card title="Reference implementations" icon="puzzle">
+    A Go runtime SDK plus confidential web and public SPA examples covering login, protected APIs, and logout linkage.
+  </Card>
+</CardGrid>
+
+</section>
+
+<section>
+
+## Three steps to integrate
+
+<div class="steps">
+  <div class="step">
+    <h3>Deploy the identity center</h3>
+    <p>Start PostgreSQL, configure the issuer and RSA signing key, run cobotusr, and sign in as the first administrator.</p>
+  </div>
+  <div class="step">
+    <h3>Register and approve an application</h3>
+    <p>Developers register redirect URIs and scopes. Production configuration must be approved before it can serve real logins.</p>
+  </div>
+  <div class="step">
+    <h3>Integrate over OIDC</h3>
+    <p>Discover endpoints automatically, choose server-side exchange or PKCE, and inherit SSO plus logout linkage.</p>
+  </div>
+</div>
+
+</section>
+
+<section>
+
+<div class="split">
+<div>
+
+## Running in five minutes
+
+Local development needs Docker, Rust, and pnpm. Compose provides the database, and versioned migrations run at startup.
+
+Open `http://127.0.0.1:4000` after the first start and sign in with the super administrator from your configuration.
+
+See [Quick start](/en/getting-started/) for every configuration key, production deployment, and the full integration flow.
+
+</div>
+<div>
+
+```bash
+git clone https://github.com/Bin-hy/cobot-for.git
+cd cobot-for
+
+pnpm install
+docker compose up -d
+
+cp conf/cobotusr.example.toml conf/cobotusr.local.toml
+cargo run --bin cobotusr --features webui -- \
+  --config conf/cobotusr.local.toml \
+  --allow-insecure-loopback-cookies
+```
+
+</div>
+</div>
+
+</section>
+
+<section>
+
+## Standard protocols, explicit boundaries
+
+<p class="lead">
+  Only a verified protocol subset is implemented: authorization code, PKCE S256, refresh-token rotation,
+  and standard logout. Multi-tenancy, external IdP federation, SAML/LDAP/SCIM, and MFA are out of scope.
+</p>
+
+| Endpoint | Path | Notes |
+| --- | --- | --- |
+| Authorization | `/oidc/authorize` | `response_type=code` with PKCE `S256` only |
+| Token | `/oidc/token` | `authorization_code` and `refresh_token` |
+| UserInfo | `/oidc/userinfo` | Bearer access token |
+| Introspection | `/oidc/introspect` | Reader credentials |
+| Revocation | `/oidc/revoke` | Access and refresh tokens |
+| End session | `/oidc/end-session` | RP-initiated logout, published with RS256 |
+| Discovery | `/.well-known/openid-configuration` | Endpoints and capabilities |
+
+</section>
+
+<section>
+
+<div class="shot-wrap">
+  <Image src={consent} alt="cobotusr consent screen" />
+</div>
+<p class="shot-caption">Consent screen: each requested scope is disclosed explicitly</p>
+
+</section>
+
+<div class="cta-band">
+  <h2>Ready to onboard your first application?</h2>
+  <p>From local startup to production, the docs cover configuration, protocols, SDKs, and operations.</p>
+  <div class="cta-actions">
+    <a class="cta-primary" href="/en/getting-started/">Quick start</a>
+    <a class="cta-secondary" href="/en/guides/oidc-integration/">Read the integration guide</a>
+  </div>
+</div>
+
+</div>

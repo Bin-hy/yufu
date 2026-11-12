@@ -1,0 +1,56 @@
+---
+title: 公共 SPA
+description: 浏览器端 PKCE 授权码流程与独立保护 API 的接入方式。
+---
+
+公共 SPA 不持有 `client_secret`，使用授权码 + PKCE `S256`。浏览器包只包含 `VITE_*` 公共参数，
+Reader 凭据只存在于 API 进程。
+
+## 公共参数（构建时注入）
+
+```dotenv
+VITE_ISSUER=https://id.example.com
+VITE_CLIENT_ID=your-spa-client
+VITE_REDIRECT_URI=https://spa.example.com/callback
+VITE_POST_LOGOUT_REDIRECT_URI=https://spa.example.com/
+VITE_SCOPE=openid profile email
+VITE_API_BASE_URL=https://api.example.com
+```
+
+## API 进程参数
+
+```dotenv
+API_AUDIENCE=urn:app:production
+SPA_CLIENT_ID=your-spa-client
+READER_CLIENT_ID=your-reader
+READER_CLIENT_SECRET=issued-reader-secret
+ALLOWED_ORIGIN=https://spa.example.com
+ALLOW_INSECURE_LOOPBACK=false
+PORT=3001
+```
+
+## 运行示例
+
+```bash
+pnpm install
+pnpm --filter @cobotrix/oidc-spa build
+pnpm --filter @cobotrix/oidc-spa start:api
+pnpm --filter @cobotrix/oidc-spa dev
+```
+
+## 流程
+
+1. SPA 使用 `oidc-client-ts` 发起 code + PKCE；`sessionStorage` 隔离标签页，不启用 iframe 静默续期。
+2. 回调完成 state / nonce 校验后保存用户；刷新只走 refresh token，本标签页内 single-flight，
+   避免并发刷新。
+3. `POST {API}/api/operation` 携带 `Authorization: Bearer <access_token>`。
+4. API 先本地校验 RS256、issuer、`aud=API_AUDIENCE`、`typ=at+jwt`、有效期；再用 Reader 凭据内省，
+   确认 `active`、`client_id=SPA_CLIENT_ID`、`sub` 与 JWT 一致。
+5. 退出：本地清用户；中心退出走 RP 发起端点；后通道通知到达时按 `sid` / `sub` 清缓存。
+
+## 注意事项
+
+- 不要在 SPA 中放 `client_secret` 或 Reader 凭据。
+- 回调页必须是该 SPA 客户端注册的回调，不要复用 Web 客户端回调。
+- Access Token 的 `aud` 是应用环境的 access audience，不是 client id。
+- 保护 API 必须校验 `typ=at+jwt`，ID Token 不能当作 access token 使用。

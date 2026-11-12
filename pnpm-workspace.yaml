@@ -1,8 +1,16 @@
 packages:
   - "cobotweb/apps/cobotusr"
   - "examples/*"
+  - "website"
 allowBuilds:
   esbuild: true
   playwright-webkit: false
+  workerd: true
 minimumReleaseAgeExclude:
   - jose@6.2.16
+  - "@astrojs/markdown-satteri@0.4.9"
+  - "@astrojs/runtime@0.1.1"
+  - "@astrojs/vite-plugin-astro@0.1.2"
+  - astro@7.4.11
+  - miniflare@5.20261110.1-beta
+  - wrangler@4.160.1

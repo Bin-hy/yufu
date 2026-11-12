@@ -1,0 +1,125 @@
+---
+title: Go SDK
+description: cobotusr Runtime SDK 的安装、授权码流程、令牌校验与后通道退出。
+---
+
+`github.com/Bin-hy/cobot-sdk-go` 是 cobotusr Runtime SDK 的 Go 参考实现：一个轻量、
+无额外依赖的 HTTP / OIDC 客户端。
+
+:::note
+当前为 v0.1 参考 SDK。模块路径在 SDK 迁出服务端仓库前是临时的。
+:::
+
+## 范围
+
+包含：Discovery 与 issuer 校验、授权码 + PKCE（S256）、state / nonce 生成、code 兑换与
+refresh token 轮换（single-flight）、UserInfo、JWKS 缓存与 RS256 校验、access token 校验
+（`typ=at+jwt`、`iss`、`aud`、`exp`、`nbf`）、ID Token 校验、内省、撤销、RP 发起退出、
+后通道 logout token 校验，以及带 `request_id` 与 `Retry-After` 的类型化错误。
+
+不包含：M2M / `client_credentials`、权限同步、`/enforce`、旧 RBAC、管理控制台 API。
+
+## 安装
+
+```bash
+go get github.com/Bin-hy/cobot-sdk-go
+```
+
+SDK 仍在服务端仓库内时，使用 `replace`：
+
+```go
+require github.com/Bin-hy/cobot-sdk-go v0.0.0
+
+replace github.com/Bin-hy/cobot-sdk-go => /path/to/cobot-for/sdk/go
+```
+
+## 快速开始
+
+```go
+client, err := cobotusr.New(cobotusr.Config{
+    Issuer:       "https://id.example.com",
+    ClientID:     "web",
+    ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
+    RedirectURI:  "https://app.example.com/callback",
+    Scopes:       []string{"openid", "profile", "email"},
+})
+if err != nil {
+    return err
+}
+defer client.Close()
+
+auth, err := client.AuthorizeURL(cobotusr.AuthorizeOptions{})
+if err != nil {
+    return err
+}
+// 把 auth.State、auth.Nonce、auth.CodeVerifier 存入用户会话，
+// 然后让浏览器跳转到 auth.URL。
+
+tokens, err := client.ExchangeCode(ctx, code, auth.CodeVerifier)
+if err != nil {
+    return err
+}
+idClaims, err := client.VerifyIDToken(ctx, tokens.IDToken, auth.Nonce)
+if err != nil {
+    return err
+}
+accessClaims, err := client.VerifyAccessToken(ctx, tokens.AccessToken, "urn:app:production")
+if err != nil {
+    return err
+}
+profile, err := client.UserInfo(ctx, tokens.AccessToken)
+```
+
+Access Token 的 audience 是应用注册的 access audience，不是 OIDC client id。
+资源服务器必须把期望的 audience 传给 `VerifyAccessToken`。
+
+## 资源服务器
+
+```go
+reader, err := cobotusr.New(cobotusr.Config{
+    Issuer:       "https://id.example.com",
+    ClientID:     os.Getenv("READER_CLIENT_ID"),
+    ClientSecret: os.Getenv("READER_CLIENT_SECRET"),
+})
+if err != nil {
+    return err
+}
+
+claims, err := reader.VerifyAccessToken(ctx, bearerToken, "urn:app:production")
+if err != nil {
+    return err
+}
+introspection, err := reader.Introspect(ctx, bearerToken, cobotusr.TokenTypeAccessToken)
+if err != nil {
+    return err
+}
+if !introspection.Active || introspection.Subject != claims.Subject {
+    return errors.New("token is not active or subject changed")
+}
+```
+
+SDK 在本地校验 JWT；内省是额外的在线检查，新鲜度策略由应用决定。
+
+## 后通道退出
+
+```go
+claims, err := client.VerifyLogoutToken(ctx, logoutToken)
+if err != nil {
+    http.Error(w, err.Error(), http.StatusBadRequest)
+    return
+}
+// 按 claims.SID 与 claims.Subject 删除本地会话。
+// 持久化 claims.JTI 以保证投递幂等。
+```
+
+`VerifyLogoutToken` 强制校验 `typ=logout+jwt`、`aud=client_id`、后通道事件、`jti`、
+`sid` 或 `sub`、不含 `nonce`，且有效期不超过 120 秒。
+
+## 安全默认值
+
+- 仅 RS256；小于 2048 位的 RSA 密钥被拒绝。
+- `kid` 必填；遇到未知 `kid` 时刷新 JWKS。
+- access token 必须 `typ=at+jwt`；ID token 必须 `typ=JWT` 或无 `typ`；
+  logout token 必须 `typ=logout+jwt`。
+- `iss` 必须与配置的 issuer 完全一致。
+- access token 的 `aud` 必填，且必须与调用方期望值一致。

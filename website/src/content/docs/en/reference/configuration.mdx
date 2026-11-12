@@ -1,0 +1,113 @@
+---
+title: Configuration
+description: Configuration keys, defaults, and command-line flags.
+---
+
+Configuration is TOML, passed with `--config <path>`. Omitted fields use their defaults.
+
+## Command-line flags
+
+| Flag | Description |
+| --- | --- |
+| `--config <path>` | Path to the configuration file |
+| `--allow-insecure-loopback-cookies` | Local HTTP development mode; listener and issuer must be loopback |
+| `--check-security-clock` | Diagnose the authentication clock without opening the database or HTTP server |
+
+## `[http]`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `listen` | `0.0.0.0:4000` (overridable by `PORT`) | HTTP listen address |
+| `public` | empty | Public base URL; used to derive the issuer when `oidc.issuer` is empty |
+| `api_prefix` | `/api/v1` | Management API prefix |
+
+## `[auth]`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `secret` | built-in default | JWT / CSRF signing secret; replace in production |
+| `tokens` | `[]` | Static debug tokens for local troubleshooting only |
+| `exp_seconds` | `7200` | Access-token lifetime in seconds |
+| `refresh_exp_seconds` | `604800` | Refresh-token lifetime in seconds |
+| `origins` | local development origins | Allowed CORS origins |
+| `allow_insecure_loopback_cookies` | `false` | Equivalent to the CLI flag |
+| `rsa_private_key_path` | `conf/oidc_rsa_private.local.pem` | Compatibility field; the `[oidc]` value wins |
+
+### `[auth.super_admin]`
+
+| Key | Description |
+| --- | --- |
+| `username` | Super administrator username |
+| `password` | Super administrator password |
+
+### `[[auth.accounts]]`
+
+Repeatable static account entries with the same `username` and `password` fields.
+
+## `[oidc]`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `issuer` | derived from `http.public` or `http.listen` | Public issuer; HTTPS in production |
+| `rsa_private_key_path` | `conf/oidc_rsa_private.local.pem` | RS256 signing key path |
+| `access_token_expire_seconds` | follows `auth.exp_seconds` | Access-token lifetime |
+| `refresh_token_expire_seconds` | follows `auth.refresh_exp_seconds` | Refresh-token lifetime |
+| `email_domain` | `cobotrix.local` | Domain used by UserInfo when a user has no email |
+| `signing_algorithm` | `RS256` | `RS256`, or `HS256` for tests |
+| `mcp_token_max_ttl_days` | `90` | Maximum lifetime for long-lived MCP tokens |
+
+### `[[oidc.bootstrap_clients]]`
+
+Clients registered at startup. Existing `client_id` entries are never overwritten and secrets are
+never silently rotated by configuration.
+
+```toml
+[[oidc.bootstrap_clients]]
+client_id = "example-spa"
+name = "Example application"
+redirect_uris = ["http://localhost:5174/oauth/callback"]
+allowed_scopes = ["openid", "profile", "email"]
+grant_types = ["authorization_code", "refresh_token"]
+public_client = true
+```
+
+## `[database]`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `url` | `DATABASE_URL` or local PostgreSQL | Connection string |
+| `max_connections` | `10` | Connection pool limit |
+| `connect_timeout` | `30` | Connect timeout in seconds |
+
+## `[security_clock]`
+
+Authentication endpoints only serve requests while the clock is healthy. Checks measure host time
+and never modify the system clock.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `servers` | Apple / Cloudflare / Aliyun NTP | Trusted time sources |
+| `min_agreeing_sources` | `2` | Minimum number of agreeing sources |
+| `poll_interval_seconds` | `10` | Poll interval |
+| `sample_ttl_seconds` | `30` | Sample lifetime |
+| `timeout_millis` | `1500` | Per-query timeout |
+
+:::caution
+Plain NTP has no transport authentication. Production should use NTP sources inside a trusted
+network, or inject a clock with trusted health evidence from the host. Do not substitute public
+sources for a deployment trust policy.
+:::
+
+## `[log]`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `level` | `info` | `off` / `error` / `warn` / `info` / `debug` / `trace`; overridable by `LOG_LEVEL` |
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `DATABASE_URL` | Default for `[database].url` |
+| `PORT` | Default port for `[http].listen` |
+| `LOG_LEVEL` | Log level |

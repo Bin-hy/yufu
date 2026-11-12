@@ -1,0 +1,95 @@
+---
+title: 生产部署
+description: 构建、配置、systemd、反向代理、升级与回滚。
+---
+
+## 构建
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build:cobotusr
+cargo build --bin cobotusr --features webui --release
+```
+
+产物为单个二进制 `target/release/cobotusr`，前端已嵌入。部署时只需要二进制、配置文件、
+RSA 私钥与数据库。
+
+## 生产配置要点
+
+- `oidc.issuer` 必须是公开 HTTPS 基址，且与浏览器访问地址完全一致。
+- `auth.secret` 使用足够长的随机值，并与其他环境隔离。
+- `oidc.rsa_private_key_path` 指向持久化私钥；生产不会自动生成。
+- 不要启用 `--allow-insecure-loopback-cookies`。
+- `security_clock.servers` 使用受信网络内的 NTP 来源。
+- 数据库使用独立账号与强密码，限制来源网段。
+
+## systemd
+
+仓库提供 `conf/cobotusr.service` 模板：
+
+```ini
+[Unit]
+Description=cobotusr identity provider
+After=network-online.target
+
+[Service]
+User=cobotusr
+Group=cobotusr
+WorkingDirectory=/opt/cobotusr
+ExecStart=/opt/cobotusr/cobotusr --config /etc/cobotusr/cobotusr.toml
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now cobotusr
+sudo systemctl status cobotusr
+```
+
+## 反向代理
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name id.example.com;
+
+    ssl_certificate     /etc/ssl/id.example.com.pem;
+    ssl_certificate_key /etc/ssl/id.example.com.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+代理必须保留原始 `Host` 与协议信息，否则 Cookie 与 Origin 校验会失败。
+
+## 健康检查
+
+```bash
+curl -fsS https://id.example.com/api/v1/health/ready
+```
+
+返回 200 且 `security_clock_synchronized=true` 才应接入流量。时钟异常时认证入口返回 503，
+这是预期行为，不要通过重试绕过。
+
+## 升级
+
+1. 备份数据库与 RSA 私钥。
+2. 构建新版本二进制与前端。
+3. 停止服务，替换二进制。
+4. 启动服务，自动执行版本化迁移。
+5. 验证 Discovery、健康检查与一次真实登录。
+
+## 回滚边界
+
+数据库迁移是版本化的。回滚二进制前必须确认新版本没有执行不可逆迁移；
+已有库的历史数据、已注册客户端与授权不会自动删除，回滚不会恢复被撤销的会话。
