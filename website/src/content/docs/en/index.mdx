@@ -75,6 +75,42 @@ import consent from '../../../assets/console-consent.png';
 
 <section>
 
+## Why "yufu"
+
+<p class="lead">
+  yufu is the pinyin of <strong>鱼符</strong> (yúfú): the fish-shaped identity token that Tang-dynasty
+  officials carried on their person. It was cut in two — one half kept at court, one half carried —
+  and only counted once the halves were joined. Gold, silver and copper marked three ranks of authority.
+</p>
+
+That object is the act of authentication itself: holding one half is not an identity, matching the two is.
+Our mark is therefore a fish split by a seam — **apart a token, together an identity**. And "three ranks"
+is the reminder that recognising who you are is not enough; the system also has to know how far you may go.
+
+<CardGrid>
+  <Card title="One identity, not a pile of accounts" icon="lock">
+    A fixed issuer, one sign-in for every authorised application. Internal apps no longer keep a
+    password store of their own.
+  </Card>
+  <Card title="Access is granted explicitly" icon="approve-check">
+    Applications join through enterprise invitation and approval, and which applications a member
+    may reach is assigned explicitly — there is no "registered, therefore visible". Unsupported
+    execution credential profiles fail closed.
+  </Card>
+  <Card title="Credentials can be withdrawn" icon="refresh">
+    Refresh-token rotation, sessions terminated per centre or per application, logout delivered over
+    back-channel where the application supports it, and every grant and revocation written to audit.
+  </Card>
+  <Card title="The keys stay with you" icon="server">
+    One Rust binary plus PostgreSQL, with the console embeddable in the binary. The signing keys, the
+    database and the audit trail all belong to the deployment.
+  </Card>
+</CardGrid>
+
+</section>
+
+<section>
+
 ## Three steps to integrate
 
 <div class="steps">

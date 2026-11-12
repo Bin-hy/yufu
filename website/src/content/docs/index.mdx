@@ -74,6 +74,37 @@ import consent from '../../assets/console-consent.png';
 
 <section>
 
+## 为什么叫 yufu
+
+<p class="lead">
+  yufu 是<strong>鱼符</strong>的拼音。唐代官员随身佩带鱼形的身份凭证，剖分为二：一半留在内廷，
+  一半带在身上，两半合上才算数。金、银、铜三品，对应不同的权级。
+</p>
+
+这个器物就是认证这个动作本身——持有一半不算身份，两半对上才算。标志因此是一条被中缝劈开的鱼：
+**分开是凭证，合起来才是身份**。「三品」则提醒我们：认出你是谁还不够，还要知道你被允许走多远。
+
+<CardGrid>
+  <Card title="一个身份，不是一堆账号" icon="lock">
+    固定 issuer，一次登录进入所有被授权的应用。内部应用不必各自维护一套密码。
+  </Card>
+  <Card title="访问显式授予，默认拒绝" icon="approve-check">
+    应用接入走企业邀约与审批，用户能进哪些应用必须被明确分配，不存在「注册即可见」；
+    不受支持的执行凭据配置直接 fail closed。
+  </Card>
+  <Card title="凭证可撤回，行为留痕" icon="refresh">
+    刷新令牌轮换、会话按中心或按应用分别终止、退出按应用能力投递后通道通知，
+    每一次授权与撤销都进入审计。
+  </Card>
+  <Card title="自托管，密钥在自己手里" icon="server">
+    单个 Rust 二进制加 PostgreSQL，管理前端可嵌入交付。签名私钥、数据库与审计记录都由部署方掌握。
+  </Card>
+</CardGrid>
+
+</section>
+
+<section>
+
 ## 三步接入
 
 <div class="steps">
