@@ -1,32 +1,43 @@
 name: Container image
 
-# Publishes the identity service as a multi-arch image on ghcr.io.
-# The build reuses deploy/docker/Dockerfile, so the published image and a local
-# `docker compose build` produce the same layers.
+# Builds the identity service image and publishes it to ghcr.io.
+#
+# Two entry points:
+#   • release.yml calls this right after the GitHub release is published, so a
+#     single tag push produces both the release assets and the matching image.
+#   • workflow_dispatch republishes an image without cutting a new release.
 #
 # After the first publish the package is private by default. Anonymous
 # `docker pull` only works once it is switched to public in
 # Repository → Packages → yufu → Package settings.
 
 on:
-  push:
-    tags:
-      - 'v*'
-  # Manual runs are useful to refresh `latest` without cutting a release.
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version without the v prefix, for example 1.2.3'
+        required: true
+        type: string
+      prerelease:
+        description: 'true keeps only the exact version tag, with no minor and no latest'
+        required: false
+        type: string
+        default: 'false'
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Additional tag for this build'
+      version:
+        description: 'Version to publish, for example 1.2.3'
+        required: true
+        type: string
+      prerelease:
+        description: 'true keeps only the exact version tag, with no minor and no latest'
         required: false
-        default: 'latest'
+        type: string
+        default: 'false'
 
 permissions:
   contents: read
   packages: write
-
-concurrency:
-  group: image-${{ github.ref }}
-  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -54,27 +65,16 @@ jobs:
       - name: Resolve image tags
         id: tags
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-          INPUT_TAG: ${{ inputs.tag }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          tags="${IMAGE}:sha-${SHA:0:7}"
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            if [ -n "${INPUT_TAG:-}" ]; then
-              tags="${tags},${IMAGE}:${INPUT_TAG}"
-            fi
-          else
-            # v1.2.3-rc.1 keeps only its full version; v1.2.3 also moves 1.2 and latest.
-            tags="${tags},${IMAGE}:${REF_NAME#v}"
-            case "$REF_NAME" in
-              *-*) ;;
-              v*.*.*)
-                minor="${REF_NAME#v}"
-                tags="${tags},${IMAGE}:${minor%.*},${IMAGE}:latest"
-                ;;
-            esac
+          # Every build is addressable by commit, so an image can always be traced
+          # back to the tree it came from even when the moving tags move on.
+          tags="${IMAGE}:sha-${SHA:0:7},${IMAGE}:${VERSION}"
+          if [ "$PRERELEASE" != "true" ]; then
+            tags="${tags},${IMAGE}:${VERSION%.*},${IMAGE}:latest"
           fi
           printf 'tags=%s\n' "$tags" >> "$GITHUB_OUTPUT"
           printf 'resolved tags: %s\n' "$tags"
@@ -84,8 +84,8 @@ jobs:
           TAGS: ${{ steps.tags.outputs.tags }}
         run: |
           set -euo pipefail
-          # A container driver keeps the registry cache across runs without
-          # needing a local image store for a multi-arch result.
+          # A container driver keeps the registry cache across runs and can push a
+          # multi-arch result without a local image store.
           docker buildx create --driver docker-container --name yufu-image --use
           tag_args=()
           IFS=',' read -ra tag_list <<< "$TAGS"

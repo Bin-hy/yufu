@@ -265,9 +265,13 @@ git push origin v1.2.3
 - 失败时从 Actions 重新运行原 tag 工作流。同一提交的本流程草稿可重试，已公开版本不可覆盖；不要移动 tag 修复公开版本，使用新版本发布。
 - 默认使用 `GITHUB_TOKEN`，仅最终发布 job 具有仓库内容写权限；不需要额外 PAT。若仓库策略限制写权限，须由维护者调整对应 Actions 策略。
 
-本流程不部署官网，也不发布容器镜像，不为安装包签名或公证。
-容器部署由仓库内 [`deploy/docker`](deploy/docker/README.md) 从源码构建镜像，见
-[容器部署](https://yufu-sso.pages.dev/operations/docker/)。
+发布通过后，同一个 tag 会接着触发容器镜像构建：`linux/amd64` 与 `linux/arm64` 多架构镜像推送到
+`ghcr.io/bin-hy/yufu`，正式版同时移动 `1.2` 与 `latest` 标签，预发布只保留精确版本号。
+Release 失败或被放弃时不会留下镜像。
+
+本流程不部署官网，也不为安装包签名或公证。
+容器部署可直接使用上面推送的镜像，或由仓库内 [`deploy/docker`](deploy/docker/README.md) 自行构建，
+见[容器部署](https://yufu-sso.pages.dev/operations/docker/)。
 
 手工构建、打包、校验与发版的完整步骤见[打包与发版操作手册](docs/releases/packaging.md)。
 

@@ -197,8 +197,10 @@ cat yufu-v1.2.3-aarch64-apple-darwin/BUILD-INFO.json    # 核对 tag/commit/targ
 
 ## 8. 容器镜像
 
-容器镜像由 [Container image workflow](../../.github/workflows/docker.yml) 在版本 tag 上构建并推送到
-`ghcr.io/bin-hy/yufu`（`linux/amd64` + `linux/arm64`）。也可以直接用
+容器镜像由 [Container image workflow](../../.github/workflows/docker.yml) 构建并推送到
+`ghcr.io/bin-hy/yufu`（`linux/amd64` + `linux/arm64`）。它作为 release 流程的最后一环，
+在 GitHub Release 发布成功后才被调用——Release 失败或被放弃时不会留下镜像。
+正式版打 `1.2.3`、`1.2`、`latest` 与 `sha-<short>`，预发布只保留精确版本号与 `sha-<short>`。也可以直接用
 [`deploy/docker/Dockerfile`](../../deploy/docker/Dockerfile) 从本仓库构建，
 步骤与 compose 组合见[容器部署](https://yufu-sso.pages.dev/operations/docker/)与
 [`deploy/docker/README.md`](../../deploy/docker/README.md)。
