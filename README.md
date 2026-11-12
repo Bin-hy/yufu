@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="website/src/assets/logo.svg" width="96" height="96" alt="yufu 鱼符">
+
 # yufu
 
 **企业统一身份与 SSO 平台**
