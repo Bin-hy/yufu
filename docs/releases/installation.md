@@ -1,6 +1,6 @@
 # yufu 二进制安装
 
-从 [GitHub Releases](https://github.com/Bin-hy/cobot-for/releases) 下载与你的操作系统和 CPU 对应的安装包及同版本 `SHA256SUMS`。
+从 [GitHub Releases](https://github.com/Bin-hy/yufu/releases) 下载与你的操作系统和 CPU 对应的安装包及同版本 `SHA256SUMS`。
 安装包内嵌 WebUI，不需要在部署机器上安装 Rust、Node.js 或 pnpm。运行服务仍需要 PostgreSQL 和可用的可信 NTP 来源。
 
 ## 选择安装包

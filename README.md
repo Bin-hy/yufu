@@ -8,7 +8,7 @@
 
 统一账户、应用接入与访问治理，让内部应用共享清晰、可控的身份边界。
 
-[下载 Release](https://github.com/Bin-hy/cobot-for/releases) · [官网](https://cobotusr.pages.dev/) · [快速开始](https://cobotusr.pages.dev/getting-started/) · [控制台指南](https://cobotusr.pages.dev/guides/console/) · [English Docs](https://cobotusr.pages.dev/en/)
+[下载 Release](https://github.com/Bin-hy/yufu/releases) · [官网](https://cobotusr.pages.dev/) · [快速开始](https://cobotusr.pages.dev/getting-started/) · [控制台指南](https://cobotusr.pages.dev/guides/console/) · [English Docs](https://cobotusr.pages.dev/en/)
 
 Rust · Vue 3 · PostgreSQL · OpenID Connect · OAuth 2.0 · PKCE
 
@@ -75,7 +75,7 @@ yufu 是**鱼符**的拼音。唐代官员随身佩带鱼形的身份凭证，�
 
 ## 下载与安装
 
-[GitHub Releases](https://github.com/Bin-hy/cobot-for/releases) 提供内嵌 WebUI 的二进制安装包，无需在部署机器上安装 Rust 或 Node.js。
+[GitHub Releases](https://github.com/Bin-hy/yufu/releases) 提供内嵌 WebUI 的二进制安装包，无需在部署机器上安装 Rust 或 Node.js。
 首次版本发布后可在该页面下载；运行服务仍需 PostgreSQL、部署配置和可信时钟来源。
 
 | 平台 | 安装包（`<tag>` 例如 `v1.2.3`） |
@@ -99,8 +99,8 @@ yufu 是**鱼符**的拼音。唐代官员随身佩带鱼形的身份凭证，�
 ### 1. 获取代码并构建前端
 
 ```sh
-git clone https://github.com/Bin-hy/cobot-for.git
-cd cobot-for
+git clone https://github.com/Bin-hy/yufu.git
+cd yufu
 pnpm install --frozen-lockfile
 pnpm build:web
 ```

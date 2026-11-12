@@ -40,7 +40,7 @@ While the SDK lives in the server repository, use a `replace` directive:
 
 ```go
 require github.com/Bin-hy/yufu-sdk-go v0.0.0
-replace github.com/Bin-hy/yufu-sdk-go => /path/to/cobot-for/sdk/go
+replace github.com/Bin-hy/yufu-sdk-go => /path/to/yufu/sdk/go
 ```
 
 ## Quickstart

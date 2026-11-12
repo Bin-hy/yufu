@@ -26,11 +26,11 @@ export default defineConfig({
         {
           icon: 'github',
           label: 'GitHub',
-          href: 'https://github.com/Bin-hy/cobot-for',
+          href: 'https://github.com/Bin-hy/yufu',
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/Bin-hy/cobot-for/edit/main/',
+        baseUrl: 'https://github.com/Bin-hy/yufu/edit/main/',
       },
       customCss: ['./src/styles/custom.css'],
       lastUpdated: true,
