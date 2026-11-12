@@ -32,6 +32,7 @@ import consent from '../../../assets/console-consent.png';
   <span>Vue 3</span>
   <span>PostgreSQL</span>
   <span>Go SDK</span>
+  <span>Docker</span>
 </p>
 
 <div class="shot-wrap">
@@ -115,8 +116,8 @@ is the reminder that recognising who you are is not enough; the system also has 
 
 <div class="steps">
   <div class="step">
-    <h3>Deploy the identity center</h3>
-    <p>Start PostgreSQL, configure the issuer and RSA signing key, run yufu, and sign in as the first administrator.</p>
+    <h3>Start the identity center</h3>
+    <p>Pull <code>ghcr.io/bin-hy/yufu</code> to bring up the full stack (or build it from source), configure the issuer and RSA signing key, then sign in as the first administrator.</p>
   </div>
   <div class="step">
     <h3>Register and approve an application</h3>
@@ -135,29 +136,29 @@ is the reminder that recognising who you are is not enough; the system also has 
 <div class="split">
 <div>
 
-## Running in five minutes
+## Running in five minutes with Docker
 
-Local development needs Docker, Rust, and pnpm. Compose provides the database, and versioned migrations run at startup.
+Images are published at `ghcr.io/bin-hy/yufu` (`linux/amd64` and `linux/arm64`), so no local Rust or
+Node toolchain is needed. In the Compose stack Caddy terminates TLS, PostgreSQL stays on an internal
+network, and versioned migrations run at startup.
 
-Open `http://127.0.0.1:4000` after the first start and sign in with the super administrator from your configuration.
-
-See [Quick start](/en/getting-started/) for every configuration key, production deployment, and the full integration flow.
+Set your own domain and secrets in `.env` and `yufu.toml`, then open `https://localhost:8443` and sign
+in with the `[auth.super_admin]` account. See [Quick start](/en/getting-started/) for every
+configuration key and production deployment.
 
 </div>
 <div>
 
 ```bash
-git clone https://github.com/Bin-hy/yufu.git
-cd yufu
+git clone https://github.com/Bin-hy/yufu.git && cd yufu/deploy/docker
 
-pnpm install --frozen-lockfile
-pnpm build:web
-docker compose up -d
+cp env.example .env && cp yufu.toml.example yufu.toml
+mkdir -p state && openssl genpkey -algorithm RSA \
+  -pkeyopt rsa_keygen_bits:2048 -out state/oidc_rsa_private.pem
 
-cp conf/yufu.example.toml conf/yufu.local.toml
-cargo run --bin yufu --features webui -- \
-  --config conf/yufu.local.toml \
-  --allow-insecure-loopback-cookies
+# .env: YUFU_DOMAIN=localhost, YUFU_HTTPS_PORT=8443,
+#       YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest
+docker compose pull yufu && docker compose up -d --no-build
 ```
 
 </div>

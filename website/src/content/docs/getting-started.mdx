@@ -3,17 +3,24 @@ title: 快速开始
 description: 在本机启动 yufu，完成首次登录并验证 OIDC Discovery。
 ---
 
-本页用最短路径在本机跑起 yufu：启动数据库、写入配置、运行服务、登录管理控制台，
-最后用 Discovery 文档确认协议端点可用。
+本页给两条路径：**用 Docker 起完整栈**（推荐，本机不需要 Rust 与 Node），
+或**从源码运行**（需要改代码时用）。两条路径最后都用 Discovery 文档确认协议端点可用。
 
 ## 前置要求
 
+用 Docker 只需要：
+
+- Docker Engine 与 Compose v2（`docker compose`）
+- 容器可出站访问 `UDP/123`——启动前会校验认证时钟，失败即退出
+
+从源码运行时另需：
+
 - Rust 工具链（使用 workspace 的 edition 与依赖）
 - Node.js ≥ 22.23.4 与 pnpm 10+
-- Docker 兼容的容器运行时（用于 PostgreSQL）
-- 生产部署需要 HTTPS 与受信 NTP 来源
 
-## 用 Docker 快速跑起来
+生产部署需要 HTTPS 与受信 NTP 来源。
+
+## 用 Docker 跑起来（推荐）
 
 仓库发布 `linux/amd64` 与 `linux/arm64` 镜像，可以跳过本机的 Rust 与 Node 安装。
 自带的 Compose 栈由 Caddy 终止 TLS、身份服务从 `ghcr.io` 拉取、PostgreSQL 只在内部网络，
@@ -67,9 +74,13 @@ docker compose ps
 `state/oidc_rsa_private.pem` 必须持久保留，换钥会让已签发的令牌与既有客户端校验失效。
 :::
 
-需要改代码时再用下面的源码方式；域名、证书、备份与升级见[容器部署](/operations/docker/)。
+域名、证书、备份、升级与故障排查见[容器部署](/operations/docker/)。
 
-## 1. 获取代码与依赖
+## 从源码运行
+
+需要改动代码，或想直接用本机工具链调试时走这条路径。
+
+### 1. 获取代码与依赖
 
 ```bash
 git clone https://github.com/Bin-hy/yufu.git
@@ -77,7 +88,7 @@ cd yufu
 pnpm install --frozen-lockfile
 ```
 
-## 2. 启动数据库
+### 2. 启动数据库
 
 `compose.yaml` 只提供鉴权 PostgreSQL，默认映射到本机 `5433`：
 
@@ -87,7 +98,7 @@ docker compose up -d
 
 默认库名为 `yufu`，用户名与密码均为 `postgres`。生产环境必须替换这些凭据。
 
-## 3. 准备配置
+### 3. 准备配置
 
 ```bash
 cp conf/yufu.example.toml conf/yufu.local.toml
@@ -123,7 +134,7 @@ min_agreeing_sources = 2
 生产环境必须使用 HTTPS 和默认的 Secure Cookie。
 :::
 
-## 4. 启动服务
+### 4. 启动服务
 
 ```bash
 pnpm build:web
@@ -135,7 +146,7 @@ cargo run --bin yufu --features webui -- \
 `--features webui` 会嵌入 `assets/web` 的前端产物，因此首次运行前需要执行 `pnpm build:web`。
 启动时会自动执行版本化数据库迁移。
 
-## 5. 首次登录
+### 5. 首次登录
 
 浏览器打开：
 
@@ -152,7 +163,7 @@ http://127.0.0.1:4000
 侧栏入口按账户资格显示：普通成员使用账户中心，开发者资格开放开发者控制台，企业管理员可进入企业管理。
 工作台位于 `/dashboard`。各页面截图与操作说明见[控制台使用指南](/guides/console/)。
 
-## 6. 验证 Discovery
+### 6. 验证 Discovery
 
 ```bash
 curl -s http://127.0.0.1:4000/.well-known/openid-configuration | jq .
@@ -167,7 +178,7 @@ curl -s http://127.0.0.1:4000/api/v1/health/ready | jq .
 
 响应中的 `security_clock_synchronized` 为 `true` 才表示认证时钟就绪。时钟异常时认证入口返回 503。
 
-## 7. 下一步
+### 7. 下一步
 
 - [注册第一个应用并接入 OIDC](/guides/oidc-integration/)
 - [机密 Web 应用接入](/guides/web-app/)

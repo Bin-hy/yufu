@@ -3,17 +3,24 @@ title: Quick start
 description: Run yufu locally, sign in for the first time, and verify OIDC discovery.
 ---
 
-This page takes the shortest path to a running yufu: start the database, write a configuration,
-run the service, sign in to the admin console, and confirm the protocol endpoints through discovery.
+This page offers two paths: **run the full stack with Docker** (recommended — no local Rust or Node
+toolchain), or **run it from source** when you need to change code. Both end with the same discovery check.
 
 ## Requirements
 
+With Docker you only need:
+
+- Docker Engine with Compose v2 (`docker compose`)
+- Outbound `UDP/123` from the container — the security clock is verified at startup and the service exits if it fails
+
+Running from source additionally needs:
+
 - A Rust toolchain (matching the workspace edition and dependencies)
 - Node.js ≥ 22.23.4 and pnpm 10+
-- A Docker-compatible container runtime for PostgreSQL
-- HTTPS and trusted NTP sources for production
 
-## Run it with Docker
+Production needs HTTPS and trusted NTP sources.
+
+## Run it with Docker (recommended)
 
 Images are published for `linux/amd64` and `linux/arm64`, so no local Rust or Node toolchain is needed.
 The bundled Compose stack terminates TLS in Caddy, pulls the identity service from `ghcr.io`, and keeps
@@ -69,10 +76,14 @@ its own local CA, which the browser will report as self-signed. Keep `state/oidc
 replacing it invalidates issued tokens and every registered client.
 :::
 
-Use the source path below when you need to change code; domains, certificates, backups and upgrades are
-covered in [container deployment](/en/operations/docker/).
+Domains, certificates, backups, upgrades and troubleshooting are covered in
+[container deployment](/en/operations/docker/).
 
-## 1. Get the code and dependencies
+## Run it from source
+
+Take this path when you need to change code or want to debug with a local toolchain.
+
+### 1. Get the code and dependencies
 
 ```bash
 git clone https://github.com/Bin-hy/yufu.git
@@ -80,7 +91,7 @@ cd yufu
 pnpm install --frozen-lockfile
 ```
 
-## 2. Start the database
+### 2. Start the database
 
 `compose.yaml` only provides the identity PostgreSQL instance, mapped to local port `5433`:
 
@@ -91,7 +102,7 @@ docker compose up -d
 The default database is `yufu`, with `postgres` as both user and password.
 Replace these credentials in production.
 
-## 3. Prepare the configuration
+### 3. Prepare the configuration
 
 ```bash
 cp conf/yufu.example.toml conf/yufu.local.toml
@@ -127,7 +138,7 @@ min_agreeing_sources = 2
 issuer to be loopback. Production must use HTTPS and the default secure cookies.
 :::
 
-## 4. Start the service
+### 4. Start the service
 
 ```bash
 pnpm build:web
@@ -139,7 +150,7 @@ cargo run --bin yufu --features webui -- \
 `--features webui` embeds the frontend build from `assets/web`, so run `pnpm build:web`
 first. Versioned database migrations run automatically at startup.
 
-## 5. Sign in for the first time
+### 5. Sign in for the first time
 
 Open:
 
@@ -157,7 +168,7 @@ Navigation follows account qualifications: all members have the account center, 
 have the developer console, and enterprise administrators have enterprise administration.
 The workspace is at `/dashboard`. See the [console guide](/en/guides/console/) for screenshots and workflows.
 
-## 6. Verify discovery
+### 6. Verify discovery
 
 ```bash
 curl -s http://127.0.0.1:4000/.well-known/openid-configuration | jq .
@@ -173,7 +184,7 @@ curl -s http://127.0.0.1:4000/api/v1/health/ready | jq .
 Authentication is ready only when `security_clock_synchronized` is `true`. When the clock check fails,
 authentication endpoints return 503.
 
-## 7. Next steps
+### 7. Next steps
 
 - [Register your first application and integrate OIDC](/en/guides/oidc-integration/)
 - [Confidential web application](/en/guides/web-app/)

@@ -32,6 +32,7 @@ import consent from '../../assets/console-consent.png';
   <span>Vue 3</span>
   <span>PostgreSQL</span>
   <span>Go SDK</span>
+  <span>Docker</span>
 </p>
 
 <div class="shot-wrap">
@@ -109,8 +110,8 @@ import consent from '../../assets/console-consent.png';
 
 <div class="steps">
   <div class="step">
-    <h3>部署身份中心</h3>
-    <p>启动 PostgreSQL，配置 issuer 与 RSA 签名密钥，运行 yufu 并完成首次管理员登录。</p>
+    <h3>启动身份中心</h3>
+    <p>拉取 <code>ghcr.io/bin-hy/yufu</code> 镜像启动完整栈（或从源码构建），配置 issuer 与 RSA 签名密钥，完成首次管理员登录。</p>
   </div>
   <div class="step">
     <h3>注册并审批应用</h3>
@@ -129,29 +130,27 @@ import consent from '../../assets/console-consent.png';
 <div class="split">
 <div>
 
-## 五分钟跑起来
+## 用 Docker 五分钟跑起来
 
-本机开发只需要 Docker、Rust 与 pnpm。数据库由 compose 提供，服务启动时自动执行版本化迁移。
+镜像已发布在 `ghcr.io/bin-hy/yufu`（`linux/amd64` / `linux/arm64`），本机不需要 Rust 与 Node。
+Compose 栈里 Caddy 终止 TLS、PostgreSQL 只在内部网络，启动时自动执行版本化数据库迁移。
 
-首次启动后访问 `http://127.0.0.1:4000`，用配置中的超级管理员账号登录。
-
-完整的配置项、生产部署与接入流程见[快速开始](/getting-started/)。
+把 `.env` 与 `yufu.toml` 里的域名和密钥改成自己的值后，访问 `https://localhost:8443`，
+用 `[auth.super_admin]` 的账号登录。完整配置项与生产部署见[快速开始](/getting-started/)。
 
 </div>
 <div>
 
 ```bash
-git clone https://github.com/Bin-hy/yufu.git
-cd yufu
+git clone https://github.com/Bin-hy/yufu.git && cd yufu/deploy/docker
 
-pnpm install --frozen-lockfile
-pnpm build:web
-docker compose up -d
+cp env.example .env && cp yufu.toml.example yufu.toml
+mkdir -p state && openssl genpkey -algorithm RSA \
+  -pkeyopt rsa_keygen_bits:2048 -out state/oidc_rsa_private.pem
 
-cp conf/yufu.example.toml conf/yufu.local.toml
-cargo run --bin yufu --features webui -- \
-  --config conf/yufu.local.toml \
-  --allow-insecure-loopback-cookies
+# .env: YUFU_DOMAIN=localhost、YUFU_HTTPS_PORT=8443、
+#       YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest
+docker compose pull yufu && docker compose up -d --no-build
 ```
 
 </div>
