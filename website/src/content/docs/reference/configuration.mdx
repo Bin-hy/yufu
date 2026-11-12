@@ -3,13 +3,15 @@ title: 配置项
 description: yufu 配置文件字段、默认值与命令行参数。
 ---
 
-配置文件使用 TOML，通过 `--config <path>` 指定。未填写的字段使用默认值。
+配置文件使用 TOML，通过 `--config <path>` 指定；未指定时读取当前目录的 `yufu.toml`。
+未填写的字段使用默认值。
 
 ## 命令行参数
 
 | 参数 | 说明 |
 | --- | --- |
-| `--config <path>` | 配置文件路径 |
+| `-c, --config <path>` | 配置文件路径，默认 `yufu.toml` |
+| `-v` / `-vv` / `-vvv` | 日志级别 info / debug / trace |
 | `--allow-insecure-loopback-cookies` | 本机 HTTP 开发模式，要求监听地址与 issuer 都是 loopback |
 | `--check-security-clock` | 只做认证时钟诊断，不打开数据库或 HTTP 服务 |
 

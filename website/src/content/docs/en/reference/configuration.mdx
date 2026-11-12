@@ -3,13 +3,15 @@ title: Configuration
 description: Configuration keys, defaults, and command-line flags.
 ---
 
-Configuration is TOML, passed with `--config <path>`. Omitted fields use their defaults.
+Configuration is TOML, passed with `--config <path>`; without it the service reads `yufu.toml`
+from the working directory. Omitted fields use their defaults.
 
 ## Command-line flags
 
 | Flag | Description |
 | --- | --- |
-| `--config <path>` | Path to the configuration file |
+| `-c, --config <path>` | Path to the configuration file; defaults to `yufu.toml` |
+| `-v` / `-vv` / `-vvv` | Log level info / debug / trace |
 | `--allow-insecure-loopback-cookies` | Local HTTP development mode; listener and issuer must be loopback |
 | `--check-security-clock` | Diagnose the authentication clock without opening the database or HTTP server |
 
