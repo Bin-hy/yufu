@@ -6,7 +6,7 @@
 
 ## 架构概览
 
-`auth` 库负责声明 ID Token 协议载荷并签名；`cobotusr` 在业务 ID 进入协议层时完成整数到十进制字符串的转换；`cobotimx` 按字符串接收 UserInfo，在业务 store 中保留现有数字转换。
+`auth` 库负责声明 ID Token 协议载荷并签名；`yufu` 在业务 ID 进入协议层时完成整数到十进制字符串的转换；`cobotimx` 按字符串接收 UserInfo，在业务 store 中保留现有数字转换。
 
 ## 核心数据结构与接口
 
@@ -29,9 +29,9 @@
 |---|---|---|
 | `libs/auth/src/claims.rs` | 固定 ID Token subject 类型 | F1、N3 |
 | `libs/auth/src/token_manager.rs` | 收紧两个签发入口，补充签名验证单元测试 | F1、N3 |
-| `cobotusr/src/service/oidc.rs` | 授权码与刷新调用方显式转换 | F1、F3 |
-| `cobotusr/src/route/oidc.rs` | UserInfo 类型与响应转换 | F2、F3 |
-| `tests/cobotusr/routes/oidc.rs` | 扩展现有授权码、UserInfo、刷新集成场景 | F1、F2、F3、N2 |
+| `yufu/src/service/oidc.rs` | 授权码与刷新调用方显式转换 | F1、F3 |
+| `yufu/src/route/oidc.rs` | UserInfo 类型与响应转换 | F2、F3 |
+| `tests/yufu/routes/oidc.rs` | 扩展现有授权码、UserInfo、刷新集成场景 | F1、F2、F3、N2 |
 | `cobotimx/src/auth/oidc.ts` | 收紧 UserInfo 接口 | F4 |
 | `cobotimx/src/stores/auth.test.ts` | 使用现有测试约定，验证字符串 subject 加载为原数字用户 ID | F4 |
 

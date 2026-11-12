@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"
@@ -104,7 +104,7 @@ func New(cfg Config) (*Client, error) {
 	}
 	cfg.Issuer = issuer
 	if strings.TrimSpace(cfg.ClientID) == "" {
-		return nil, errors.New("cobotusr: ClientID is required")
+		return nil, errors.New("yufu: ClientID is required")
 	}
 	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = []string{"openid"}
@@ -119,14 +119,14 @@ func New(cfg Config) (*Client, error) {
 	switch cfg.TokenAuthMethod {
 	case TokenAuthPost, TokenAuthBasic:
 		if cfg.ClientSecret == "" {
-			return nil, fmt.Errorf("cobotusr: ClientSecret is required for %s", cfg.TokenAuthMethod)
+			return nil, fmt.Errorf("yufu: ClientSecret is required for %s", cfg.TokenAuthMethod)
 		}
 	case TokenAuthNone:
 		if cfg.ClientSecret != "" {
-			return nil, errors.New("cobotusr: ClientSecret must be empty for TokenAuthNone")
+			return nil, errors.New("yufu: ClientSecret must be empty for TokenAuthNone")
 		}
 	default:
-		return nil, fmt.Errorf("cobotusr: unsupported TokenAuthMethod %q", cfg.TokenAuthMethod)
+		return nil, fmt.Errorf("yufu: unsupported TokenAuthMethod %q", cfg.TokenAuthMethod)
 	}
 	if cfg.DiscoveryTTL <= 0 {
 		cfg.DiscoveryTTL = defaultDiscoveryTTL
@@ -135,13 +135,13 @@ func New(cfg Config) (*Client, error) {
 		cfg.JWKSTTL = defaultJWKSTTL
 	}
 	if cfg.Leeway < 0 {
-		return nil, errors.New("cobotusr: Leeway must not be negative")
+		return nil, errors.New("yufu: Leeway must not be negative")
 	}
 	if cfg.Leeway == 0 {
 		cfg.Leeway = defaultLeeway
 	}
 	if cfg.UserAgent == "" {
-		cfg.UserAgent = "cobotusr-go-sdk/" + Version
+		cfg.UserAgent = "yufu-go-sdk/" + Version
 	}
 	ownsHTTPClient := false
 	if cfg.HTTPClient == nil {
@@ -172,15 +172,15 @@ func (c *Client) Close() error {
 func normalizeIssuer(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", errors.New("cobotusr: Issuer is required")
+		return "", errors.New("yufu: Issuer is required")
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil || !parsed.IsAbs() || parsed.Host == "" ||
 		(parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", errors.New("cobotusr: Issuer must be an absolute http(s) URL")
+		return "", errors.New("yufu: Issuer must be an absolute http(s) URL")
 	}
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", errors.New("cobotusr: Issuer must not contain a query or fragment")
+		return "", errors.New("yufu: Issuer must not contain a query or fragment")
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	return parsed.String(), nil

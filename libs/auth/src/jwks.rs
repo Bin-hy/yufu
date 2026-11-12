@@ -238,8 +238,8 @@ mod security_tests {
         let c = client();
         for (field, value) in [
             ("iss", json!("https://other.test")),
-            ("aud", json!("cobotusr")),
-            ("aud", json!(["resource-app", "cobotusr"])),
+            ("aud", json!("other-audience")),
+            ("aud", json!(["resource-app", "other-audience"])),
             ("token_use", json!("mcp_access")),
             ("principal_kind", json!("machine")),
             ("sub", json!("")),
@@ -298,13 +298,13 @@ mod security_tests {
             (
                 PrincipalKind::Machine,
                 TokenUse::SecurityService,
-                "cobotusr:security",
+                "yufu:security",
                 json!({"kind":"gateway","gateway_id":"g"}),
             ),
             (
                 PrincipalKind::Machine,
                 TokenUse::PermissionSync,
-                "cobotusr:permission-sync",
+                "yufu:permission-sync",
                 json!({"kind":"none"}),
             ),
         ] {
@@ -339,7 +339,7 @@ mod security_tests {
     #[test]
     fn security_t07_header_key_and_algorithm_are_not_chosen_by_attacker() {
         let c = client();
-        for typ in [None, Some("JWT"), Some("cobotrix-execution+jwt")] {
+        for typ in [None, Some("JWT"), Some("yufu-execution+jwt")] {
             let mut h = header();
             h.typ = typ.map(str::to_owned);
             assert!(
@@ -621,15 +621,7 @@ mod security_tests {
             3600,
         ));
         let local_token = signer
-            .sign_access_token(
-                "42",
-                "https://idp.test",
-                "cobotusr",
-                "",
-                3600,
-                vec![],
-                vec![],
-            )
+            .sign_access_token("42", "https://idp.test", "yufu", "", 3600, vec![], vec![])
             .unwrap();
         let app = Router::new()
             .route("/legacy", get(|| async { "ok" }))

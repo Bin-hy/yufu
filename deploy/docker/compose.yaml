@@ -1,0 +1,98 @@
+# yufu reference stack: PostgreSQL + identity service + Caddy TLS entry point.
+#
+#   cd deploy/docker
+#   cp env.example .env          # then edit every CHANGE_ME value
+#   cp yufu.toml.example yufu.toml
+#   docker compose up --build -d
+#
+# Keep the public origin in yufu.toml ([oidc].issuer and [auth].origins) equal
+# to https://<YUFU_DOMAIN>[:<YUFU_HTTPS_PORT>]. The service refuses to start
+# otherwise. Details: deploy/docker/README.md.
+
+name: yufu
+
+services:
+    postgres:
+        image: postgres:18-alpine
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-yufu}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+            POSTGRES_DB: ${POSTGRES_DB:-yufu}
+        volumes:
+            - postgres-data:/var/lib/postgresql
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready --username \"$${POSTGRES_USER}\" --dbname \"$${POSTGRES_DB}\""]
+            interval: 10s
+            timeout: 5s
+            retries: 12
+            start_period: 20s
+        networks:
+            - backend
+        security_opt:
+            - no-new-privileges:true
+
+    yufu:
+        image: ${YUFU_IMAGE:-yufu:local}
+        build:
+            context: ../..
+            dockerfile: deploy/docker/Dockerfile
+        restart: unless-stopped
+        depends_on:
+            postgres:
+                condition: service_healthy
+        environment:
+            # [database].url is intentionally absent from the config file so this
+            # URL wins. Percent-encode special characters in the password.
+            DATABASE_URL: postgres://${POSTGRES_USER:-yufu}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-yufu}
+            # [auth].secret default; used for CSRF/session material when unset.
+            AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
+            LOG_LEVEL: ${LOG_LEVEL:-info}
+        volumes:
+            - ./yufu.toml:/etc/yufu/yufu.toml:ro
+            # Must outlive the container: it holds the ID token signing key.
+            # A host directory keeps the key visible for offline backup.
+            - ./state:/var/lib/yufu
+        networks:
+            - backend
+            - edge
+        read_only: true
+        tmpfs:
+            - /tmp
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
+        stop_grace_period: 30s
+
+    caddy:
+        image: caddy:2-alpine
+        restart: unless-stopped
+        depends_on:
+            yufu:
+                condition: service_started
+        environment:
+            YUFU_DOMAIN: ${YUFU_DOMAIN:?set YUFU_DOMAIN in .env}
+        ports:
+            - "${YUFU_HTTP_PORT:-80}:80"
+            - "${YUFU_HTTPS_PORT:-443}:443"
+        volumes:
+            - ./Caddyfile:/etc/caddy/Caddyfile:ro
+            - caddy-data:/data
+            - caddy-config:/config
+        networks:
+            - edge
+        security_opt:
+            - no-new-privileges:true
+
+networks:
+    # Caddy and the identity service; the only network facing published ports.
+    edge:
+    # Database traffic; no route to the outside world.
+    backend:
+        internal: true
+
+volumes:
+    postgres-data:
+    caddy-data:
+    caddy-config:

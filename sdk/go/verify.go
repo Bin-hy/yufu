@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bin-hy/cobot-sdk-go/internal/jose"
+	"github.com/Bin-hy/yufu-sdk-go/internal/jose"
 )
 
 const backchannelLogoutEvent = "http://schemas.openid.net/event/backchannel-logout"
@@ -24,7 +24,7 @@ type verifyOptions struct {
 // audience is the application access audience, not the OIDC client id.
 func (c *Client) VerifyAccessToken(ctx context.Context, token, audience string) (*AccessTokenClaims, error) {
 	if strings.TrimSpace(audience) == "" {
-		return nil, errors.New("cobotusr: audience is required")
+		return nil, errors.New("yufu: audience is required")
 	}
 	parsed, err := c.verifyJWT(ctx, token, verifyOptions{
 		typ:             []string{"at+jwt"},
@@ -58,7 +58,7 @@ func (c *Client) VerifyIDToken(ctx context.Context, token, nonce string) (*IDTok
 }
 
 // VerifyLogoutToken verifies an OIDC back-channel logout token for
-// Config.ClientID and enforces the cobotusr logout-token profile.
+// Config.ClientID and enforces the yufu logout-token profile.
 func (c *Client) VerifyLogoutToken(ctx context.Context, token string) (*LogoutTokenClaims, error) {
 	parsed, err := c.verifyJWT(ctx, token, verifyOptions{
 		typ:             []string{"logout+jwt"},

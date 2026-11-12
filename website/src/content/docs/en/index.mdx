@@ -1,10 +1,10 @@
 ---
-title: cobotusr
+title: yufu
 description: A single-tenant identity and SSO platform with standard OIDC, fine-grained authorization, and self-hosting.
 template: splash
 head:
   - tag: title
-    content: cobotusr — Single-tenant identity and SSO platform
+    content: yufu — Single-tenant identity and SSO platform
 hero:
   tagline: Unified login, authorization, and audit for internal applications. One Rust binary plus PostgreSQL, integrated over standard OIDC.
   actions:
@@ -35,7 +35,7 @@ import consent from '../../../assets/console-consent.png';
 </p>
 
 <div class="shot-wrap">
-  <Image src={dashboard} alt="Current cobotusr workspace with account, developer, and enterprise administration navigation (demo data)" />
+  <Image src={dashboard} alt="Current yufu workspace with account, developer, and enterprise administration navigation (demo data)" />
 </div>
 <p class="shot-caption">Current workspace: account center, developer console, and enterprise administration (demo data)</p>
 <p class="shot-caption"><a href="/en/guides/console/">Explore the console guide and more screenshots →</a></p>
@@ -45,7 +45,7 @@ import consent from '../../../assets/console-consent.png';
 ## One issuer for every identity entry point
 
 <p class="lead">
-  cobotusr is a single-tenant identity and SSO platform that you deploy yourself. The account center,
+  yufu is a single-tenant identity and SSO platform that you deploy yourself. The account center,
   developer console, and enterprise admin console are one product. Application onboarding is
   invitation and approval based; there is no public application marketplace.
 </p>
@@ -80,7 +80,7 @@ import consent from '../../../assets/console-consent.png';
 <div class="steps">
   <div class="step">
     <h3>Deploy the identity center</h3>
-    <p>Start PostgreSQL, configure the issuer and RSA signing key, run cobotusr, and sign in as the first administrator.</p>
+    <p>Start PostgreSQL, configure the issuer and RSA signing key, run yufu, and sign in as the first administrator.</p>
   </div>
   <div class="step">
     <h3>Register and approve an application</h3>
@@ -115,12 +115,12 @@ git clone https://github.com/Bin-hy/cobot-for.git
 cd cobot-for
 
 pnpm install --frozen-lockfile
-pnpm build:cobotusr
+pnpm build:web
 docker compose up -d
 
-cp conf/cobotusr.example.toml conf/cobotusr.local.toml
-cargo run --bin cobotusr --features webui -- \
-  --config conf/cobotusr.local.toml \
+cp conf/yufu.example.toml conf/yufu.local.toml
+cargo run --bin yufu --features webui -- \
+  --config conf/yufu.local.toml \
   --allow-insecure-loopback-cookies
 ```
 
@@ -153,7 +153,7 @@ cargo run --bin cobotusr --features webui -- \
 <section>
 
 <div class="shot-wrap">
-  <Image src={consent} alt="Current cobotusr consent screen showing identity, profile, and email permissions (demo data)" />
+  <Image src={consent} alt="Current yufu consent screen showing identity, profile, and email permissions (demo data)" />
 </div>
 <p class="shot-caption">Current consent screen: identity, profile, and email permissions disclosed individually (demo data)</p>
 

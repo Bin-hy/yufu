@@ -3,7 +3,7 @@
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-const require = createRequire(new URL('../../cobotweb/apps/cobotusr/package.json', import.meta.url));
+const require = createRequire(new URL('../../web/package.json', import.meta.url));
 const { chromium } = require('@playwright/test');
 const output = fileURLToPath(new URL('../src/assets/', import.meta.url));
 const origin = 'http://127.0.0.1:5174';
@@ -55,7 +55,7 @@ try {
     const unexpected = [];
     const page = await context.newPage();
     await page.clock.install({ time: now });
-    await page.addInitScript(() => localStorage.setItem('cobotusr:theme', 'light'));
+    await page.addInitScript(() => localStorage.setItem('yufu:theme', 'light'));
     await context.route('**/*', async (route) => {
       const request = route.request();
       const url = new URL(request.url());

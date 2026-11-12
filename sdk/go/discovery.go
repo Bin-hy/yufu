@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"

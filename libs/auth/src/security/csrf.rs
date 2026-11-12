@@ -52,7 +52,7 @@ impl CsrfProtector {
         let iat = healthy_reading(clock)?.unix_millis / 1000;
         let claims = CsrfClaims {
             iss: issuer.into(),
-            aud: "cobotusr-csrf".into(),
+            aud: "yufu-csrf".into(),
             iat,
             exp: iat
                 .checked_add(900)
@@ -97,7 +97,7 @@ impl CsrfProtector {
         }
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_issuer(&[issuer]);
-        validation.set_audience(&["cobotusr-csrf"]);
+        validation.set_audience(&["yufu-csrf"]);
         validation.validate_exp = false;
         validation.validate_nbf = false;
         let claims = decode::<CsrfClaims>(
@@ -123,7 +123,7 @@ fn binding(context: CsrfBinding<'_>) -> String {
     let mut hash = Sha256::new();
     match context {
         CsrfBinding::LegacyRefresh(refresh) => {
-            hash.update(b"cobotusr-csrf-v1\0");
+            hash.update(b"yufu-csrf-v1\0");
             hash.update(if refresh.is_some() {
                 b"session\0".as_slice()
             } else {
@@ -134,11 +134,11 @@ fn binding(context: CsrfBinding<'_>) -> String {
             }
         }
         CsrfBinding::CenterRootDigest(digest) => {
-            hash.update(b"cobotusr-csrf-v2\0center\0");
+            hash.update(b"yufu-csrf-v2\0center\0");
             hash.update(digest);
         }
         CsrfBinding::AnonymousBrowserDigest(digest) => {
-            hash.update(b"cobotusr-csrf-v2\0anonymous\0");
+            hash.update(b"yufu-csrf-v2\0anonymous\0");
             hash.update(digest);
         }
     }
@@ -264,7 +264,7 @@ mod tests {
         );
         let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
         header.typ = Some("at+jwt".into());
-        let wrong=jsonwebtoken::encode(&header,&serde_json::json!({"iss":"https://idp.test","aud":"cobotusr-csrf","exp":1000,"nonce":"known","binding":""}),&jsonwebtoken::EncodingKey::from_secret(b"csrf-test-secret")).unwrap();
+        let wrong=jsonwebtoken::encode(&header,&serde_json::json!({"iss":"https://idp.test","aud":"yufu-csrf","exp":1000,"nonce":"known","binding":""}),&jsonwebtoken::EncodingKey::from_secret(b"csrf-test-secret")).unwrap();
         assert_eq!(
             signer.verify(
                 &SecretToken::new(wrong).unwrap(),

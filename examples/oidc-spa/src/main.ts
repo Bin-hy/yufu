@@ -27,7 +27,7 @@ function render(session: SpaSession | undefined, message = ''): void {
        <button id="logout-local" type="button">Sign out of this tab</button>
        <button id="logout-central" type="button">Sign out of the identity center</button>`
     : `<h1>Not signed in</h1>
-       <button id="login" type="button">Sign in with Cobotrix</button>`
+       <button id="login" type="button">Sign in with Yufu</button>`
   if (message) app.insertAdjacentHTML('beforeend', `<p role="status">${escapeHtml(message)}</p>`)
 
   document.querySelector('#login')?.addEventListener('click', () => void oidc.signIn())

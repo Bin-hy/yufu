@@ -24,13 +24,13 @@ import {
 const config: WebConfig = {
   port: 3000,
   issuer: 'https://id.example.com',
-  clientId: 'cobotrix-web-example',
+  clientId: 'yufu-web-example',
   clientSecret: 'web-client-secret',
   redirectUri: 'https://app.example.com/callback',
   postLogoutRedirectUri: 'https://app.example.com/',
   scope: 'openid profile email',
   sessionSecret: 'x'.repeat(32),
-  readerClientId: 'cobotrix-web-reader',
+  readerClientId: 'yufu-web-reader',
   readerClientSecret: 'reader-secret',
   allowInsecureLoopback: false,
 }

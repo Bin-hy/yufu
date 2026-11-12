@@ -1,9 +1,9 @@
 ---
 title: Quick start
-description: Run cobotusr locally, sign in for the first time, and verify OIDC discovery.
+description: Run yufu locally, sign in for the first time, and verify OIDC discovery.
 ---
 
-This page takes the shortest path to a running cobotusr: start the database, write a configuration,
+This page takes the shortest path to a running yufu: start the database, write a configuration,
 run the service, sign in to the admin console, and confirm the protocol endpoints through discovery.
 
 ## Requirements
@@ -29,13 +29,13 @@ pnpm install --frozen-lockfile
 docker compose up -d
 ```
 
-The default database is `cobotusr`, with `postgres` as both user and password.
+The default database is `yufu`, with `postgres` as both user and password.
 Replace these credentials in production.
 
 ## 3. Prepare the configuration
 
 ```bash
-cp conf/cobotusr.example.toml conf/cobotusr.local.toml
+cp conf/yufu.example.toml conf/yufu.local.toml
 ```
 
 At minimum, review these fields:
@@ -56,7 +56,7 @@ issuer = "http://127.0.0.1:4000"
 rsa_private_key_path = "conf/oidc_rsa_private.local.pem"
 
 [database]
-url = "postgres://postgres:postgres@localhost:5433/cobotusr"
+url = "postgres://postgres:postgres@localhost:5433/yufu"
 
 [security_clock]
 servers = ["time.apple.com:123", "time.cloudflare.com:123"]
@@ -71,13 +71,13 @@ issuer to be loopback. Production must use HTTPS and the default secure cookies.
 ## 4. Start the service
 
 ```bash
-pnpm build:cobotusr
-cargo run --bin cobotusr --features webui -- \
-  --config conf/cobotusr.local.toml \
+pnpm build:web
+cargo run --bin yufu --features webui -- \
+  --config conf/yufu.local.toml \
   --allow-insecure-loopback-cookies
 ```
 
-`--features webui` embeds the frontend build from `assets/cobotusr`, so run `pnpm build:cobotusr`
+`--features webui` embeds the frontend build from `assets/web`, so run `pnpm build:web`
 first. Versioned database migrations run automatically at startup.
 
 ## 5. Sign in for the first time
@@ -120,3 +120,4 @@ authentication endpoints return 503.
 - [Confidential web application](/en/guides/web-app/)
 - [Public SPA](/en/guides/spa/)
 - [Production deployment](/en/operations/deployment/)
+- [Container deployment](/en/operations/docker/)

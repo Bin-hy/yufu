@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"
@@ -60,7 +60,7 @@ func (c *Client) tokenSet(response tokenResponse) (*TokenSet, error) {
 // token are coalesced into one server request.
 func (c *Client) Refresh(ctx context.Context, refreshToken string) (*TokenSet, error) {
 	if strings.TrimSpace(refreshToken) == "" {
-		return nil, errors.New("cobotusr: refresh token is required")
+		return nil, errors.New("yufu: refresh token is required")
 	}
 	c.refreshMu.Lock()
 	if call, ok := c.refreshes[refreshToken]; ok {

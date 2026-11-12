@@ -1,9 +1,9 @@
-package cobotusr
+package yufu
 
 import (
 	"time"
 
-	"github.com/Bin-hy/cobot-sdk-go/internal/jose"
+	"github.com/Bin-hy/yufu-sdk-go/internal/jose"
 )
 
 // AccessTokenClaims is the validated access-token profile exposed to resource

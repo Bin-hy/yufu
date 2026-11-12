@@ -1,0 +1,16 @@
+[Unit]
+Description=yufu · enterprise identity and SSO service
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/bin/yufu --config /etc/yufu/yufu.toml
+WorkingDirectory=/var/lib/yufu
+StateDirectory=yufu
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

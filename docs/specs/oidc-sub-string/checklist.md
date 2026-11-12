@@ -21,7 +21,7 @@
 ## 编译与测试
 
 - [ ] `cargo test -p auth` 全部通过：45 个单元测试通过（包含 AC1 的 RSA、HMAC 测试），但 8 个原有文档示例测试编译失败，1 个忽略。
-- [x] AC5：`cargo check -p cobotusr` 通过，所有受影响 ID Token 签发调用方编译成功。
+- [x] AC5：`cargo check -p yufu` 通过，所有受影响 ID Token 签发调用方编译成功。
 - [x] AC2、AC5：`cargo test --test mod test_oidc_authorization_code_pkce_exchange -- --nocapture` 通过；记录 PostgreSQL 测试容器是否可用。
 - [x] AC4：在 `cobotimx` 目录运行 `npm test` 通过，包含新增 store 测试。
 - [x] AC4：在 `cobotimx` 目录运行 `npx vue-tsc -b` 通过，UserInfo 的字符串类型与使用方一致。
@@ -38,7 +38,7 @@
 
 - 缺陷复现：修复前运行 `cargo test -p auth id_token`，3 个新增测试均在签名验证成功后失败，实际 `Number(123)`，预期 `String("123")`。
 - 修复后 `cargo test -p auth`：45 个单元测试全部通过。文档示例测试 8 个失败、1 个忽略；错误涉及原有示例引用私有的 `auth::TokenManager` / `auth::Claims`、缺少示例依赖、过时接口和运行时 feature。此次未扩大范围修改这些示例。
-- `cargo check -p cobotusr`：通过。
+- `cargo check -p yufu`：通过。
 - `cargo test --test mod test_oidc_authorization_code_pkce_exchange -- --nocapture`：1 个测试通过（70 个过滤），覆盖 confidential/public 授权码兑换、UserInfo、刷新后 subject，以及原有轮换、撤销与错误路径。
 - 集成测试第一次在沙箱内无法连接 Docker socket，确认是权限限制后，经工具审批在沙箱外重跑通过，实际使用本机 Docker 的临时 PostgreSQL 容器。
 - `npm test`（cobotimx）：2 个测试文件、11 个测试通过。新增 store 测试通过 `completeSignIn()` 触发实际的后台 UserInfo 加载（`loadUserInfo` 是私有函数），验证 `"123"` 转换为数字 123。

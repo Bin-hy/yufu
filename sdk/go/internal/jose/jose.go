@@ -1,7 +1,7 @@
 // Package jose implements the small RS256/JWKS subset used by the Runtime SDK.
 //
 // The SDK deliberately keeps this surface private: callers get typed claims from
-// the cobotusr package and never need to handle raw JOSE objects.
+// the yufu package and never need to handle raw JOSE objects.
 package jose
 
 import (

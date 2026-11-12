@@ -1,5 +1,5 @@
 {
-  "name": "@cobotrix/oidc-spa",
+  "name": "@yufu/oidc-spa",
   "private": true,
   "version": "0.1.0",
   "type": "module",

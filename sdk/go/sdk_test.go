@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bin-hy/cobot-sdk-go/internal/pkce"
+	"github.com/Bin-hy/yufu-sdk-go/internal/pkce"
 )
 
 type testSigner struct {

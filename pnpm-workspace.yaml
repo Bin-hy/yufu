@@ -1,5 +1,5 @@
 packages:
-  - "cobotweb/apps/cobotusr"
+  - "web"
   - "examples/*"
   - "website"
 allowBuilds:

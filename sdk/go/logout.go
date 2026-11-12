@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"
@@ -16,7 +16,7 @@ type EndSessionOptions struct {
 // EndSessionURL builds the browser redirect for RP-initiated logout.
 func (c *Client) EndSessionURL(ctx context.Context, opts EndSessionOptions) (string, error) {
 	if opts.PostLogoutRedirectURI == "" {
-		return "", errors.New("cobotusr: PostLogoutRedirectURI is required")
+		return "", errors.New("yufu: PostLogoutRedirectURI is required")
 	}
 	discovery, err := c.Discover(ctx)
 	if err != nil {

@@ -44,7 +44,7 @@ flowchart LR
 
 ### 1.2 模块职责与依赖
 
-新增 `cobotusr/src/domain/identity/` 保存纯规则和传输无关类型；`service/identity/` 编排账户、应用、准入、SSO、同意及通知；`service/identity/repository*.rs` 实现 PostgreSQL 持久化。现有 `service/security/` 继续负责凭据根、签发、刷新、撤销与有效性。
+新增 `yufu/src/domain/identity/` 保存纯规则和传输无关类型；`service/identity/` 编排账户、应用、准入、SSO、同意及通知；`service/identity/repository*.rs` 实现 PostgreSQL 持久化。现有 `service/security/` 继续负责凭据根、签发、刷新、撤销与有效性。
 
 纯规则模块不依赖 Axum、SeaORM 或前端。HTTP 层调用服务接口，身份服务通过同一事务接口使用安全模块，不在两个服务中分别开启事务。PostgreSQL 适配器实现规则层定义的仓储契约。安全模块读取共享的 `ManagedAdmission` 值与事务能力，不反向调用身份编排服务，避免循环依赖。
 
@@ -246,7 +246,7 @@ pub trait IdentityTransaction: SecurityTransaction {
 
 ### 4.1 中心 Cookie 与前端恢复
 
-生产中心新增 `__Host-cobotusr-sso`：HttpOnly、Secure、SameSite=Lax、Path=/、无 Domain，值为随机不透明秘密。固定默认寿命 12 小时，通过新 `identity.sso_session_ttl_seconds` 配置；会话检查和普通 SSO 不轮换秘密、不修改 authenticated_at。过期、退出、停用和密码变化使服务端记录失效。
+生产中心新增 `__Host-yufu-sso`：HttpOnly、Secure、SameSite=Lax、Path=/、无 Domain，值为随机不透明秘密。固定默认寿命 12 小时，通过新 `identity.sso_session_ttl_seconds` 配置；会话检查和普通 SSO 不轮换秘密、不修改 authenticated_at。过期、退出、停用和密码变化使服务端记录失效。
 
 中心页面、账户 API 与新控制台 API 同源部署。新中心 API 使用该 Cookie 认证，GET `/account/session` 返回当前资料、入口资格和 CSRF 证明；无中心会话返回 401。前端启动、刷新及新标签页均先调用此接口，不能因 sessionStorage 没有 access token 而直接跳登录。
 
@@ -256,7 +256,7 @@ pub trait IdentityTransaction: SecurityTransaction {
 
 旧管理 bearer/refresh 接口仍接受其原有合法调用；中心 UI 切换到 Cookie API。旧 `/login` 浏览器入口委托同一认证服务建立中心根，并按兼容返回原管理 token set；这些管理凭据同事务关联该根。旧 `/refresh` 不用于新中心会话恢复，也不增加容忍真正重放的宽限窗口。
 
-本机 HTTP 开发仅沿用显式 loopback 开关并使用 `cobotusr-dev-sso` 等非 `__Host-` 名称；生产配置校验 HTTPS 和持久 RSA key。跨站 SSO 通过顶层导航到中心发生，不依赖第三方 iframe Cookie。
+本机 HTTP 开发仅沿用显式 loopback 开关并使用 `yufu-dev-sso` 等非 `__Host-` 名称；生产配置校验 HTTPS 和持久 RSA key。跨站 SSO 通过顶层导航到中心发生，不依赖第三方 iframe Cookie。
 
 ### 4.2 端点分组
 
@@ -377,7 +377,7 @@ sequenceDiagram
     RP->>Browser: 建立该应用自己的会话
 ```
 
-每个需要交互的授权流程使用 10 分钟有效期和独立 Cookie 名 `__Host-cobotusr-flow-{flow_id}`，绑定随机浏览器证明，最多保留 8 个未完成 flow。避免两个应用第一次同时进入中心时互相覆盖一个全局 flow Cookie；完成/超时清理相应 Cookie。URL 只携带 flow_id，授权请求的回调/state/nonce/PKCE 从服务端记录恢复，不接受 return_to 任意跳转。
+每个需要交互的授权流程使用 10 分钟有效期和独立 Cookie 名 `__Host-yufu-flow-{flow_id}`，绑定随机浏览器证明，最多保留 8 个未完成 flow。避免两个应用第一次同时进入中心时互相覆盖一个全局 flow Cookie；完成/超时清理相应 Cookie。URL 只携带 flow_id，授权请求的回调/state/nonce/PKCE 从服务端记录恢复，不接受 return_to 任意跳转。
 
 有中心根且无需交互时，直接校验后生成授权码，不消耗旋转刷新秘密；两个应用并发各建独立 RP 会话和代码。prompt=login 或超出 max_age 时必须完成该 flow 的新密码认证，记录 reauth_completed_at；不能因其他标签页已有旧 Cookie 而跳过该请求的重新认证。强制重新认证替换浏览器中心根，旧关联会话按撤销规则退出。
 
@@ -475,22 +475,22 @@ OIDC 登录/同意页面使用 flow_id 加服务端概要：应用名称、实�
 
 | 路径 | 新建或修改内容 |
 | --- | --- |
-| `cobotusr/src/domain/identity/{mod,account,application,admission,session,error}.rs` | 核心类型、规则、资格/范围/状态决策 |
-| `cobotusr/src/service/identity/{mod,account,application,assignment,sso,authorization,protocol,session,logout}.rs` | 各业务编排与标准身份输出 |
-| `cobotusr/src/service/identity/{repository,repository_account,repository_application,repository_session,repository_admission,repository_outbox}.rs` | Pg 事务适配、锁和集合更新 |
-| `cobotusr/src/entity/identity_*.rs` | 第 2 节新实体，按表独立文件；修改 user/application/session/code/consent/client 实体 |
-| `cobotusr/src/route/{account,developer,enterprise_admin,identity_browser}.rs` | 本人、开发者、管理和交互路由 |
-| `cobotusr/src/route/{mod,auth,oidc,oidc_admin,application,user}.rs` | Router 认证分组、协议更新和旧入口封闭 |
-| `cobotusr/src/service/security/{repository,lifecycle,revocation,repository_revocation,repository_bounds,browser}.rs` | 共享事务、managed 根/准入检查、签发、刷新与范围撤销 |
+| `yufu/src/domain/identity/{mod,account,application,admission,session,error}.rs` | 核心类型、规则、资格/范围/状态决策 |
+| `yufu/src/service/identity/{mod,account,application,assignment,sso,authorization,protocol,session,logout}.rs` | 各业务编排与标准身份输出 |
+| `yufu/src/service/identity/{repository,repository_account,repository_application,repository_session,repository_admission,repository_outbox}.rs` | Pg 事务适配、锁和集合更新 |
+| `yufu/src/entity/identity_*.rs` | 第 2 节新实体，按表独立文件；修改 user/application/session/code/consent/client 实体 |
+| `yufu/src/route/{account,developer,enterprise_admin,identity_browser}.rs` | 本人、开发者、管理和交互路由 |
+| `yufu/src/route/{mod,auth,oidc,oidc_admin,application,user}.rs` | Router 认证分组、协议更新和旧入口封闭 |
+| `yufu/src/service/security/{repository,lifecycle,revocation,repository_revocation,repository_bounds,browser}.rs` | 共享事务、managed 根/准入检查、签发、刷新与范围撤销 |
 | `libs/auth/src/{claims,token_manager}.rs`、`libs/auth/src/security/csrf.rs` | auth_time/sid/受控资料和 Logout Token 签名、CSRF 绑定扩展 |
-| `cobotusr/src/{lib,config,swagger_docs,recording_middleware}.rs`、`src/cobotusr.rs` | 服务装配、worker 启停、部署校验、OpenAPI 与秘密脱敏 |
-| `cobotusr/src/migration/m20261109_00000{1,2,3}_*.rs` | 身份准入、应用治理、SSO/outbox/历史纳管；注册到 migration/mod.rs |
-| `cobotusr/src/seed/m20261109_000004_identity_operations.rs` | 注册管理操作目录；不向新用户赋业务/MCP 许可 |
-| `cobotweb/apps/cobotusr/src/pages/{account,developer,enterprise-admin}/` | 三入口 API/types/views/components，复用现有组件 |
-| `cobotweb/apps/cobotusr/src/{router,workspace,pinia,http}/` 和原 login/oidc 页面 | 中心恢复、guard、请求认证和 flow 交互 |
+| `yufu/src/{lib,config,swagger_docs,recording_middleware}.rs`、`src/yufu.rs` | 服务装配、worker 启停、部署校验、OpenAPI 与秘密脱敏 |
+| `yufu/src/migration/m20261109_00000{1,2,3}_*.rs` | 身份准入、应用治理、SSO/outbox/历史纳管；注册到 migration/mod.rs |
+| `yufu/src/seed/m20261109_000004_identity_operations.rs` | 注册管理操作目录；不向新用户赋业务/MCP 许可 |
+| `web/src/pages/{account,developer,enterprise-admin}/` | 三入口 API/types/views/components，复用现有组件 |
+| `web/src/{router,workspace,pinia,http}/` 和原 login/oidc 页面 | 中心恢复、guard、请求认证和 flow 交互 |
 | `examples/oidc-web/`、`examples/oidc-spa/` | 独立标准客户端与保护 API、package.json、配置样例和 README |
-| `tests/cobotusr/routes/{identity_account,identity_application,identity_assignment,identity_session,identity_protocol,identity_migration,identity_browser}.rs` | 黑盒 API、并发、迁移和真实浏览器 fixture |
-| `cobotweb/apps/cobotusr/tests/{unit,e2e}/` | 入口/flow/权限/状态测试；独立 enterprise-sso 配置与脚本 |
+| `tests/yufu/routes/{identity_account,identity_application,identity_assignment,identity_session,identity_protocol,identity_migration,identity_browser}.rs` | 黑盒 API、并发、迁移和真实浏览器 fixture |
+| `web/tests/{unit,e2e}/` | 入口/flow/权限/状态测试；独立 enterprise-sso 配置与脚本 |
 | `docs/integration/enterprise-oidc.md`、`docs/operations/enterprise-identity-upgrade.md` | 接入契约、退出能力、升级/纳管/回滚和诊断说明 |
 | `package.json`、`pnpm-workspace.yaml`、`pnpm-lock.yaml`、`.github/workflows/rust.yml` | 示例 workspace、固定依赖、真实 SSO 专用验证命令 |
 
@@ -567,7 +567,7 @@ fixture 启动三个浏览器引擎 Chromium、Firefox、WebKit；每个 browser
 
 ### 10.3 必要检查与实际记录
 
-实现后执行现有 `pnpm build:cobotusr`、前端 test/check/lint、`cargo fmt --all -- --check`、全 workspace/all-targets/all-features clippy 与 build、隔离集成及 doctest。新增示例各自 check/build/test 与专用 `test:sso` 命令；CI 保留当前平台构建，Ubuntu 执行带真实 OP 的三引擎 SSO 测试。
+实现后执行现有 `pnpm build:web`、前端 test/check/lint、`cargo fmt --all -- --check`、全 workspace/all-targets/all-features clippy 与 build、隔离集成及 doctest。新增示例各自 check/build/test 与专用 `test:sso` 命令；CI 保留当前平台构建，Ubuntu 执行带真实 OP 的三引擎 SSO 测试。
 
 验收报告记录 commit、依赖版本、OS/浏览器、临时数据库和站点配置、实际命令、通过/失败数量、跳过原因、并发和 5 秒撤销时间证据。保存脱敏截图/网络摘要/审计/通知状态及迁移样本比对；trace/报告不得包含密码、邀请/重置秘密、完整 code/token/Cookie/secret，必要日志在产生时脱敏。Docker、浏览器或测试依赖缺失时明确记为未验证，不能把历史通过记录当本轮新功能证据。
 

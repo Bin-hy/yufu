@@ -43,16 +43,16 @@ jobs:
                   npm install --global pnpm@12.10.1
                   pnpm install --frozen-lockfile
             - name: Build authentication frontend
-              run: pnpm build:cobotusr
+              run: pnpm build:web
             - name: Verify frontend (Ubuntu)
               if: matrix.os == 'ubuntu-latest'
               run: |
-                  pnpm --filter @cobotweb/cobotusr test
-                  pnpm --filter @cobotweb/cobotusr check
-                  pnpm --filter @cobotweb/cobotusr lint
+                  pnpm --filter @yufu/web test
+                  pnpm --filter @yufu/web check
+                  pnpm --filter @yufu/web lint
             - name: Install browser engines (Ubuntu)
               if: matrix.os == 'ubuntu-latest'
-              working-directory: cobotweb/apps/cobotusr
+              working-directory: web
               run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
 
             - name: Cargo format

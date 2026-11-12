@@ -1,0 +1,52 @@
+# yufu configuration for the container stack in this directory.
+#
+#   cp yufu.toml.example yufu.toml   # then edit each CHANGE_ME value
+#
+# Mounted read-only at /etc/yufu/yufu.toml. The public origin below must
+# equal https://<YUFU_DOMAIN>[:<YUFU_HTTPS_PORT>] from .env: the service
+# refuses to start when the issuer is not an explicit HTTPS origin.
+# Field reference: https://cobotusr.pages.dev/reference/configuration/
+
+[http]
+# Inside the container the service must accept connections from the proxy, so it
+# cannot bind to loopback. Caddy is the only published entry point.
+listen = "0.0.0.0:4000"
+api_prefix = "/api/v1"
+
+[auth]
+# secret comes from the AUTH_SECRET environment variable; do not set it here.
+# Browser origins allowed to call the API. Use the exact public origin.
+origins = ["https://CHANGE_ME.example.com"]
+
+[auth.super_admin]
+username = "admin"
+password = "CHANGE_ME_use_a_long_random_password"
+
+[oidc]
+# Fixed public issuer; must match the browser-facing origin exactly.
+issuer = "https://CHANGE_ME.example.com"
+# Persistent signing key inside the container volume; it is created once, outside
+# the service. Production never generates a key automatically.
+rsa_private_key_path = "/var/lib/yufu/oidc_rsa_private.pem"
+signing_algorithm = "RS256"
+
+# [database].url is intentionally absent: DATABASE_URL from the environment is
+# used so the database password is not stored in this file.
+# Tuning knobs if needed:
+# max_connections = 10
+# connect_timeout = 30
+
+# [log] is intentionally absent: LOG_LEVEL from .env is used. Setting
+# `level` here overrides the environment variable.
+# [log]
+# level = "info"
+
+# Trusted time sources. Authentication is unavailable while these are unreachable
+# or disagree, and the service exits when the first check fails, so the container
+# needs outbound UDP/123. Use sources inside your trust boundary for production.
+[security_clock]
+servers = ["time.cloudflare.com:123", "ntp.aliyun.com:123"]
+min_agreeing_sources = 2
+poll_interval_seconds = 10
+sample_ttl_seconds = 30
+timeout_millis = 1500

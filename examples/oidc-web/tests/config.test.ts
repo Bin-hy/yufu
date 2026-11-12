@@ -4,13 +4,13 @@ import { ConfigError, loadConfig, publicConfig } from '../src/config.js'
 
 const baseEnv = {
   ISSUER: 'https://id.example.com',
-  CLIENT_ID: 'cobotrix-web-example',
+  CLIENT_ID: 'yufu-web-example',
   CLIENT_SECRET: 'web-client-secret',
   REDIRECT_URI: 'https://app.example.com/callback',
   POST_LOGOUT_REDIRECT_URI: 'https://app.example.com/',
   SCOPE: 'openid profile email',
   SESSION_SECRET: 'x'.repeat(32),
-  READER_CLIENT_ID: 'cobotrix-web-reader',
+  READER_CLIENT_ID: 'yufu-web-reader',
   READER_CLIENT_SECRET: 'reader-secret',
   PORT: '3000',
 } satisfies Record<string, string>

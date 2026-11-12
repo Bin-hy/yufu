@@ -13,7 +13,7 @@ import {
 
 const config: SpaConfig = {
   issuer: 'https://id.example.com',
-  clientId: 'cobotrix-spa-example',
+  clientId: 'yufu-spa-example',
   redirectUri: 'https://spa.example.com/callback',
   postLogoutRedirectUri: 'https://spa.example.com/',
   scope: 'openid profile email',

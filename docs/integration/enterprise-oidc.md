@@ -102,8 +102,8 @@ PORT=3000
 
 ```bash
 pnpm install
-pnpm --filter @cobotrix/oidc-web build
-pnpm --filter @cobotrix/oidc-web start
+pnpm --filter @yufu/oidc-web build
+pnpm --filter @yufu/oidc-web start
 ```
 
 ### 6.3 流程
@@ -148,9 +148,9 @@ PORT=3001
 
 ```bash
 pnpm install
-pnpm --filter @cobotrix/oidc-spa build
-pnpm --filter @cobotrix/oidc-spa start:api
-pnpm --filter @cobotrix/oidc-spa dev
+pnpm --filter @yufu/oidc-spa build
+pnpm --filter @yufu/oidc-spa start:api
+pnpm --filter @yufu/oidc-spa dev
 ```
 
 ### 7.3 流程

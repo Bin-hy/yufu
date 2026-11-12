@@ -60,22 +60,23 @@ desktop.ini
 # OIDC RSA private keys (any environment)
 conf/oidc_rsa_private*.pem
 
-# cobotweb build output (baked into binaries via rust-embed when --features webui)
+# yufu build output (baked into binaries via rust-embed when --features webui)
 # Keep directories alive with .gitkeep so CI builds (--all-features) don't fail on
 # missing rust-embed folders.
 assets/*
-!assets/cobotusr/
-assets/cobotusr/*
-!assets/cobotusr/.gitkeep
+!assets/web/
+assets/web/*
+!assets/web/.gitkeep
 node_modules
 **/node_modules
 **/dist
 **/dist-ssr
 **/.astro
 **/*.local
+.pnpm-store/
 
 # Local configuration overrides (root-level only, not conf/ templates)
-/cobotusr.toml
+/yufu.toml
 
 # redb
 data/uploads/
@@ -83,12 +84,26 @@ data/
 
 # upload files
 storage
-!cobotweb/apps/cobotusr/src/storage/
-!cobotweb/apps/cobotusr/src/storage/**
-cobotweb/apps/cobotusr/test-results/
-cobotweb/apps/cobotusr/playwright-report/
+!web/src/storage/
+!web/src/storage/**
+web/test-results/
+web/playwright-report/
 # Configuration
-/conf/cobotusr.toml
+/conf/yufu.toml
 
 # dev docs
 devdocs/
+
+# container deployment runtime state (see deploy/docker/README.md)
+deploy/docker/state/
+deploy/docker/yufu.toml
+
+# local release packaging output
+release-assets/
+
+# local agent telemetry
+dsh-usage/
+
+# python bytecode
+__pycache__/
+*.pyc

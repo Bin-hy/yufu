@@ -9,12 +9,12 @@ export default defineConfig({
   site,
   integrations: [
     starlight({
-      title: 'cobotusr',
+      title: 'yufu',
       description:
         '单企业统一身份与 SSO 平台：标准 OIDC、细粒度授权、自托管部署。',
       logo: {
         src: './src/assets/logo.svg',
-        alt: 'cobotusr',
+        alt: 'yufu 鱼符',
       },
       favicon: '/favicon.svg',
       defaultLocale: 'root',
@@ -101,6 +101,11 @@ export default defineConfig({
               label: '生产部署',
               translations: { en: 'Deployment' },
               slug: 'operations/deployment',
+            },
+            {
+              label: '容器部署',
+              translations: { en: 'Container deployment' },
+              slug: 'operations/docker',
             },
             {
               label: '安全与备份',

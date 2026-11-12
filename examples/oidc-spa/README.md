@@ -34,9 +34,9 @@ API 进程参数（只在服务端读取）：
 
 ```bash
 pnpm install
-pnpm --filter @cobotrix/oidc-spa build
-pnpm --filter @cobotrix/oidc-spa start:api
-pnpm --filter @cobotrix/oidc-spa dev
+pnpm --filter @yufu/oidc-spa build
+pnpm --filter @yufu/oidc-spa start:api
+pnpm --filter @yufu/oidc-spa dev
 ```
 
 打开 `http://127.0.0.1:5173/`，登录后点击受保护操作。API 默认监听 `http://127.0.0.1:3001`。
@@ -59,9 +59,9 @@ pnpm --filter @cobotrix/oidc-spa dev
 ## 测试
 
 ```bash
-pnpm --filter @cobotrix/oidc-spa check
-pnpm --filter @cobotrix/oidc-spa test
-pnpm --filter @cobotrix/oidc-spa build
+pnpm --filter @yufu/oidc-spa check
+pnpm --filter @yufu/oidc-spa test
+pnpm --filter @yufu/oidc-spa build
 ```
 
 当前单测覆盖公共配置、OIDC 用户流、bearer 校验、Reader 内省、origin 门、后通道通知与缓存时限。构建产物已扫描，不含 Reader secret 或 Reader client id。真实跨站 TLS 与三浏览器验收（T95—T98）尚未完成，不能据此宣称浏览器级交付。

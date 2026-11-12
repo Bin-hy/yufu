@@ -6,41 +6,41 @@
 
 | 命令 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
-| `cargo test -p cobotrix-root security_ -- --test-threads=1` | 81 通过，0 失败 | 旧安全仓储、签发/撤销竞态、预算和提交故障。执行于本轮配置修改及最新 managed 签发 helper 之前，后续需回归。 |
-| `cargo test -p cobotrix-root identity_session_uncertain_commit -- --test-threads=1` | 1 通过，0 失败 | COMMIT 中耗尽原预算，操作只执行一次，不返回秘密；主库已提交的安全回执可查询。 |
-| `cargo test -p cobotrix-root identity_ -- --test-threads=1` | 32 通过，0 失败 | 最新账户 action/profile、迁移、应用版本、准入、多来源代次、会话、真实 RSA/JWKS/ID Token 和提交故障集成测试。执行于本轮配置修改之前。 |
+| `cargo test -p yufu-root security_ -- --test-threads=1` | 81 通过，0 失败 | 旧安全仓储、签发/撤销竞态、预算和提交故障。执行于本轮配置修改及最新 managed 签发 helper 之前，后续需回归。 |
+| `cargo test -p yufu-root identity_session_uncertain_commit -- --test-threads=1` | 1 通过，0 失败 | COMMIT 中耗尽原预算，操作只执行一次，不返回秘密；主库已提交的安全回执可查询。 |
+| `cargo test -p yufu-root identity_ -- --test-threads=1` | 32 通过，0 失败 | 最新账户 action/profile、迁移、应用版本、准入、多来源代次、会话、真实 RSA/JWKS/ID Token 和提交故障集成测试。执行于本轮配置修改之前。 |
 | `cargo test -p auth` | 49 单元测试、8 doctest 通过；1 个既有 doctest ignored | 包含真实 RSA/JWKS ID Token 与 Logout Token 签名；不代表 HTTP OIDC 闭环。 |
-| `cargo test -p cobotusr --lib` | 63 通过，0 失败 | 配置规则与领域单元测试，执行于本轮 SSO/HTTP 编排落盘之前。 |
-| `cargo test -p cobotrix-root identity_migration_production_key -- --test-threads=1` | 1 通过，0 失败 | 生产缺失/损坏密钥拒绝启动且不覆盖，显式 loopback 开发生成权限 0600，生产重载 JWKS 不变。 |
-| `cargo test -p cobotrix-root identity_session_ -- --test-threads=1` | 11 通过，0 失败 | 并发只读恢复、根到期/auth_epoch 拒绝、个人撤销范围和其他浏览器/用户隔离；执行于后续密码/HTTP 编辑之前。 |
-| `cargo check -p cobotusr --all-targets` | 通过，无编译警告 | 包含本轮中心 SSO 服务和 HTTP；既有 proc-macro-error2 future-incompat notice 保留。 |
-| `cargo test -p cobotrix-root identity_browser_ -- --test-threads=1` | 2 通过，0 失败 | HTTP 密码登录、Cookie、并发恢复不覆写、不续期、Origin 拒绝、重登录撤销旧 RP 和退出清 Cookie；flow 用例手工 seed，不是完整 authorize/token 闭环。 |
-| `cargo test -p cobotrix-root identity_session_center_bound_manager_can_manage_independent_mcp_and_revoke_scopes -- --test-threads=1` | 1 通过，0 失败 | 中心绑定管理凭据创建、改名、轮换、删除独立 MCP，撤销 RP；中心退出使 manager 失效但保留独立 MCP。 |
-| `cargo test -p cobotusr --lib identity_browser_ -- --test-threads=1` | 2 通过，0 失败 | 生产 Cookie/Origin/CSRF 上下文与读取复用；执行于 action Cookie 和 write_challenge 编辑之前，需回归。 |
-| `cargo test -p cobotrix-root identity_account_service_ -- --test-threads=1` | 4 通过，0 失败 | 管理员签发、邀请开户与撞名、真实资料、并发 reset/change、延迟提交故障与密码空格。执行于精确管理授权及最新 action HTTP 编辑之前。 |
-| `cargo test -p cobotrix-root security_ -- --test-threads=1` | 69 通过，12 失败 | 新配置改变了旧 fixture 的 issuer/Cookie 模式，旧 fixture 错误期待生产 HTTP 的 Host Cookie。已区分固定 HTTPS 生产策略与显式 loopback 开发策略，待完整复跑。 |
-| `cargo test -p cobotrix-root cobotusr::routes::auth:: -- --test-threads=1` | 17 通过，1 失败 | fixture 修复后仅诊断用例期待旧的无效生产 HTTP 原因；已改为生产 HTTPS 缺失 Cookie 的原因。 |
-| `cargo test -p cobotrix-root security_browser_loopback_aliases_and_rejection_diagnostics -- --test-threads=1` | 1 通过，0 失败 | 上述诊断用例复跑通过；仍不能代替完整旧安全回归。 |
-| `cargo test -p cobotrix-root identity_actions_http_ -- --test-threads=1` | 3 通过，0 失败 | 邀请/重置精确权限、动作 proof 的 HttpOnly Cookie 和浏览器绑定、并发只读 inspection、未知字段拒绝、密码提交故障不清 Cookie、reset 清本人根。执行于后续资格 HTTP 增补前。 |
-| `cargo test -p cobotrix-root identity_ -- --test-threads=1` | 49 通过，0 失败 | 当前账户服务、4 个账户动作/治理 HTTP 用例、迁移升级/回退、应用/分配仓储、会话、RSA/JWKS、并发和提交故障回归。覆盖最后管理员并发保护、developer_managed 负责人保护、多来源代次、停用/启用不复活旧会话，以及迁移继承用户拒绝且不恢复编辑后的角色授权。仍无 authorize/token HTTP 闭环和跨站浏览器证据。 |
+| `cargo test -p yufu --lib` | 63 通过，0 失败 | 配置规则与领域单元测试，执行于本轮 SSO/HTTP 编排落盘之前。 |
+| `cargo test -p yufu-root identity_migration_production_key -- --test-threads=1` | 1 通过，0 失败 | 生产缺失/损坏密钥拒绝启动且不覆盖，显式 loopback 开发生成权限 0600，生产重载 JWKS 不变。 |
+| `cargo test -p yufu-root identity_session_ -- --test-threads=1` | 11 通过，0 失败 | 并发只读恢复、根到期/auth_epoch 拒绝、个人撤销范围和其他浏览器/用户隔离；执行于后续密码/HTTP 编辑之前。 |
+| `cargo check -p yufu --all-targets` | 通过，无编译警告 | 包含本轮中心 SSO 服务和 HTTP；既有 proc-macro-error2 future-incompat notice 保留。 |
+| `cargo test -p yufu-root identity_browser_ -- --test-threads=1` | 2 通过，0 失败 | HTTP 密码登录、Cookie、并发恢复不覆写、不续期、Origin 拒绝、重登录撤销旧 RP 和退出清 Cookie；flow 用例手工 seed，不是完整 authorize/token 闭环。 |
+| `cargo test -p yufu-root identity_session_center_bound_manager_can_manage_independent_mcp_and_revoke_scopes -- --test-threads=1` | 1 通过，0 失败 | 中心绑定管理凭据创建、改名、轮换、删除独立 MCP，撤销 RP；中心退出使 manager 失效但保留独立 MCP。 |
+| `cargo test -p yufu --lib identity_browser_ -- --test-threads=1` | 2 通过，0 失败 | 生产 Cookie/Origin/CSRF 上下文与读取复用；执行于 action Cookie 和 write_challenge 编辑之前，需回归。 |
+| `cargo test -p yufu-root identity_account_service_ -- --test-threads=1` | 4 通过，0 失败 | 管理员签发、邀请开户与撞名、真实资料、并发 reset/change、延迟提交故障与密码空格。执行于精确管理授权及最新 action HTTP 编辑之前。 |
+| `cargo test -p yufu-root security_ -- --test-threads=1` | 69 通过，12 失败 | 新配置改变了旧 fixture 的 issuer/Cookie 模式，旧 fixture 错误期待生产 HTTP 的 Host Cookie。已区分固定 HTTPS 生产策略与显式 loopback 开发策略，待完整复跑。 |
+| `cargo test -p yufu-root yufu::routes::auth:: -- --test-threads=1` | 17 通过，1 失败 | fixture 修复后仅诊断用例期待旧的无效生产 HTTP 原因；已改为生产 HTTPS 缺失 Cookie 的原因。 |
+| `cargo test -p yufu-root security_browser_loopback_aliases_and_rejection_diagnostics -- --test-threads=1` | 1 通过，0 失败 | 上述诊断用例复跑通过；仍不能代替完整旧安全回归。 |
+| `cargo test -p yufu-root identity_actions_http_ -- --test-threads=1` | 3 通过，0 失败 | 邀请/重置精确权限、动作 proof 的 HttpOnly Cookie 和浏览器绑定、并发只读 inspection、未知字段拒绝、密码提交故障不清 Cookie、reset 清本人根。执行于后续资格 HTTP 增补前。 |
+| `cargo test -p yufu-root identity_ -- --test-threads=1` | 49 通过，0 失败 | 当前账户服务、4 个账户动作/治理 HTTP 用例、迁移升级/回退、应用/分配仓储、会话、RSA/JWKS、并发和提交故障回归。覆盖最后管理员并发保护、developer_managed 负责人保护、多来源代次、停用/启用不复活旧会话，以及迁移继承用户拒绝且不恢复编辑后的角色授权。仍无 authorize/token HTTP 闭环和跨站浏览器证据。 |
 
 ## 授权、令牌与内省阶段的补充证据
 
 | 命令/范围 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
-| `cargo test -p cobotrix-root identity_migration -- --test-threads=1` | 11 通过，0 失败 | 账户/应用/会话约束、升级保留历史、显式 Provider 回填、回退与生产密钥；执行于后续协议编辑之前。 |
+| `cargo test -p yufu-root identity_migration -- --test-threads=1` | 11 通过，0 失败 | 账户/应用/会话约束、升级保留历史、显式 Provider 回填、回退与生产密钥；执行于后续协议编辑之前。 |
 | 授权服务及 HTTP 筛选 | 6 通过，0 失败 | SSO 复用根、独立 RP、同意原子完成、强制重新认证、合法错误回调、仅 flow_id 的登录/同意恢复。该阶段执行，不作为真实跨站浏览器证据。 |
 | 原授权码/刷新筛选 | 11 通过，0 失败 | 标准 Web/SPA 兑换、代码一次消费、真实签名、刷新轮换/重放、根期限及提交故障；执行于内省/CORS 增补之前。 |
 | 原 UserInfo 筛选 | 2 通过，0 失败 | 按原 scopes 返回真实资料、注册表与当前准入验证、数据库故障；执行于 CORS 增补之前。 |
-| `cargo test -p cobotrix-root identity_protocol_ -- --test-threads=1` | 16 通过，1 失败 | 17 项协议集成；唯一失败为内省测试错误期待 scope 顺序，已按集合的稳定排序改正。执行于后续完整认证格式及 CORS 测试增补之前。 |
-| `cargo test -p cobotrix-root identity_protocol_introspection_ -- --test-threads=1` | 1 通过，0 失败 | scope 断言修正后，注册表 access/refresh 及跨客户端隐藏复跑通过；不是完整内省回归。 |
-| `cargo test -p cobotrix-root identity_protocol_cors_ -- --test-threads=1` | 1 通过，0 失败 | 精确 SPA Origin/预检、中心与内省不开放、目标环境 Web 跨域兑换拒绝、SPA 兑换/UserInfo/环境停用。执行于显式 wildcard 旧 CORS fixture 和最终认证格式编辑之前。 |
-| `cargo test -p cobotusr --lib` | 75 通过，0 失败 | 领域规则、配置及协议响应规则；执行于最后 Basic/Bearer 大小写编辑之前。 |
-| `cargo clippy -p cobotusr --all-targets -- -D warnings` | 通过 | 既有 proc-macro-error2 future incompat notice 保留；执行于最后认证格式及 legacy Origin 编辑之前。 |
-| `cargo test -p cobotrix-root identity_ -- --test-threads=1` | 71 通过，2 失败，372.20 秒 | 73 项完整 identity 回归覆盖账户、授权/同意、code/refresh/UserInfo、内省、CORS、迁移、会话与故障。失败仅为 token.revoke 的审计字段不在白名单，发生在新增注册服务之前。 |
-| `cargo test -p cobotrix-root identity_protocol_revoke_ -- --test-threads=1` | 2 通过，0 失败，8.80 秒 | 将审计摘要 `subject` 改为已有 `target_user_id` 后复跑；验证客户端审计 actor_id 为空、目标用户准确、grant/RP/audit/outbox 原子撤销、跨客户端及中心根隔离、提交失败完整回滚。 |
-| `cargo test -p cobotrix-root identity_application_service_registration_ -- --test-threads=1` | 3 通过，0 失败，15.71 秒 | 自助两环境注册、独立密钥与生产 disabled、无开发资格拒绝、SPA 无密钥/机器 grant、并发同键只有一个应用、重复只读回执、不同请求冲突、延迟提交失败无半应用。初版测试浏览器夹具格式错误已修，不算产品服务失败。 |
-| `cargo test -p cobotrix-root identity_developer_http_ -- --test-threads=1` | 2 通过，0 失败，13.63 秒 | 注册的 Cookie/CSRF/资格/幂等键/owner 注入拒绝；应用详情、成员范围分页及操作回执不包含密钥；reader 列表/创建/轮换/停用、应用与环境路径绑定、旧 revision 冲突及匿名拒绝。 |
+| `cargo test -p yufu-root identity_protocol_ -- --test-threads=1` | 16 通过，1 失败 | 17 项协议集成；唯一失败为内省测试错误期待 scope 顺序，已按集合的稳定排序改正。执行于后续完整认证格式及 CORS 测试增补之前。 |
+| `cargo test -p yufu-root identity_protocol_introspection_ -- --test-threads=1` | 1 通过，0 失败 | scope 断言修正后，注册表 access/refresh 及跨客户端隐藏复跑通过；不是完整内省回归。 |
+| `cargo test -p yufu-root identity_protocol_cors_ -- --test-threads=1` | 1 通过，0 失败 | 精确 SPA Origin/预检、中心与内省不开放、目标环境 Web 跨域兑换拒绝、SPA 兑换/UserInfo/环境停用。执行于显式 wildcard 旧 CORS fixture 和最终认证格式编辑之前。 |
+| `cargo test -p yufu --lib` | 75 通过，0 失败 | 领域规则、配置及协议响应规则；执行于最后 Basic/Bearer 大小写编辑之前。 |
+| `cargo clippy -p yufu --all-targets -- -D warnings` | 通过 | 既有 proc-macro-error2 future incompat notice 保留；执行于最后认证格式及 legacy Origin 编辑之前。 |
+| `cargo test -p yufu-root identity_ -- --test-threads=1` | 71 通过，2 失败，372.20 秒 | 73 项完整 identity 回归覆盖账户、授权/同意、code/refresh/UserInfo、内省、CORS、迁移、会话与故障。失败仅为 token.revoke 的审计字段不在白名单，发生在新增注册服务之前。 |
+| `cargo test -p yufu-root identity_protocol_revoke_ -- --test-threads=1` | 2 通过，0 失败，8.80 秒 | 将审计摘要 `subject` 改为已有 `target_user_id` 后复跑；验证客户端审计 actor_id 为空、目标用户准确、grant/RP/audit/outbox 原子撤销、跨客户端及中心根隔离、提交失败完整回滚。 |
+| `cargo test -p yufu-root identity_application_service_registration_ -- --test-threads=1` | 3 通过，0 失败，15.71 秒 | 自助两环境注册、独立密钥与生产 disabled、无开发资格拒绝、SPA 无密钥/机器 grant、并发同键只有一个应用、重复只读回执、不同请求冲突、延迟提交失败无半应用。初版测试浏览器夹具格式错误已修，不算产品服务失败。 |
+| `cargo test -p yufu-root identity_developer_http_ -- --test-threads=1` | 2 通过，0 失败，13.63 秒 | 注册的 Cookie/CSRF/资格/幂等键/owner 注入拒绝；应用详情、成员范围分页及操作回执不包含密钥；reader 列表/创建/轮换/停用、应用与环境路径绑定、旧 revision 冲突及匿名拒绝。 |
 
 以上已取得的历史结果对应执行时的源码，不自动覆盖之后的编辑。尚未复跑完整旧 security/OIDC 与完整质量门禁。
 
@@ -58,14 +58,14 @@
 
 | 命令/范围 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
-| `cargo test -p cobotrix-root -- --test-threads=1` | 183 通过、5 失败，共 188 项，641.06 秒 | 执行于治理扩展之前；5 个失败涉及固定 discovery 在时钟不可用时读取和冲突客户端认证的错误分类，修复后相关筛选已通过，尚未完整复跑。 |
-| `cargo test -p cobotrix-root cobotusr::routes::auth:: -- --test-threads=1` | 18 通过，0 失败，69.62 秒 | 修复后旧认证、注册、退出、CSRF、撤销及故障行为回归。 |
-| `cargo test -p cobotrix-root security_t21_http_ -- --test-threads=1` | 3 通过，0 失败，9.30 秒 | 固定部署 discovery/JWKS 可读取，缺失或不可信时钟、错误签名不能消费授权码。 |
-| `cargo test -p cobotrix-root identity_protocol_token_http_ -- --test-threads=1` | 1 通过，0 失败，7.73 秒 | 标准 Basic/post/SPA 和冲突认证 HTTP 错误分类。 |
-| `cargo test -p cobotusr --lib` | 78 通过，0 失败 | 执行于最新用户组/分配扩展之前。 |
-| `cargo test -p cobotrix-root identity_application_governance_ -- --test-threads=1` | 4 通过，0 失败，20.21 秒 | 配置切换/新候选 client、固定审批快照和独立审批/有限退出确认、单环境秘密与独立 secret_revision/故障回滚、候选隐私/owner交接/多来源保留。执行于用户组/分配扩展之前。 |
-| `cargo test -p cobotrix-root identity_developer_http_configuration_ -- --test-threads=1` | 1 通过，0 失败，6.35 秒 | 注册、生产草案、提交、自批拒绝、独立批准、精确 deny 优先、停用及缺少 CSRF；执行于 secret_revision 及分配扩展之前。 |
-| `cargo test -p cobotrix-root identity_protocol_reader_ -- --test-threads=1` | 1 通过，0 失败，12.00 秒 | reader 在环境信任停用时内省失效，重新启用不绕过当前注册表状态。 |
+| `cargo test -p yufu-root -- --test-threads=1` | 183 通过、5 失败，共 188 项，641.06 秒 | 执行于治理扩展之前；5 个失败涉及固定 discovery 在时钟不可用时读取和冲突客户端认证的错误分类，修复后相关筛选已通过，尚未完整复跑。 |
+| `cargo test -p yufu-root yufu::routes::auth:: -- --test-threads=1` | 18 通过，0 失败，69.62 秒 | 修复后旧认证、注册、退出、CSRF、撤销及故障行为回归。 |
+| `cargo test -p yufu-root security_t21_http_ -- --test-threads=1` | 3 通过，0 失败，9.30 秒 | 固定部署 discovery/JWKS 可读取，缺失或不可信时钟、错误签名不能消费授权码。 |
+| `cargo test -p yufu-root identity_protocol_token_http_ -- --test-threads=1` | 1 通过，0 失败，7.73 秒 | 标准 Basic/post/SPA 和冲突认证 HTTP 错误分类。 |
+| `cargo test -p yufu --lib` | 78 通过，0 失败 | 执行于最新用户组/分配扩展之前。 |
+| `cargo test -p yufu-root identity_application_governance_ -- --test-threads=1` | 4 通过，0 失败，20.21 秒 | 配置切换/新候选 client、固定审批快照和独立审批/有限退出确认、单环境秘密与独立 secret_revision/故障回滚、候选隐私/owner交接/多来源保留。执行于用户组/分配扩展之前。 |
+| `cargo test -p yufu-root identity_developer_http_configuration_ -- --test-threads=1` | 1 通过，0 失败，6.35 秒 | 注册、生产草案、提交、自批拒绝、独立批准、精确 deny 优先、停用及缺少 CSRF；执行于 secret_revision 及分配扩展之前。 |
+| `cargo test -p yufu-root identity_protocol_reader_ -- --test-threads=1` | 1 通过，0 失败，12.00 秒 | reader 在环境信任停用时内省失效，重新启用不绕过当前注册表状态。 |
 
 管理员直接接入、组/分配 HTTP、旧接口治理、标准 RP 退出与网络投递器已经落盘；生命周期全部竞态、旧接口影响图性能、真实 HTTPS 投递、三个 UI 入口与真实浏览器仍未完整验收。以上为局部功能证据。
 
@@ -74,15 +74,15 @@
 | 命令/范围 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
 | 用户组/分配/管理员服务及 HTTP 筛选（前序已执行结果） | 14 通过、0 失败 | 管理员直接注册、组/分配、精确权限、提交失败；保留前序范围记录，不补造具体命令。 |
-| `cargo test -p cobotrix-root identity_protocol_logout_ -- --test-threads=1`（前序） | 5 通过、0 失败 | 标准 /oidc/end-session、hint 关联、确认绑定、匿名与另一浏览器根隔离及故障回滚。 |
-| `cargo test -p cobotrix-root identity_session_ -- --test-threads=1`（前序） | 16 通过、0 失败 | 包含 dispatcher/worker/cleanup 的租约、稳定 jti、重试、失败、取消与重启；成功投递采用 mock，不代表真实 TLS 成功发送。 |
-| `cargo test -p cobotrix-root identity_protocol_ -- --test-threads=1`（前序） | 24 通过、1 失败 | 失败为 metadata OPTIONS CORS；快速路径已限制为无 Origin 的 GET/HEAD，尚未取得修复后的完整复跑结果。 |
-| `cargo test -p cobotrix-root identity_protocol_reader_ -- --test-threads=1`（前序） | 4 通过、0 失败，38.35 秒 | 用途隔离、同键并发与无秘密回执、admin 非成员精确读写权限、延迟 COMMIT 回滚；执行于本轮纳管扩展之前。 |
-| `cargo test -p cobotrix-root test_ -- --test-threads=1`（前序） | 17 通过、0 失败，110.90 秒 | 旧 CRUD、recording、认证、完整旧 OIDC、sync_permissions；执行于本轮旧 consent 事务及 bootstrap 封闭之前。 |
-| `cargo test -p cobotrix-root identity_migration_legacy_ -- --test-threads=1` | 8 通过、0 失败，54.37 秒 | SQL fixture 修正后，当前管理凭据、有效权限变更撤销、最后管理员/owner、并发管理员降级、旧 client 原子审计与 COMMIT 故障；执行于本轮 consent/bootstrap 扩展之前。 |
-| `cargo test -p cobotrix-root identity_developer_http_reader_ -- --test-threads=1` | 1 通过、0 失败，10.02 秒 | Reader HTTP 路径、幂等键、revision、脱敏列表和匿名拒绝。 |
-| `cargo test -p cobotusr --lib` | 84 通过、0 失败 | 包含两项纳管输入规则；执行于旧 token 客户端锁增补之前。 |
-| `cargo test -p cobotrix-root identity_migration_adoption_ -- --test-threads=1` | 6 通过、0 失败，44.80 秒 | 关联 application/client/hash/key 保留、孤立 SPA 两环境、同键并发首次秘密、issuer/多应用/快照/类型拒绝、COMMIT 失败无半纳管、HTTP 当前权限/CSRF/键、bootstrap 重启无写入。尚未覆盖历史 JWT issuer 解析、派生图专门样本和纳管/签发交错的专项并发。 |
+| `cargo test -p yufu-root identity_protocol_logout_ -- --test-threads=1`（前序） | 5 通过、0 失败 | 标准 /oidc/end-session、hint 关联、确认绑定、匿名与另一浏览器根隔离及故障回滚。 |
+| `cargo test -p yufu-root identity_session_ -- --test-threads=1`（前序） | 16 通过、0 失败 | 包含 dispatcher/worker/cleanup 的租约、稳定 jti、重试、失败、取消与重启；成功投递采用 mock，不代表真实 TLS 成功发送。 |
+| `cargo test -p yufu-root identity_protocol_ -- --test-threads=1`（前序） | 24 通过、1 失败 | 失败为 metadata OPTIONS CORS；快速路径已限制为无 Origin 的 GET/HEAD，尚未取得修复后的完整复跑结果。 |
+| `cargo test -p yufu-root identity_protocol_reader_ -- --test-threads=1`（前序） | 4 通过、0 失败，38.35 秒 | 用途隔离、同键并发与无秘密回执、admin 非成员精确读写权限、延迟 COMMIT 回滚；执行于本轮纳管扩展之前。 |
+| `cargo test -p yufu-root test_ -- --test-threads=1`（前序） | 17 通过、0 失败，110.90 秒 | 旧 CRUD、recording、认证、完整旧 OIDC、sync_permissions；执行于本轮旧 consent 事务及 bootstrap 封闭之前。 |
+| `cargo test -p yufu-root identity_migration_legacy_ -- --test-threads=1` | 8 通过、0 失败，54.37 秒 | SQL fixture 修正后，当前管理凭据、有效权限变更撤销、最后管理员/owner、并发管理员降级、旧 client 原子审计与 COMMIT 故障；执行于本轮 consent/bootstrap 扩展之前。 |
+| `cargo test -p yufu-root identity_developer_http_reader_ -- --test-threads=1` | 1 通过、0 失败，10.02 秒 | Reader HTTP 路径、幂等键、revision、脱敏列表和匿名拒绝。 |
+| `cargo test -p yufu --lib` | 84 通过、0 失败 | 包含两项纳管输入规则；执行于旧 token 客户端锁增补之前。 |
+| `cargo test -p yufu-root identity_migration_adoption_ -- --test-threads=1` | 6 通过、0 失败，44.80 秒 | 关联 application/client/hash/key 保留、孤立 SPA 两环境、同键并发首次秘密、issuer/多应用/快照/类型拒绝、COMMIT 失败无半纳管、HTTP 当前权限/CSRF/键、bootstrap 重启无写入。尚未覆盖历史 JWT issuer 解析、派生图专门样本和纳管/签发交错的专项并发。 |
 
 T66 使用单例 Policy barrier、Application/Environment/OAuthClient 等统一锁后重检注册凭据和 method/URI 权限；旧角色、权限、用户覆盖、账户、应用及客户端写入共用原预算和事务。账户删除改为停用，旧开户/密码/managed 编辑拒绝并指向受控流程，recording/人员/权限目录限管理员。有效权限变化才递增账户代次、撤销根并重算环境。全范围发现目前最多 1000 用户且逐用户加载，容量与性能尚未完整核验。
 
@@ -98,21 +98,21 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 
 | 命令/范围 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
-| `cargo check -p cobotusr` | 通过，16.32 秒 | 本轮控制台服务/路由编译检查；仅有既有 `proc-macro-error2` future-incompat notice。 |
-| `cargo test -p cobotrix-root identity_console_ -- --test-threads=1` | 3 通过、0 失败，19.80 秒 | 本人元数据最小披露与 admin 精确授权、非法分页/停用身份拒绝；同意撤回提交失败不产生半状态；投递重试保留 endpoint/jti/attempt_count、拒绝租约冲突/已送达/过期/未知记录。 |
-| `pnpm --filter @cobotweb/cobotusr test` | 8 个文件、79 项通过、0 失败，1.51 秒 | 中心会话恢复、CSRF/401/403、页面入口与 action 秘密处理等前端单测。 |
-| `pnpm --filter @cobotweb/cobotusr check` | 通过 | `vue-tsc -b` 类型检查。 |
-| `pnpm --filter @cobotweb/cobotusr lint` | 通过 | ESLint 对 `src`、`tests` 与配置执行，无错误。 |
-| `pnpm --filter @cobotweb/cobotusr build` | 通过，2.45 秒 | 生成 `assets/cobotusr` 产物；browserslist 数据偏旧与 outDir 常规 warning 不影响构建。 |
+| `cargo check -p yufu` | 通过，16.32 秒 | 本轮控制台服务/路由编译检查；仅有既有 `proc-macro-error2` future-incompat notice。 |
+| `cargo test -p yufu-root identity_console_ -- --test-threads=1` | 3 通过、0 失败，19.80 秒 | 本人元数据最小披露与 admin 精确授权、非法分页/停用身份拒绝；同意撤回提交失败不产生半状态；投递重试保留 endpoint/jti/attempt_count、拒绝租约冲突/已送达/过期/未知记录。 |
+| `pnpm --filter @yufu/web test` | 8 个文件、79 项通过、0 失败，1.51 秒 | 中心会话恢复、CSRF/401/403、页面入口与 action 秘密处理等前端单测。 |
+| `pnpm --filter @yufu/web check` | 通过 | `vue-tsc -b` 类型检查。 |
+| `pnpm --filter @yufu/web lint` | 通过 | ESLint 对 `src`、`tests` 与配置执行，无错误。 |
+| `pnpm --filter @yufu/web build` | 通过，2.45 秒 | 生成 `assets/web` 产物；browserslist 数据偏旧与 outDir 常规 warning 不影响构建。 |
 | `cargo fmt --all -- --check` | 通过 | 当前工作区格式检查。 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | 通过，5.07 秒 | 仅保留既有 `proc-macro-error2` future-incompat notice。 |
 | `cargo test --workspace -- --test-threads=1`（第一次完整运行） | root 集成测试 228 通过、1 失败，992.98 秒；auth 另 50 项通过 | 失败为 `identity_migration_managed_session_code_and_logout_links_are_complete`：新增种子迁移后，测试仍以“回滚最后一步”回到 `identity_code_rp` 之前，实际只回滚了 no-op 种子，升级断言得到 0。 |
 | 修复后单项复跑 | 1 通过、0 失败，1.91 秒 | 按迁移名动态计算回滚步数；该用例已覆盖回到 `identity_code_rp` 前 schema 再升级的路径。 |
-| `cargo test --workspace -- --test-threads=1`（修复后完整复跑） | 全部通过：auth 50、root 集成 229、cobotusr 86；auth doctest 8 通过/1 ignored、cobotusr doctest 1 通过；root 集成 1004.25 秒 | 默认 feature 的完整 workspace 回归；失败用例已在同一源码状态下转绿，无失败、无新增 ignored。尚未加 `--all-features`，不能替代 checklist C82 的最终门禁。 |
+| `cargo test --workspace -- --test-threads=1`（修复后完整复跑） | 全部通过：auth 50、root 集成 229、yufu 86；auth doctest 8 通过/1 ignored、yufu doctest 1 通过；root 集成 1004.25 秒 | 默认 feature 的完整 workspace 回归；失败用例已在同一源码状态下转绿，无失败、无新增 ignored。尚未加 `--all-features`，不能替代 checklist C82 的最终门禁。 |
 
 第一次完整运行中唯一失败是测试夹具的迁移位置假设，不是产品约束失败；修复只改测试回滚步数计算。修复后的完整 workspace 默认 feature 复跑已全部通过，但 T102/AC27 还要求 `--all-targets --all-features`、参考客户端和真实浏览器/HTTPS 证据，因此当前仍不能宣称整体交付完成。
 
-当前代码盘点：工作区有 94 个未跟踪新文件、81 个已跟踪修改文件；`cobotusr/src` 约 4.1 万行 Rust，`tests` 约 2.1 万行，中心前端约 8.2 千行；路由层 30 个模块、119 处路由注册。核心后端已覆盖账户/邀请/重置、中心 SSO、授权/同意/code/refresh/UserInfo/内省/撤销、标准退出与后通道投递、两环境应用注册/审批/负责人/Reader、组/分配、历史纳管和审计/outbox。
+当前代码盘点：工作区有 94 个未跟踪新文件、81 个已跟踪修改文件；`yufu/src` 约 4.1 万行 Rust，`tests` 约 2.1 万行，中心前端约 8.2 千行；路由层 30 个模块、119 处路由注册。核心后端已覆盖账户/邀请/重置、中心 SSO、授权/同意/code/refresh/UserInfo/内省/撤销、标准退出与后通道投递、两环境应用注册/审批/负责人/Reader、组/分配、历史纳管和审计/outbox。
 
 尚未完成的关键交付：标准 `openid-client` Web 示例、`oidc-client-ts` SPA 与独立保护 API 示例尚未创建；没有真实跨站 TLS、Chromium/Firefox/WebKit 的 A→B SSO/新标签页/退出验收，也没有真实 HTTPS 后通道成功发送证据；`tests/e2e` 仍使用 `127.0.0.1:5188` 假接口 server。UI 已补审批时固定快照对比（见下节），仍缺开发者本人应用投递概况、旧隐藏管理页面的中心身份适配，以及 Reader/候选/历史扫描的完整分页遍历。旧 `legacy_client` 仍可能以错误差异暴露 app_key 是否存在，旧全范围治理仍受 1000 用户和逐用户加载限制。生产升级演练、容量/延迟、备份恢复和运维文档未完成。C01—C90 及四项纳管补充检查共 94 个复选框全部保持未勾选。
 
@@ -129,18 +129,18 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 
 | 命令 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
-| `cargo test -p cobotrix-root --all-features security_browser_ -- --test-threads=1` | 5 通过、0 失败，37.39 秒 | 含 Chromium/Firefox/WebKit 的 `127.0.0.1` 与 `localhost` 登录/刷新/退出、WebKit 明文 HTTP 诊断；真实跨站 TLS 仍不在其中。 |
+| `cargo test -p yufu-root --all-features security_browser_ -- --test-threads=1` | 5 通过、0 失败，37.39 秒 | 含 Chromium/Firefox/WebKit 的 `127.0.0.1` 与 `localhost` 登录/刷新/退出、WebKit 明文 HTTP 诊断；真实跨站 TLS 仍不在其中。 |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | 通过，24.68 秒 | 仅保留 `proc-macro-error2` future-incompat notice。 |
-| `cargo test --workspace --all-targets --all-features -- --test-threads=1` | auth 50、root 集成 231、cobotusr 86，全部 0 失败；root 集成 734.87 秒 | 本轮依赖升级与浏览器修复后的完整全 feature 回归；`--all-targets` 不含 doctest，doctest 单独执行。 |
-| `cargo test --workspace --doc --all-features` | auth 8 通过/1 ignored、cobotusr 1 通过，0 失败 | 文档示例编译与运行。 |
+| `cargo test --workspace --all-targets --all-features -- --test-threads=1` | auth 50、root 集成 231、yufu 86，全部 0 失败；root 集成 734.87 秒 | 本轮依赖升级与浏览器修复后的完整全 feature 回归；`--all-targets` 不含 doctest，doctest 单独执行。 |
+| `cargo test --workspace --doc --all-features` | auth 8 通过/1 ignored、yufu 1 通过，0 失败 | 文档示例编译与运行。 |
 | `cargo build --workspace --all-targets --all-features --release` | 通过，2 分 39 秒 | release 全目标构建。 |
 | `cargo fmt --all -- --check` | 通过 | 当前工作区格式。 |
 | `cargo machete` | 未发现未使用依赖 | 删除 `libs/auth` 的 `headers`、`log` 后复跑。 |
 | `cargo audit` | 退出码 0；剩余 5 条在 `.cargo/audit.toml` 中逐条记录理由 | `libsqlite3-sys`/`rkyv` 仅来自未启用的可选驱动/特性，`arrow-data` 仅来自未启用的 `sea-orm-arrow`，`astral-tokio-tar` 仅 dev（testcontainers），`proc-macro-error2` 仅构建期 proc-macro。 |
-| `pnpm --filter @cobotweb/cobotusr test` | 9 个文件、81 项通过、0 失败 | 含新增审批快照对比用例。 |
-| `pnpm --filter @cobotweb/cobotusr check` | 通过 | `vue-tsc -b`。 |
-| `pnpm --filter @cobotweb/cobotusr lint` | 通过 | ESLint。 |
-| `pnpm --filter @cobotweb/cobotusr build` | 通过，2.71 秒 | 生成 `assets/cobotusr` 产物。 |
+| `pnpm --filter @yufu/web test` | 9 个文件、81 项通过、0 失败 | 含新增审批快照对比用例。 |
+| `pnpm --filter @yufu/web check` | 通过 | `vue-tsc -b`。 |
+| `pnpm --filter @yufu/web lint` | 通过 | ESLint。 |
+| `pnpm --filter @yufu/web build` | 通过，2.71 秒 | 生成 `assets/web` 产物。 |
 
 本轮之后仍未交付的部分保持不变：`examples/` 参考客户端、真实跨站 TLS 与三浏览器 A→B SSO/新标签页/退出验收、真实 HTTPS 后通道成功发送、开发者本人应用投递概况、旧隐藏管理页的中心身份适配，以及 Reader/候选/历史扫描的完整分页遍历。94 个复选框继续保持未勾选。
 
@@ -155,13 +155,13 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 
 | 命令 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
-| `cargo test -p cobotrix-root --all-features identity_console_app_deliveries -- --test-threads=1` | 1 通过、0 失败，3.94 秒 | 同应用同环境的两次撤回产生 ≥2 条投递；limit=1 连翻两页 id 递增；生产环境空列表；非成员 `OwnerRequired`；跨应用环境 `Forbidden`；limit=0 与非法游标 `InvalidInput`；`/developer` 与 `/admin` 均 200、`Cache-Control: no-store`、无敏感键、未登录 401。 |
-| `cargo test -p cobotrix-root --all-features identity_legacy -- --test-threads=1` | 8 通过、0 失败 | 含先凭据后 app_key 的 401 行为。 |
-| `cargo test -p cobotrix-root --all-features sync_permissions -- --test-threads=1` | 2 通过、0 失败 | 错误 secret 与不存在 app_key 均 401。 |
-| `pnpm --filter @cobotweb/cobotusr test` | 10 个文件、91 项通过、0 失败 | 含投递概况映射、虚假候选分页与 `getAppDeliveries` 桩。 |
-| `pnpm --filter @cobotweb/cobotusr check` / `lint` / `build` | 均通过，构建 2.47 秒 | `vue-tsc -b`、ESLint、产物落 `assets/cobotusr`。 |
-| `cargo test --workspace --all-targets --all-features -- --test-threads=1` | 全部通过：auth 50（3.62 秒）、root 集成 233（776.85 秒）、cobotusr 86（0.21 秒），0 失败、0 新增 ignored，退出码 0 | 含三引擎 SSO 用例（Chromium+Firefox 10 项 17.0 秒、WebKit 四组场景通过）与本人投递概况用例；此为本轮最终门禁，早期被中断的运行不计入。 |
-| `cargo test --workspace --doc --all-features` | auth 8 通过 / 1 ignored、cobotusr 1 通过（compile fail 用例），0 失败 | 文档示例编译与运行。 |
+| `cargo test -p yufu-root --all-features identity_console_app_deliveries -- --test-threads=1` | 1 通过、0 失败，3.94 秒 | 同应用同环境的两次撤回产生 ≥2 条投递；limit=1 连翻两页 id 递增；生产环境空列表；非成员 `OwnerRequired`；跨应用环境 `Forbidden`；limit=0 与非法游标 `InvalidInput`；`/developer` 与 `/admin` 均 200、`Cache-Control: no-store`、无敏感键、未登录 401。 |
+| `cargo test -p yufu-root --all-features identity_legacy -- --test-threads=1` | 8 通过、0 失败 | 含先凭据后 app_key 的 401 行为。 |
+| `cargo test -p yufu-root --all-features sync_permissions -- --test-threads=1` | 2 通过、0 失败 | 错误 secret 与不存在 app_key 均 401。 |
+| `pnpm --filter @yufu/web test` | 10 个文件、91 项通过、0 失败 | 含投递概况映射、虚假候选分页与 `getAppDeliveries` 桩。 |
+| `pnpm --filter @yufu/web check` / `lint` / `build` | 均通过，构建 2.47 秒 | `vue-tsc -b`、ESLint、产物落 `assets/web`。 |
+| `cargo test --workspace --all-targets --all-features -- --test-threads=1` | 全部通过：auth 50（3.62 秒）、root 集成 233（776.85 秒）、yufu 86（0.21 秒），0 失败、0 新增 ignored，退出码 0 | 含三引擎 SSO 用例（Chromium+Firefox 10 项 17.0 秒、WebKit 四组场景通过）与本人投递概况用例；此为本轮最终门禁，早期被中断的运行不计入。 |
+| `cargo test --workspace --doc --all-features` | auth 8 通过 / 1 ignored、yufu 1 通过（compile fail 用例），0 失败 | 文档示例编译与运行。 |
 | `cargo build --workspace --all-targets --all-features --release` | 通过，1 分 27 秒 | release 全目标构建，独立部署形态未变。 |
 | `cargo fmt --all -- --check` | 退出码 0 | 当前工作区格式。 |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | 通过 | 仅既有 `proc-macro-error2` future-incompat notice。 |
@@ -187,10 +187,10 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 
 | 命令 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
-| `pnpm --filter @cobotweb/cobotusr check` | 通过 | `vue-tsc -b`，删除后无悬空引用。 |
-| `pnpm --filter @cobotweb/cobotusr lint` | 通过 | ESLint 覆盖 `src`、`tests` 与配置。 |
-| `pnpm --filter @cobotweb/cobotusr test` | 11 个文件、92 项通过 | 新增 `legacy-routes.test.ts` 断言旧路径只重定向、不挂载组件；移除 2 项只针对已删除组合式函数的用例。 |
-| `pnpm --filter @cobotweb/cobotusr build` | 通过，2.19 秒 | 主包 303.24 kB，旧管理页 chunk 不再产出。 |
+| `pnpm --filter @yufu/web check` | 通过 | `vue-tsc -b`，删除后无悬空引用。 |
+| `pnpm --filter @yufu/web lint` | 通过 | ESLint 覆盖 `src`、`tests` 与配置。 |
+| `pnpm --filter @yufu/web test` | 11 个文件、92 项通过 | 新增 `legacy-routes.test.ts` 断言旧路径只重定向、不挂载组件；移除 2 项只针对已删除组合式函数的用例。 |
+| `pnpm --filter @yufu/web build` | 通过，2.19 秒 | 主包 303.24 kB，旧管理页 chunk 不再产出。 |
 
 该变更只影响前端产品面，未改动后端协议与数据；C65 要求的“旧入口不能绕过治理”仍由后端测试覆盖，浏览器端不再提供旧入口。
 
@@ -200,12 +200,12 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 
 - `HttpsLogoutTransport` 新增 `with_extra_roots`，为投递客户端追加信任根；生产装配仍只用内置根证书。
 - 新增 `with_loopback_fixture`，只有隔离测试策略能放行 loopback；`allowed_ip` 的 loopback 开关默认关闭，生产继续拒绝 loopback、链路本地与云元数据地址。
-- `tests/cobotusr/routes/identity_logout_transport.rs` 用 `rcgen` 现场签发 CA 与 `rp.example` 叶证书，`tokio-rustls` 在 loopback 起真实 HTTPS 接收端，投递仍经 `resolve_to_addrs` 固定解析地址，与生产同一条代码路径。
+- `tests/yufu/routes/identity_logout_transport.rs` 用 `rcgen` 现场签发 CA 与 `rp.example` 叶证书，`tokio-rustls` 在 loopback 起真实 HTTPS 接收端，投递仍经 `resolve_to_addrs` 固定解析地址，与生产同一条代码路径。
 
 | 命令 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
 | `cargo test --test mod identity_logout_transport -- --test-threads=1` | 5 通过、0 失败，0.16 秒 | 204 连续两次投递各产生一条 `logout_token=token-value` 表单请求（重复投递）；不注入信任根时证书校验失败→`Retry network_error` 且接收端零请求；429 带 `Retry-After: 30`→`RetryAfter{http_429,30}`；503→`Retry http_5xx`；400→`PermanentFailure http_4xx`；302 不跟随→`PermanentFailure http_redirect`；接收端延迟 400ms 对 120ms 超时→`Retry timeout`；非 allowlist 主机解析到私网地址→`PermanentFailure ssrf_blocked`。 |
-| `cargo test -p cobotusr --lib logout_transport` | 3 通过、0 失败 | 地址策略：loopback、链路本地、元数据、文档与隧道地址默认拒绝；私网仅对显式 allowlist 放行；loopback 仅在隔离测试策略下可达。 |
+| `cargo test -p yufu --lib logout_transport` | 3 通过、0 失败 | 地址策略：loopback、链路本地、元数据、文档与隧道地址默认拒绝；私网仅对显式 allowlist 放行；loopback 仅在隔离测试策略下可达。 |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | 通过 | 仅既有 `proc-macro-error2` future-incompat notice。 |
 
 该证据关闭 [gaps.md](gaps.md) 的 G1。C73 仍要求 E6 的完整退出矩阵（组成员移除、同意撤回、密码修改、账户停用、重启与内省故障），C86 仍要求三引擎实跑报告，因此两项保持未勾选。
@@ -221,15 +221,15 @@ T67 新增 MigrationRead/MigrationScan/MigrationAdopt 精确操作、分页扫�
 | 命令 | 实际结果 | 覆盖及限制 |
 | --- | --- | --- |
 | `cargo test --test mod routes::authority -- --test-threads=1` | 5 通过、0 失败 | 新增 `authority_write_refuses_estates_above_the_configured_bound`：上限设为 1 并插入第二个用户后，`POST /api/v1/authority` 返回 503 `capacity_exceeded`，且 `authority` 表无残留行；原有增删改查用例不受影响。 |
-| `cargo test -p cobotusr --lib config_identity` | 2 通过、0 失败 | 默认值 1000；0 与 10001 均被校验拒绝。 |
-| `cargo test --workspace --all-targets --all-features -- --test-threads=1` | 全部通过：auth 50、root 集成 237（757.92 秒）、cobotusr 86，0 失败 | 本轮最终门禁。237 = 上轮 233 + 5 项 HTTPS 投递用例 + 1 项治理上限用例 − 2 项已删除的旧前端浏览器用例。 |
+| `cargo test -p yufu --lib config_identity` | 2 通过、0 失败 | 默认值 1000；0 与 10001 均被校验拒绝。 |
+| `cargo test --workspace --all-targets --all-features -- --test-threads=1` | 全部通过：auth 50、root 集成 237（757.92 秒）、yufu 86，0 失败 | 本轮最终门禁。237 = 上轮 233 + 5 项 HTTPS 投递用例 + 1 项治理上限用例 − 2 项已删除的旧前端浏览器用例。 |
 | `cargo fmt --all -- --check` / `cargo clippy --workspace --all-targets --all-features -- -D warnings` / `cargo machete` / `cargo audit` | 全部通过 | audit 载入 1430 条 advisory、扫描 494 个 crate，退出码 0；machete 未发现未使用依赖（新增 `rcgen`、`rustls`、`tokio-rustls` 均被测试使用）。 |
 
 同时修正上一提交遗留的回归：`security_browser_real_frontend_login_refresh_logout_all_engines` 与 `security_browser_secure_http_rejection_is_actionable_in_webkit` 仍在调用已随旧前端删除的 `tests/e2e/real-auth.mjs`，全量套件因此失败。这两个用例只覆盖已退役的旧登录页浏览器流程，本轮连同 `run_browser_auth_test` 一并删除；浏览器证据由 `identity_browser_e2e` 与三引擎 SSO 套件承担。
 
 ## 容量与延迟实测（2026-11-10）
 
-此前容量只有定性描述，没有并发登录、刷新、退出、投递积压与会话清理的实测数据。本轮新增 `tests/cobotusr/routes/capacity.rs`，六项探针默认 `#[ignore]`，按需在目标环境跑：
+此前容量只有定性描述，没有并发登录、刷新、退出、投递积压与会话清理的实测数据。本轮新增 `tests/yufu/routes/capacity.rs`，六项探针默认 `#[ignore]`，按需在目标环境跑：
 
 ```text
 cargo test --release --test mod capacity -- --ignored --nocapture --test-threads=1
@@ -280,11 +280,11 @@ cargo test --release --test mod capacity -- --ignored --nocapture --test-threads
 
 同一账户的登录不再因为彼此而失败，但仍受 bcrypt 与数据库插入约束：16 并发 24.8 req/s、P95 853 ms，与不同账户的 26.2 req/s 基本持平，说明瓶颈在 CPU 与写入，不在锁。真实流量按“登录（不同账户）”一行做容量规划。
 
-锁语义调整后的完整门禁在同一源码状态复跑：`cargo test --workspace --all-targets --all-features -- --test-threads=1` 全部通过，auth 50 项（3.10 秒）、root 集成 238 项（789.04 秒，6 项 ignored）、cobotusr 86 项（0.15 秒），退出码 0；含 Playwright 10 项（18.0 秒）与 WebKit 四组场景。`cargo fmt --all -- --check` 通过，`cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过（仅 `proc-macro-error2` future-incompat notice），`cargo machete` 未发现未使用依赖，`cargo audit` 退出码 0（1430 条 advisory、494 个 crate）。
+锁语义调整后的完整门禁在同一源码状态复跑：`cargo test --workspace --all-targets --all-features -- --test-threads=1` 全部通过，auth 50 项（3.10 秒）、root 集成 238 项（789.04 秒，6 项 ignored）、yufu 86 项（0.15 秒），退出码 0；含 Playwright 10 项（18.0 秒）与 WebKit 四组场景。`cargo fmt --all -- --check` 通过，`cargo clippy --workspace --all-targets --all-features -- -D warnings` 通过（仅 `proc-macro-error2` future-incompat notice），`cargo machete` 未发现未使用依赖，`cargo audit` 退出码 0（1430 条 advisory、494 个 crate）。
 
 ## 旧库升级与恢复演练（2026-11-10）
 
-G4 要求备份、预演、维护窗口迁移与失败恢复有实际记录。本轮新增 `tests/cobotusr/routes/upgrade_drill.rs`，一条 `#[ignore]` 用例完成完整闭环，默认不参与常规门禁：
+G4 要求备份、预演、维护窗口迁移与失败恢复有实际记录。本轮新增 `tests/yufu/routes/upgrade_drill.rs`，一条 `#[ignore]` 用例完成完整闭环，默认不参与常规门禁：
 
 ```text
 cargo test --release --test mod upgrade_drill -- --ignored --nocapture --test-threads=1
@@ -323,12 +323,12 @@ cargo test --release --test mod upgrade_drill -- --ignored --nocapture --test-th
 
 ## E1 企业目录建立与访问边界（C68，2026-11-10）
 
-C68 要求不预置已认证浏览器状态，由真实管理员从中心登录开始，走完邀请、开户、建组、授权和入口核对。本轮新增 `cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-enterprise-onboarding.spec.ts`，并在 `enterprise-sso-webkit.mjs` 中维护同一场景，因为本机 macOS 14 的 WebKit 走外部 1.61 驱动。
+C68 要求不预置已认证浏览器状态，由真实管理员从中心登录开始，走完邀请、开户、建组、授权和入口核对。本轮新增 `web/tests/e2e/enterprise-sso-enterprise-onboarding.spec.ts`，并在 `enterprise-sso-webkit.mjs` 中维护同一场景，因为本机 macOS 14 的 WebKit 走外部 1.61 驱动。
 
 场景全程使用真实 HTTP：管理员在 `/login` 输入用户名密码后落到 `/account`；每个受邀账户使用独立 browser context，先 `POST /identity/actions/exchange` 兑换邀请，再 `POST /identity/invitations/accept` 自设用户名密码；所有中心写请求都带精确 `Origin` 和当次 `GET /identity/csrf` 取得的令牌，组变更另带 `idempotency-key`。第二名管理员通过既有 legacy 管理面授予 `identity.uri:*` 的 `/admin/` 权限，不提升 Superadmin。
 
 ```text
-cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
+cargo test -p yufu-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
 ```
 
 结果：退出码 0。Playwright 12 项通过（Chromium、Firefox 各 6 项，43.4 秒），外部 WebKit 脚本的准入、C68、跨客户端 SSO、本地/中心退出与后通道投递全部通过，总计 71.25 秒。三引擎的 C68 脱敏输出一致：
@@ -357,14 +357,14 @@ cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_s
 
 ## E2 开发者接入与两个示例应用（C69，2026-11-11）
 
-C69 要求开发者只通过中心控制台完成 Web A 与 SPA B 的注册，取得各自接入配置，再完成维护者协作、负责人交接和指定测试用户登录。本轮新增 `cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-developer-onboarding.spec.ts`，在 `enterprise-sso-webkit.mjs` 中维护同一场景，因为本机 macOS 14 的 WebKit 必须使用外部 1.61 驱动。
+C69 要求开发者只通过中心控制台完成 Web A 与 SPA B 的注册，取得各自接入配置，再完成维护者协作、负责人交接和指定测试用户登录。本轮新增 `web/tests/e2e/enterprise-sso-developer-onboarding.spec.ts`，在 `enterprise-sso-webkit.mjs` 中维护同一场景，因为本机 macOS 14 的 WebKit 必须使用外部 1.61 驱动。
 
 场景全程使用真实接口与界面：管理员邀请开发者 A、开发者 B 和测试用户；管理员显式授予 A→B 的候选可见性；A 在控制台一次完成基础资料、开发环境与生产环境草稿；Web A 的 client secret 只在建立回执中出现一次，刷新详情后接口响应不再包含该值；SPA B 不交付 secret，接口响应中也没有 `client_secret`；两个应用分别创建绑定当前生效 audience 的后端内省 reader，并在界面隐藏 secret；A 将 B 加为维护者，B 修改资料后由 A 交接负责人，交接后 B 拥有负责人控件而 A 变为维护者；管理员把测试用户加入两个开发环境的测试访问。
 
 两个示例由 `startGeneratedExamples` 使用控制台生成的 client、reader 与独立 session secret 启动，示例进程只收到自己的环境变量，不接收中心数据库 URL，也不共享会话存储。Web 与 SPA 使用随机分配的不同 origin 和端口；测试用户先登录 Web A，再在同一浏览器 context 的新标签进入 SPA B。
 
 ```text
-cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
+cargo test -p yufu-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
 ```
 
 结果：退出码 0。Playwright 14 项通过（Chromium、Firefox 各 7 项，1.7 分钟），外部 WebKit 1.61 的准入、C68、C69、跨客户端 SSO、本地/中心退出与后通道投递全部通过；Rust 验收 1 项通过，总计 152.52 秒。三引擎 C69 脱敏证据如下：
@@ -380,9 +380,9 @@ cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_s
 - Web A 为 `server_web`、SPA B 为 `browser_spa`，两者 client ID 与站点 origin 均不同；Web A 的 secret 只交付一次且详情 API 不再包含，SPA B 无 secret。
 - 两个环境均存在生效配置；reader 只绑定当前 application/environment 的生效 audience，secret 在界面展示后立即隐藏。
 - A→B 维护者协作、B 修改应用资料、A→B 负责人交接均经真实 UI 与 API 完成，刷新后状态保持。
-- 测试用户在 Web A 通过中心登录完成授权回调，服务端持有 `cobotrix_session` Cookie，页面 `sessionStorage` 为空，保护操作返回 200。
-- 同一测试用户进入 SPA B 时不再输入密码，身份 subject 与 Web A 相同；SPA 使用 `sessionStorage`，无 `cobotrix_session` Cookie，保护操作显示 `Operation accepted.`。
-- Web A 与 SPA B 之间没有共享 `cobotrix_session` Cookie；`distinctClients`、`distinctSites`、`webSessionCookie`、`spaSessionStorage`、`webSessionStorageEmpty` 为 true，`sharedSessionCookie` 为 false。
+- 测试用户在 Web A 通过中心登录完成授权回调，服务端持有 `yufu_session` Cookie，页面 `sessionStorage` 为空，保护操作返回 200。
+- 同一测试用户进入 SPA B 时不再输入密码，身份 subject 与 Web A 相同；SPA 使用 `sessionStorage`，无 `yufu_session` Cookie，保护操作显示 `Operation accepted.`。
+- Web A 与 SPA B 之间没有共享 `yufu_session` Cookie；`distinctClients`、`distinctSites`、`webSessionCookie`、`spaSessionStorage`、`webSessionStorageEmpty` 为 true，`sharedSessionCookie` 为 false。
 
 这轮场景暴露并修复了两个实现缺口：
 
@@ -394,24 +394,24 @@ cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_s
 | 命令 | 实际结果 |
 | --- | --- |
 | `cargo fmt --all -- --check` | 通过 |
-| `node --check cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-webkit.mjs`、`git diff --check` | 均通过 |
-| `pnpm --filter @cobotweb/cobotusr check` | 通过 |
-| `pnpm --filter @cobotweb/cobotusr lint` | 通过 |
-| `pnpm build:cobotusr` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
-| `cargo clippy -p cobotrix-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
-| `cargo test -p cobotrix-root --features webui --test mod identity_protocol_reader_allows_confidential_web_for_its_own_audience_only -- --nocapture` | 1 通过、0 失败，7.07 秒 |
-| `cargo test -p cobotrix-root --features webui --test mod identity_protocol_reader_is_bound_rotatable_and_not_a_token_or_revocation_client -- --nocapture` | 1 通过、0 失败，11.47 秒 |
+| `node --check web/tests/e2e/enterprise-sso-webkit.mjs`、`git diff --check` | 均通过 |
+| `pnpm --filter @yufu/web check` | 通过 |
+| `pnpm --filter @yufu/web lint` | 通过 |
+| `pnpm build:web` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
+| `cargo clippy -p yufu-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
+| `cargo test -p yufu-root --features webui --test mod identity_protocol_reader_allows_confidential_web_for_its_own_audience_only -- --nocapture` | 1 通过、0 失败，7.07 秒 |
+| `cargo test -p yufu-root --features webui --test mod identity_protocol_reader_is_bound_rotatable_and_not_a_token_or_revocation_client -- --nocapture` | 1 通过、0 失败，11.47 秒 |
 
 C69 已勾选。
 
 ## E3 生产治理（C70，2026-11-11）
 
-C70 要求开发者提交 Web A 与第三方 SPA B 的生产配置，另一企业管理员完成审核；管理员先把用户组分配到两个应用，开发者不能自批，LocalOnly 申请必须在审核方明确接受能力限制后才能生效，未分配用户不能登录，已分配用户的第三方同意与退出能力按批准配置执行。本轮新增 `cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-production-governance.spec.ts` 与共享场景 `enterprise-sso-production-governance.ts`，并把该场景接入外部 WebKit 1.61 脚本。
+C70 要求开发者提交 Web A 与第三方 SPA B 的生产配置，另一企业管理员完成审核；管理员先把用户组分配到两个应用，开发者不能自批，LocalOnly 申请必须在审核方明确接受能力限制后才能生效，未分配用户不能登录，已分配用户的第三方同意与退出能力按批准配置执行。本轮新增 `web/tests/e2e/enterprise-sso-production-governance.spec.ts` 与共享场景 `enterprise-sso-production-governance.ts`，并把该场景接入外部 WebKit 1.61 脚本。
 
 场景使用真实邀请、登录、控制台和 API：根管理员邀请开发者、审核管理员、已分配用户与未分配用户，为两位员工授予企业管理权限；开发者在一次注册中提交 Web A 与第三方 SPA B 的生产配置；管理员将包含已分配用户的组授予两个应用；开发者提交 `online` 生产版本后由另一管理员批准，随后开发者为两个应用提交 `local_only` 提案。旧生效配置保持 `online`，界面同时显示当前值与提案值；开发者调用审批接口返回 403，审核者未勾选“接受并记录退出能力限制”时返回 400 且申请保持 pending，勾选后申请变为 approved、pending 清空、生效配置切换为 `local_only`。
 
 ```text
-cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
+cargo test -p yufu-root --features webui --test mod identity_browser_cross_site_three_engines_login_sso_and_logout -- --nocapture
 ```
 
 结果：退出码 0。Playwright 16 项通过（Chromium、Firefox 各 8 项，2.4 分钟），外部 WebKit 1.61 的准入、C68、C69、C70、跨客户端 SSO、本地/中心退出与后通道投递全部通过；Rust 验收 1 项通过，总计 220.09 秒。三引擎 C70 脱敏证据如下：
@@ -436,28 +436,28 @@ cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_s
 
 | 命令 | 实际结果 |
 | --- | --- |
-| `cargo test -p cobotrix-root --features webui identity_authorization_http -- --nocapture` | 3 通过、0 失败，4.68 秒；新增用例覆盖登录后 `interaction=denied`、complete false、回调 `error=access_denied&state=...`、flow completed、无 code/RP session/consent |
+| `cargo test -p yufu-root --features webui identity_authorization_http -- --nocapture` | 3 通过、0 失败，4.68 秒；新增用例覆盖登录后 `interaction=denied`、complete false、回调 `error=access_denied&state=...`、flow completed、无 code/RP session/consent |
 
 当前源码下的补充门禁：
 
 | 命令 | 实际结果 |
 | --- | --- |
 | `cargo fmt --all -- --check` | 通过 |
-| `cargo clippy -p cobotrix-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
-| `pnpm --filter @cobotweb/cobotusr check` | 通过 |
-| `pnpm --filter @cobotweb/cobotusr lint` | 通过 |
-| `pnpm build:cobotusr` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
+| `cargo clippy -p yufu-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
+| `pnpm --filter @yufu/web check` | 通过 |
+| `pnpm --filter @yufu/web lint` | 通过 |
+| `pnpm build:web` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
 
 C70 已勾选。
 
 ## E4 跨站 SSO 与协议投影（C71，2026-11-11）
 
-C71 要求用户从 Web A 发起授权、接受邀请并完成标准回调，再在不同站点的新标签进入 SPA B；两个应用映射同一身份而使用独立 token/sid，刷新、并发、清标签 token 后恢复以及 `prompt`/`max_age`/`none` 均符合要求。本轮不修改中心 Provider 协议，只补齐两个标准客户端的可观测投影与真实浏览器证据：新增 `cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-cross-site-protocol.spec.ts` 与共享场景 `enterprise-sso-cross-site-protocol.ts`，并把该场景接入外部 WebKit 1.61 脚本。
+C71 要求用户从 Web A 发起授权、接受邀请并完成标准回调，再在不同站点的新标签进入 SPA B；两个应用映射同一身份而使用独立 token/sid，刷新、并发、清标签 token 后恢复以及 `prompt`/`max_age`/`none` 均符合要求。本轮不修改中心 Provider 协议，只补齐两个标准客户端的可观测投影与真实浏览器证据：新增 `web/tests/e2e/enterprise-sso-cross-site-protocol.spec.ts` 与共享场景 `enterprise-sso-cross-site-protocol.ts`，并把该场景接入外部 WebKit 1.61 脚本。
 
 Web A（`examples/oidc-web`）新增 `AuthorizationPrompt`/`AuthorizationRequestOptions`，`/login` 只接受白名单 `prompt`（`none`、`login`、`consent`、`login consent`）与非负整数 `max_age`，其他取值直接 400，不做通用参数转发；`VerifiedProtocol` 保存经 state/nonce/PKCE 校验后的 `iss`、`sub`、`client_id`、`aud`、`sid`、`auth_time`，页面与 `/api/me` 只投影这些非秘密 claim 和访问令牌的截断 SHA-256 指纹。SPA B（`examples/oidc-spa`）在内存投影中增加同类字段，首次回调要求 nonce 回显，刷新响应没有 nonce 时标记 `nonceVerified=false`；`filterProtocolClaims: false` 仅用于保留已验证的非秘密协议 claim，页面投影仍不包含 `idToken`/`refreshToken`，单测继续断言 SPA 不保存这两个凭据。
 
 ```text
-cargo test -p cobotrix-root --features webui identity_browser_cross_site_three_engines_login_sso_and_logout -- --test-threads=1 --nocapture
+cargo test -p yufu-root --features webui identity_browser_cross_site_three_engines_login_sso_and_logout -- --test-threads=1 --nocapture
 ```
 
 结果：退出码 0。Playwright 18 项通过（Chromium、Firefox 各 9 项，2.4 分钟），外部 WebKit 1.61 的准入、C68、C69、C70、E4 跨站协议、跨客户端 SSO、本地/中心退出与后通道投递全部通过；Rust 验收 1 项通过，总计 224.30 秒。三引擎 E4 脱敏证据一致：
@@ -472,7 +472,7 @@ cargo test -p cobotrix-root --features webui identity_browser_cross_site_three_e
 
 - 两个首次授权流都在中心登录前发起；登录 Web A 后，SPA B 在同一浏览器 context 的新标签直接完成 SSO，不再输入密码。
 - 两个应用得到相同 `iss/sub`，但 `client_id`、`aud`、`sid` 与访问令牌指纹均不同；`state-validated`、`nonce-validated` 均为 true。
-- Web A 使用服务端 `cobotrix_session` Cookie 且 `sessionStorage` 为空；SPA B 使用 tab 级 `sessionStorage`，没有应用会话 Cookie。
+- Web A 使用服务端 `yufu_session` Cookie 且 `sessionStorage` 为空；SPA B 使用 tab 级 `sessionStorage`，没有应用会话 Cookie。
 - 关闭 SPA 标签后新开标签可经中心 Cookie 恢复；清空 SPA `sessionStorage` 后重新登录同样恢复，且不丢失企业会话。
 - 匿名 `prompt=none` 返回 `login_required` 而不是登录表单；已登录 `prompt=none` 直接恢复。`prompt=consent` 重新展示同意页；`prompt=login` 与 `max_age=0` 都产生新的 `sid` 和新的访问令牌指纹。
 - 中心 profile 修改后再次授权，`iss/sub` 保持不变。
@@ -484,12 +484,12 @@ cargo test -p cobotrix-root --features webui identity_browser_cross_site_three_e
 
 | 命令 | 实际结果 |
 | --- | --- |
-| `pnpm --filter @cobotrix/oidc-web test` | 4 个文件、59 项通过 |
-| `pnpm --filter @cobotrix/oidc-spa test` | 4 个文件、62 项通过 |
-| `pnpm --filter @cobotweb/cobotusr test` | 11 个文件、92 项通过 |
-| `pnpm build:cobotusr` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
+| `pnpm --filter @yufu/oidc-web test` | 4 个文件、59 项通过 |
+| `pnpm --filter @yufu/oidc-spa test` | 4 个文件、62 项通过 |
+| `pnpm --filter @yufu/web test` | 11 个文件、92 项通过 |
+| `pnpm build:web` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
 | `cargo fmt --all -- --check` | 通过 |
-| `cargo clippy -p cobotrix-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
-| `node --check cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-webkit.mjs`、`git diff --check` | 均通过 |
+| `cargo clippy -p yufu-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
+| `node --check web/tests/e2e/enterprise-sso-webkit.mjs`、`git diff --check` | 均通过 |
 
 C71 已勾选。C72—C74 仍待按 checklist 逐项取证。

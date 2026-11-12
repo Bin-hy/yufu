@@ -1,4 +1,4 @@
-# 鉴权中心：市场方案与 cobotusr 实现对比
+# 鉴权中心：市场方案与 yufu 实现对比
 
 调研日期：2026-11-08，Asia/Shanghai。代码基线：`29b62d0`。按项目语境，将用户所说的“健全中心”理解为“鉴权中心”。
 
@@ -16,8 +16,8 @@
 | --- | --- | --- |
 | 中心统一账户 | 本地账户与注册、登录服务已有 | 用户只在中心注册，业务应用按稳定的 issuer/sub 识别同一用户；必要的业务资料自动建立 |
 | 应用通过 OIDC 登录 | `/oidc/authorize`、授权码、PKCE、token、userinfo、JWKS 已有 | 两个独立应用分别接入；都无需保存用户密码或开发独立认证表单 |
-| 中心登录状态复用 | authorize 跳转中心 consent 页面；前端 guard 根据中心 token 决定是否转 OIDC 登录；见 `cobotusr/src/route/oidc.rs:794`、`cobotweb/apps/cobotusr/src/router/guard.ts:17` | 应用 A 登录完成后访问应用 B，同一浏览器不再输入凭据；会话过期时能正确恢复或重新登录 |
-| 已授权应用自动继续 | consent 页面遇到 `already_consented` 会自动提交；见 `cobotweb/apps/cobotusr/src/pages/oidc-consent/index.vue:50` | 已授权应用自动回调；企业自有应用是否可通过管理员策略预授权，应明确设计，当前未发现该策略 |
+| 中心登录状态复用 | authorize 跳转中心 consent 页面；前端 guard 根据中心 token 决定是否转 OIDC 登录；见 `yufu/src/route/oidc.rs:794`、`web/src/router/guard.ts:17` | 应用 A 登录完成后访问应用 B，同一浏览器不再输入凭据；会话过期时能正确恢复或重新登录 |
+| 已授权应用自动继续 | consent 页面遇到 `already_consented` 会自动提交；见 `web/src/pages/oidc-consent/index.vue:50` | 已授权应用自动回调；企业自有应用是否可通过管理员策略预授权，应明确设计，当前未发现该策略 |
 | 首次访问时注册 | OIDC 模式登录表单用 `v-if="!oidc"` 隐藏注册入口；注册页完成后返回普通 login，未保留 OIDC 上下文 | 在业务应用发起登录后，未注册用户能完成中心注册并返回原应用，保留原授权请求参数 |
 | 退出与禁用 | 中心会话撤销、OIDC logout 与应用授权撤销已有 | 分别明确“退出某应用”“退出中心”“退出所有应用”；两个业务应用已有会话的生效时机需端到端验证 |
 | 标准客户端兼容 | 当前 AuthorizeQuery 未包含 `prompt`、`max_age` 等字段；授权入口由 SPA 处理中心登录状态 | 按实际客户端需要补齐标准参数语义，使用标准 OIDC 客户端验收，避免每个应用写自定义接入逻辑 |
@@ -38,7 +38,7 @@
 
 ## 原始广义对比结论（作为背景）
 
-cobotusr 已具备独立鉴权中心的核心实现，覆盖本地身份、OIDC、应用与权限管理、会话与撤销、MCP 凭据和结构化策略判断。其实现重点是凭据边界与数据库事务一致性。
+yufu 已具备独立鉴权中心的核心实现，覆盖本地身份、OIDC、应用与权限管理、会话与撤销、MCP 凭据和结构化策略判断。其实现重点是凭据边界与数据库事务一致性。
 
 与市场方案比较，当前最影响通用性的地方是：内部应用授权服务尚未形成可用的对外 PDP 接入闭环、资源类型仍带有原业务领域约束、用户角色与组织模型较简单。企业身份接入、认证方式、策略表达和运维验证还有进一步扩展空间。这是基于当前代码的架构判断，不是成熟度量化评分。
 
@@ -56,18 +56,18 @@ cobotusr 已具备独立鉴权中心的核心实现，覆盖本地身份、OIDC�
 
 ## 与当前代码逐项比较
 
-| 维度 | 市场参照 | cobotusr 当前证据 | 判断 |
+| 维度 | 市场参照 | yufu 当前证据 | 判断 |
 | --- | --- | --- | --- |
-| OAuth/OIDC | Keycloak、Casdoor、Auth0 提供标准协议接入 [1][2][5] | discovery、授权码、PKCE、refresh、client_credentials、userinfo、JWKS、introspection、撤销及 logout 均有入口；见 `cobotusr/src/route/oidc.rs:199`、`:230`、`:331` | 主流程覆盖较完整；未找到 OIDC 一致性认证或跨产品互操作验收证据 |
+| OAuth/OIDC | Keycloak、Casdoor、Auth0 提供标准协议接入 [1][2][5] | discovery、授权码、PKCE、refresh、client_credentials、userinfo、JWKS、introspection、撤销及 logout 均有入口；见 `yufu/src/route/oidc.rs:199`、`:230`、`:331` | 主流程覆盖较完整；未找到 OIDC 一致性认证或跨产品互操作验收证据 |
 | 企业身份与认证方式 | Keycloak 支持身份代理与 LDAP/AD；Casdoor 提供 MFA、Passkey、同步和 SCIM [1][2] | 当前用户与登录链路以本地账户为主；在路由、服务、实体和配置中未找到相应联邦登录、LDAP/SCIM、TOTP/WebAuthn 的完整实现 | 接入企业已有身份体系时需要补齐 |
-| 角色、组织、租户 | Casdoor 有多组织；Casbin 提供角色与角色关系建模 [2][3] | `cobotusr/src/entity/user.rs:25` 为单个 `role_id`；当前应用策略也通过该字段加载角色。应用和 audience 分隔已有实现，未找到完整组织/租户模型 | 应用隔离不能等同于租户隔离；多角色、组织成员关系与租户边界尚需设计 |
-| RBAC 与显式拒绝 | Casbin 可配置模型、允许/拒绝与角色关系 [3] | 用户授权、角色授权、结构化资源范围及显式拒绝优先；见 `libs/auth/src/security/policy.rs:824`、`cobotusr/src/service/security/repository.rs:939` | 核心决策语义已有实现；角色继承和策略管理能力仍较有限 |
+| 角色、组织、租户 | Casdoor 有多组织；Casbin 提供角色与角色关系建模 [2][3] | `yufu/src/entity/user.rs:25` 为单个 `role_id`；当前应用策略也通过该字段加载角色。应用和 audience 分隔已有实现，未找到完整组织/租户模型 | 应用隔离不能等同于租户隔离；多角色、组织成员关系与租户边界尚需设计 |
+| RBAC 与显式拒绝 | Casbin 可配置模型、允许/拒绝与角色关系 [3] | 用户授权、角色授权、结构化资源范围及显式拒绝优先；见 `libs/auth/src/security/policy.rs:824`、`yufu/src/service/security/repository.rs:939` | 核心决策语义已有实现；角色继承和策略管理能力仍较有限 |
 | ABAC | Casbin 支持属性规则；OpenFGA 有条件与上下文模型 [3][4] | `ResourceConstraint` 仅列出所有者、能力版本、绑定版本；见 `libs/auth/src/security/policy.rs:657`。仓储中对 `task:read` 硬编码所有者条件，其他规则构造主要传空条件 | 有有限属性约束能力，尚未形成通用、可配置的 ABAC 产品 |
 | ReBAC 与对象查询 | OpenFGA 使用资源关系建模并提供 Check、List Objects 等接口 [4] | 未找到关系元组存储、关系图推导或通用“列出用户可访问对象”接口 | 文档共享、目录继承、团队关系等场景还需额外实现 |
 | 通用资源模型 | Casbin 可自定义请求与模型；OpenFGA 通过模型声明资源关系 [3][4] | `ResourceKind` / `ResourceTarget` 固定列举应用、网关、设备、工具、任务及管理资源；见 `libs/auth/src/security/policy.rs:56`、`:72` | 通用应用键已具备，但接入订单、文档、项目等新资源时仍受固定类型约束 |
-| 对外 PDP | Casdoor 有权限检查 API，OpenFGA 提供独立授权查询 [2][4] | `/enforce` 路由已注册，但 `cobotusr/src/service/permission.rs:123` 固定返回 Unauthorized。`AuthorizationService::authorize_application` 存在，搜索到的调用点位于集成测试 | 内部授权能力与可用的外部接入接口之间仍有缺口，应优先补齐 |
-| 会话、刷新和撤销 | Keycloak、Casdoor 有会话管理；Auth0 覆盖令牌流程 [1][2][5] | 数据库注册凭据与授权根，刷新轮换、重放后的 family 撤销、并发和提交失败测试已有实现；见 `cobotusr/src/service/security/lifecycle.rs`、`revocation.rs`、`tests/cobotusr/routes/security.rs:2929`、`:3529` | 对生命周期边界投入较细；尚不能据此认定整体安全性高于市场产品 |
-| MCP / Agent | Casdoor 官方资料包含 MCP 授权；OpenFGA 文档包含 Agent/MCP 授权建模 [2][4] | MCP 要求注册应用及 audience，检查 `mcp:access`；签发与轮换结合当前权限及原始凭据上限；见 `cobotusr/src/service/security/mcp.rs:123`、`:217`、`:255` | 有针对性的边界控制；“支持 MCP”本身已不足以构成独有差异 |
+| 对外 PDP | Casdoor 有权限检查 API，OpenFGA 提供独立授权查询 [2][4] | `/enforce` 路由已注册，但 `yufu/src/service/permission.rs:123` 固定返回 Unauthorized。`AuthorizationService::authorize_application` 存在，搜索到的调用点位于集成测试 | 内部授权能力与可用的外部接入接口之间仍有缺口，应优先补齐 |
+| 会话、刷新和撤销 | Keycloak、Casdoor 有会话管理；Auth0 覆盖令牌流程 [1][2][5] | 数据库注册凭据与授权根，刷新轮换、重放后的 family 撤销、并发和提交失败测试已有实现；见 `yufu/src/service/security/lifecycle.rs`、`revocation.rs`、`tests/yufu/routes/security.rs:2929`、`:3529` | 对生命周期边界投入较细；尚不能据此认定整体安全性高于市场产品 |
+| MCP / Agent | Casdoor 官方资料包含 MCP 授权；OpenFGA 文档包含 Agent/MCP 授权建模 [2][4] | MCP 要求注册应用及 audience，检查 `mcp:access`；签发与轮换结合当前权限及原始凭据上限；见 `yufu/src/service/security/mcp.rs:123`、`:217`、`:255` | 有针对性的边界控制；“支持 MCP”本身已不足以构成独有差异 |
 | 密钥与运维 | Keycloak 提供服务管理文档；Casdoor 文档覆盖部署、证书、会话与监控 [1][2] | RS256、JWKS、客户端 secret 更新、日志脱敏、时钟检查、就绪检查及 CI 已有。当前签名器只持有一组 RSA 密钥，见 `libs/auth/src/token_manager.rs:226` | 未找到完整签名密钥重叠轮换方案；缺少持续性能、灾备和运维演练证据 |
 
 ## 两个容易高估的地方

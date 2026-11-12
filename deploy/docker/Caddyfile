@@ -1,0 +1,31 @@
+# Reverse proxy for yufu. Only Caddy is reachable from outside the stack;
+# the identity service listens on the internal network at yufu:4000.
+#
+# YUFU_DOMAIN is a public name in production and `localhost` for local trials.
+# Caddy obtains a publicly trusted certificate for a real domain and falls back to
+# its local CA for localhost, so the browser-facing origin is HTTPS either way.
+{$YUFU_DOMAIN} {
+	encode zstd gzip
+
+	# X-Forwarded-Proto/Host/For are set automatically; the service needs the
+	# original scheme and host to decide Secure cookies and Origin checks.
+	reverse_proxy yufu:4000 {
+		health_uri /api/v1/health/ready
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	# Only add headers the service cannot decide for itself. Response-level
+	# policy (X-Frame-Options, Referrer-Policy, CSP) is set by the service on the
+	# identity and OIDC pages, so repeating it here would send duplicates.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

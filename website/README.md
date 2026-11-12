@@ -1,6 +1,6 @@
-# cobotusr website
+# yufu website
 
-Official website and documentation for cobotusr, built with
+Official website and documentation for yufu, built with
 [Astro](https://astro.build) and [Starlight](https://starlight.astro.build).
 
 - Chinese (default): `/`
@@ -11,7 +11,7 @@ Official website and documentation for cobotusr, built with
 
 ```bash
 pnpm install
-pnpm --filter @cobotrix/website dev
+pnpm --filter @yufu/website dev
 ```
 
 The dev server runs at `http://localhost:4321`.
@@ -19,8 +19,8 @@ The dev server runs at `http://localhost:4321`.
 ## Build
 
 ```bash
-pnpm --filter @cobotrix/website build
-pnpm --filter @cobotrix/website preview
+pnpm --filter @yufu/website build
+pnpm --filter @yufu/website preview
 ```
 
 ## Content
@@ -45,7 +45,7 @@ Create a Pages project from the repository and use:
 | --- | --- |
 | Framework preset | Astro |
 | Root directory | `/` (repository root) |
-| Build command | `pnpm --filter @cobotrix/website build` |
+| Build command | `pnpm --filter @yufu/website build` |
 | Build output directory | `website/dist` |
 | Environment variable | `SITE_URL=https://your-domain.example` |
 | Environment variable | `NODE_VERSION=22.23.4` (or newer) |
@@ -56,9 +56,9 @@ Without it the build falls back to `https://cobotusr.pages.dev`.
 ### Wrangler CLI
 
 ```bash
-pnpm --filter @cobotrix/website build
-pnpm --filter @cobotrix/website exec wrangler pages deploy dist \
-  --project-name cobotusr-website
+pnpm --filter @yufu/website build
+pnpm --filter @yufu/website exec wrangler pages deploy dist \
+  --project-name yufu-website
 ```
 
 Set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` first. The project name
@@ -72,8 +72,8 @@ is also declared in `wrangler.jsonc`.
 ## Checks
 
 ```bash
-pnpm --filter @cobotrix/website check
-pnpm --filter @cobotrix/website build
+pnpm --filter @yufu/website check
+pnpm --filter @yufu/website build
 ```
 
 ## Console screenshots
@@ -87,7 +87,7 @@ repeatability; displayed expiry times and counts are examples.
 To refresh them after a console redesign, start the frontend in one terminal:
 
 ```bash
-pnpm --filter @cobotweb/cobotusr exec vite --host 127.0.0.1 --port 5174 --strictPort
+pnpm --filter @yufu/web exec vite --host 127.0.0.1 --port 5174 --strictPort
 ```
 
 Then run from the repository root (requires the frontend's Playwright dependency

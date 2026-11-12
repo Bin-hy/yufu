@@ -1,0 +1,8 @@
+# actionlint configuration.
+#
+# The release workflow uses GitHub-hosted Intel macOS runners introduced after
+# macos-13 retired. Older actionlint releases do not list that label, so declare
+# it here instead of pinning an outdated runner label in the workflow.
+self-hosted-runner:
+  labels:
+    - macos-15-intel

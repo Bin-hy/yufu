@@ -7,11 +7,11 @@ description: Build, configure, run under systemd, reverse proxy, upgrade, and ro
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm build:cobotusr
-cargo build --bin cobotusr --features webui --release
+pnpm build:web
+cargo build --bin yufu --features webui --release
 ```
 
-The artifact is a single binary at `target/release/cobotusr` with the frontend embedded. Deployment
+The artifact is a single binary at `target/release/yufu` with the frontend embedded. Deployment
 needs only the binary, configuration, RSA private key, and database.
 
 ## Production configuration
@@ -25,31 +25,42 @@ needs only the binary, configuration, RSA private key, and database.
 
 ## systemd
 
-The repository ships `conf/cobotusr.service` as a template:
+File locations follow the `conf/yufu.service` template shipped in the packages:
 
 ```ini
 [Unit]
-Description=cobotusr identity provider
+Description=Yufu User & Auth Service (yufu)
+Requires=network-online.target
 After=network-online.target
 
 [Service]
-User=cobotusr
-Group=cobotusr
-WorkingDirectory=/opt/cobotusr
-ExecStart=/opt/cobotusr/cobotusr --config /etc/cobotusr/cobotusr.toml
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/bin/yufu --config /etc/yufu/yufu.toml
+WorkingDirectory=/var/lib/yufu
+StateDirectory=yufu
 Restart=on-failure
-NoNewPrivileges=true
-PrivateTmp=true
+RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```bash
+sudo install -m 0755 yufu /usr/bin/yufu
+sudo install -d -m 0755 /etc/yufu
+# Install an edited configuration, never enable the example as-is
+sudo install -m 0640 yufu.toml /etc/yufu/yufu.toml
+sudo install -m 0644 yufu.service /etc/systemd/system/yufu.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now cobotusr
-sudo systemctl status cobotusr
+sudo systemctl enable --now yufu
+sudo systemctl status yufu
 ```
+
+The unit runs with `DynamicUser=yes`, so there is no fixed account or UID: grant read access to the
+configuration through a supplementary group (for example `SupplementaryGroups=` in a drop-in) or an
+ACL. Keep the signing key under `/var/lib/yufu/`, which `StateDirectory=yufu` manages. The
+Windows and macOS packages only ship a manually run executable with no service registration.
 
 ## Reverse proxy
 
@@ -94,3 +105,10 @@ failure is expected; do not bypass it with retries.
 Migrations are versioned. Before rolling back a binary, confirm the new version did not run an
 irreversible migration. Historical data, registered clients, and grants are never deleted
 automatically, and a rollback does not restore revoked sessions.
+
+## Container deployment
+
+If you prefer container orchestration, the repository ships a `deploy/docker` reference stack with
+PostgreSQL, the identity service, and a Caddy TLS entry point. See
+[Container deployment](/en/operations/docker/). A containerised service must listen on `0.0.0.0`,
+so `--allow-insecure-loopback-cookies` is unavailable and the public entry point must be HTTPS.

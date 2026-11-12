@@ -8,7 +8,7 @@ import { ConfigError as ApiConfigError, loadApiConfig } from '../server/config.j
 
 const publicEnv = {
   VITE_ISSUER: 'https://id.example.com',
-  VITE_CLIENT_ID: 'cobotrix-spa-example',
+  VITE_CLIENT_ID: 'yufu-spa-example',
   VITE_REDIRECT_URI: 'https://spa.example.com/callback',
   VITE_POST_LOGOUT_REDIRECT_URI: 'https://spa.example.com/',
   VITE_SCOPE: 'openid profile email',
@@ -18,8 +18,8 @@ const publicEnv = {
 const apiEnv = {
   ISSUER: 'https://id.example.com',
   API_AUDIENCE: 'urn:app:production',
-  SPA_CLIENT_ID: 'cobotrix-spa-example',
-  READER_CLIENT_ID: 'cobotrix-spa-reader',
+  SPA_CLIENT_ID: 'yufu-spa-example',
+  READER_CLIENT_ID: 'yufu-spa-reader',
   READER_CLIENT_SECRET: 'reader-secret',
   ALLOWED_ORIGIN: 'https://spa.example.com',
   PORT: '3001',
@@ -76,10 +76,10 @@ describe('spa protected API configuration', () => {
   it('loads reader credentials only in the API process', () => {
     const config = loadApiConfig(apiEnv)
 
-    expect(config.readerClientId).toBe('cobotrix-spa-reader')
+    expect(config.readerClientId).toBe('yufu-spa-reader')
     expect(config.readerClientSecret).toBe('reader-secret')
     expect(config.audience).toBe('urn:app:production')
-    expect(config.clientId).toBe('cobotrix-spa-example')
+    expect(config.clientId).toBe('yufu-spa-example')
     expect(config.allowedOrigin).toBe('https://spa.example.com')
     expect(config.port).toBe(3001)
   })

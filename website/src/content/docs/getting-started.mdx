@@ -1,9 +1,9 @@
 ---
 title: 快速开始
-description: 在本机启动 cobotusr，完成首次登录并验证 OIDC Discovery。
+description: 在本机启动 yufu，完成首次登录并验证 OIDC Discovery。
 ---
 
-本页用最短路径在本机跑起 cobotusr：启动数据库、写入配置、运行服务、登录管理控制台，
+本页用最短路径在本机跑起 yufu：启动数据库、写入配置、运行服务、登录管理控制台，
 最后用 Discovery 文档确认协议端点可用。
 
 ## 前置要求
@@ -29,12 +29,12 @@ pnpm install --frozen-lockfile
 docker compose up -d
 ```
 
-默认库名为 `cobotusr`，用户名与密码均为 `postgres`。生产环境必须替换这些凭据。
+默认库名为 `yufu`，用户名与密码均为 `postgres`。生产环境必须替换这些凭据。
 
 ## 3. 准备配置
 
 ```bash
-cp conf/cobotusr.example.toml conf/cobotusr.local.toml
+cp conf/yufu.example.toml conf/yufu.local.toml
 ```
 
 至少确认以下字段：
@@ -55,7 +55,7 @@ issuer = "http://127.0.0.1:4000"
 rsa_private_key_path = "conf/oidc_rsa_private.local.pem"
 
 [database]
-url = "postgres://postgres:postgres@localhost:5433/cobotusr"
+url = "postgres://postgres:postgres@localhost:5433/yufu"
 
 [security_clock]
 servers = ["time.apple.com:123", "time.cloudflare.com:123"]
@@ -70,13 +70,13 @@ min_agreeing_sources = 2
 ## 4. 启动服务
 
 ```bash
-pnpm build:cobotusr
-cargo run --bin cobotusr --features webui -- \
-  --config conf/cobotusr.local.toml \
+pnpm build:web
+cargo run --bin yufu --features webui -- \
+  --config conf/yufu.local.toml \
   --allow-insecure-loopback-cookies
 ```
 
-`--features webui` 会嵌入 `assets/cobotusr` 的前端产物，因此首次运行前需要执行 `pnpm build:cobotusr`。
+`--features webui` 会嵌入 `assets/web` 的前端产物，因此首次运行前需要执行 `pnpm build:web`。
 启动时会自动执行版本化数据库迁移。
 
 ## 5. 首次登录
@@ -117,3 +117,4 @@ curl -s http://127.0.0.1:4000/api/v1/health/ready | jq .
 - [机密 Web 应用接入](/guides/web-app/)
 - [公共 SPA 接入](/guides/spa/)
 - [生产部署](/operations/deployment/)
+- [容器部署](/operations/docker/)

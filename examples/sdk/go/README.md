@@ -1,6 +1,6 @@
 # Go Runtime SDK example
 
-This example demonstrates the `cobotusr` Go Runtime SDK with a small web
+This example demonstrates the `yufu` Go Runtime SDK with a small web
 application:
 
 - `GET /login` builds an authorization URL with state, nonce and PKCE S256.
@@ -24,10 +24,10 @@ the example handlers, and checks token verification, UserInfo, introspection,
 logout URL construction and back-channel logout.
 
 This test proves the SDK's protocol handling, **not** that it works against a
-real `cobotusr` deployment. It is deliberately excluded from the live run:
+real `yufu` deployment. It is deliberately excluded from the live run:
 `go test ./...` never touches the network.
 
-## Live integration test (real cobotusr, real HTTP, real JWKS)
+## Live integration test (real yufu, real HTTP, real JWKS)
 
 `integration_test.go` is guarded by the `integration` build tag and talks to a
 real server: real login, real application registration, real authorization
@@ -36,7 +36,7 @@ refresh and real revocation.
 
 The easiest way to run it is the script. With no configuration it runs a
 **self-contained local harness**: it starts Postgres, writes a loopback-only
-config with `issuer = http://127.0.0.1:14000`, builds and starts `cobotusr`,
+config with `issuer = http://127.0.0.1:14000`, builds and starts `yufu`,
 waits for discovery, runs the test and stops the server it started. The issuer
 is not defaulted inside the SDK; the script writes it into the generated config
 and exports the same value to the test, which then asserts that discovery
@@ -47,15 +47,15 @@ cd examples/sdk/go
 ./run-integration.sh
 ```
 
-To point the same test at an existing deployment, set `COBOTUSR_ISSUER` (and
+To point the same test at an existing deployment, set `YUFU_ISSUER` (and
 the admin credentials). In this mode the script does not start Postgres or a
 local server:
 
 ```bash
 cd examples/sdk/go
-COBOTUSR_ISSUER=https://id.example.com \
-COBOTUSR_ADMIN_USERNAME=admin \
-COBOTUSR_ADMIN_PASSWORD=... \
+YUFU_ISSUER=https://id.example.com \
+YUFU_ADMIN_USERNAME=admin \
+YUFU_ADMIN_PASSWORD=... \
   ./run-integration.sh
 ```
 
@@ -63,9 +63,9 @@ To run the test directly against a server you already started:
 
 ```bash
 cd examples/sdk/go
-COBOTUSR_ISSUER=http://127.0.0.1:14000 \
-COBOTUSR_ADMIN_USERNAME=sdk-admin \
-COBOTUSR_ADMIN_PASSWORD=sdk-admin-password \
+YUFU_ISSUER=http://127.0.0.1:14000 \
+YUFU_ADMIN_USERNAME=sdk-admin \
+YUFU_ADMIN_PASSWORD=sdk-admin-password \
   go test -tags=integration -run TestLive -v -count=1 ./...
 ```
 
@@ -73,14 +73,14 @@ Required variables:
 
 | Variable | Meaning |
 | --- | --- |
-| `COBOTUSR_ISSUER` | Base URL of the running server, e.g. `http://127.0.0.1:14000` |
-| `COBOTUSR_ADMIN_USERNAME` | Bootstrap super admin used to register a test application |
-| `COBOTUSR_ADMIN_PASSWORD` | Password for that admin |
+| `YUFU_ISSUER` | Base URL of the running server, e.g. `http://127.0.0.1:14000` |
+| `YUFU_ADMIN_USERNAME` | Bootstrap super admin used to register a test application |
+| `YUFU_ADMIN_PASSWORD` | Password for that admin |
 
-Optional variables: `COBOTUSR_REDIRECT_URI` (default
-`http://127.0.0.1:18080/callback`), `COBOTUSR_POST_LOGOUT_REDIRECT_URI`,
-`COBOTUSR_SCOPES` (default `openid profile email`), and
-`COBOTUSR_READER_CLIENT_ID` / `COBOTUSR_READER_CLIENT_SECRET` to enable the
+Optional variables: `YUFU_REDIRECT_URI` (default
+`http://127.0.0.1:18080/callback`), `YUFU_POST_LOGOUT_REDIRECT_URI`,
+`YUFU_SCOPES` (default `openid profile email`), and
+`YUFU_READER_CLIENT_ID` / `YUFU_READER_CLIENT_SECRET` to enable the
 introspection assertion.
 
 Missing required configuration is a hard failure. A skipped test would make a
@@ -93,7 +93,7 @@ server's 2s security budget while verifying the bcrypt-hashed client secret and
 return `503 deadline_exceeded`. The SDK supports `ClientSecret`, but the live
 test does not depend on that server-side path.
 
-## Run against a real cobotusr
+## Run against a real yufu
 
 Register a confidential web client and, optionally, an introspection Reader.
 Then export:

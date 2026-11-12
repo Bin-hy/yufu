@@ -1,20 +1,20 @@
 [package]
-name = "cobotrix-root"
+name = "yufu-root"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-default-run = "cobotusr"
+default-run = "yufu"
 autobins = false
 
 [[bin]]
-name = "cobotusr"
-path = "src/cobotusr.rs"
+name = "yufu"
+path = "src/yufu.rs"
 
 [workspace]
-members = [".", "cobotusr", "libs/auth"]
+members = [".", "yufu", "libs/auth"]
 
 [workspace.package]
 version = "0.0.0"
@@ -58,7 +58,7 @@ anyhow = { workspace = true }
 toml = "1.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-cobotusr = { path = "cobotusr" }
+yufu = { path = "yufu" }
 
 [dev-dependencies]
 async-trait = "0.1.89"
@@ -85,8 +85,8 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 
 [features]
 default = []
-webui = ["cobotusr/webui"]
-openapi = ["cobotusr/openapi"]
+webui = ["yufu/webui"]
+openapi = ["yufu/openapi"]
 
 [profile.dev]
 # 默认是 2（完整调试信息）。改为 1（仅保留行号），可以减少 50%~80% 的体积

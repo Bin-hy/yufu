@@ -3,15 +3,15 @@
 // Live integration test for the Go Runtime SDK.
 //
 // Unlike sdk_test.go (which runs against an in-process fake issuer), this file
-// talks to a real cobotusr deployment: real discovery, real JWKS, real login,
+// talks to a real yufu deployment: real discovery, real JWKS, real login,
 // real application registration, real authorization code exchange and real
 // revocation.
 //
 // Run it with ./run-integration.sh, or against an already running server:
 //
-//	COBOTUSR_ISSUER=http://127.0.0.1:14000 \
-//	COBOTUSR_ADMIN_USERNAME=sdk-admin \
-//	COBOTUSR_ADMIN_PASSWORD=sdk-admin-password \
+//	YUFU_ISSUER=http://127.0.0.1:14000 \
+//	YUFU_ADMIN_USERNAME=sdk-admin \
+//	YUFU_ADMIN_PASSWORD=sdk-admin-password \
 //	go test -tags=integration -run TestLive -v ./...
 //
 // Missing configuration is a hard failure on purpose: a green `go test ./...`
@@ -33,10 +33,10 @@ import (
 	"testing"
 	"time"
 
-	cobotusr "github.com/Bin-hy/cobot-sdk-go"
+	yufu "github.com/Bin-hy/yufu-sdk-go"
 )
 
-const liveAudience = "urn:cobotusr:sdk-integration"
+const liveAudience = "urn:yufu:sdk-integration"
 
 type liveConfig struct {
 	issuer                string
@@ -52,9 +52,9 @@ type liveConfig struct {
 func loadLiveConfig(t *testing.T) liveConfig {
 	t.Helper()
 	required := []string{
-		"COBOTUSR_ISSUER",
-		"COBOTUSR_ADMIN_USERNAME",
-		"COBOTUSR_ADMIN_PASSWORD",
+		"YUFU_ISSUER",
+		"YUFU_ADMIN_USERNAME",
+		"YUFU_ADMIN_PASSWORD",
 	}
 	var missing []string
 	for _, name := range required {
@@ -69,27 +69,27 @@ func loadLiveConfig(t *testing.T) liveConfig {
 	}
 
 	cfg := liveConfig{
-		issuer:             strings.TrimSuffix(os.Getenv("COBOTUSR_ISSUER"), "/"),
-		adminUsername:      os.Getenv("COBOTUSR_ADMIN_USERNAME"),
-		adminPassword:      os.Getenv("COBOTUSR_ADMIN_PASSWORD"),
-		redirectURI:        os.Getenv("COBOTUSR_REDIRECT_URI"),
-		readerClientID:     os.Getenv("COBOTUSR_READER_CLIENT_ID"),
-		readerClientSecret: os.Getenv("COBOTUSR_READER_CLIENT_SECRET"),
+		issuer:             strings.TrimSuffix(os.Getenv("YUFU_ISSUER"), "/"),
+		adminUsername:      os.Getenv("YUFU_ADMIN_USERNAME"),
+		adminPassword:      os.Getenv("YUFU_ADMIN_PASSWORD"),
+		redirectURI:        os.Getenv("YUFU_REDIRECT_URI"),
+		readerClientID:     os.Getenv("YUFU_READER_CLIENT_ID"),
+		readerClientSecret: os.Getenv("YUFU_READER_CLIENT_SECRET"),
 	}
 	if cfg.redirectURI == "" {
 		cfg.redirectURI = "http://127.0.0.1:18080/callback"
 	}
-	cfg.postLogoutRedirectURI = os.Getenv("COBOTUSR_POST_LOGOUT_REDIRECT_URI")
+	cfg.postLogoutRedirectURI = os.Getenv("YUFU_POST_LOGOUT_REDIRECT_URI")
 	if cfg.postLogoutRedirectURI == "" {
 		cfg.postLogoutRedirectURI = strings.TrimSuffix(cfg.redirectURI, "/callback") + "/"
 	}
-	scopes := os.Getenv("COBOTUSR_SCOPES")
+	scopes := os.Getenv("YUFU_SCOPES")
 	if scopes == "" {
 		scopes = "openid profile email"
 	}
 	cfg.scopes = strings.Fields(scopes)
 	if (cfg.readerClientID == "") != (cfg.readerClientSecret == "") {
-		t.Fatal("COBOTUSR_READER_CLIENT_ID and COBOTUSR_READER_CLIENT_SECRET must be set together")
+		t.Fatal("YUFU_READER_CLIENT_ID and YUFU_READER_CLIENT_SECRET must be set together")
 	}
 	return cfg
 }
@@ -106,7 +106,7 @@ func TestLiveAuthorizationCodeFlow(t *testing.T) {
 	clientID := browser.registerPublicApp(ctx, session.UserID, cfg)
 	t.Logf("registered live application client_id=%s", clientID)
 
-	client, err := cobotusr.New(cobotusr.Config{
+	client, err := yufu.New(yufu.Config{
 		Issuer:      cfg.issuer,
 		ClientID:    clientID,
 		RedirectURI: cfg.redirectURI,
@@ -138,7 +138,7 @@ func TestLiveAuthorizationCodeFlow(t *testing.T) {
 	}
 	t.Logf("discovered %s (jwks %s)", discovery.Issuer, discovery.JWKSURI)
 
-	authorize, err := client.AuthorizeURLContext(ctx, cobotusr.AuthorizeOptions{})
+	authorize, err := client.AuthorizeURLContext(ctx, yufu.AuthorizeOptions{})
 	if err != nil {
 		t.Fatalf("authorize url: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestLiveAuthorizationCodeFlow(t *testing.T) {
 	if accessClaims.TokenUse != "user_session" {
 		t.Errorf("access token token_use = %q, want user_session", accessClaims.TokenUse)
 	}
-	if _, err := client.VerifyAccessToken(ctx, tokens.AccessToken, "urn:cobotusr:wrong-audience"); err == nil {
+	if _, err := client.VerifyAccessToken(ctx, tokens.AccessToken, "urn:yufu:wrong-audience"); err == nil {
 		t.Fatal("access token verified with a wrong audience")
 	}
 	if _, err := client.VerifyLogoutToken(ctx, tokens.AccessToken); err == nil {
@@ -221,7 +221,7 @@ func TestLiveAuthorizationCodeFlow(t *testing.T) {
 	}
 
 	if cfg.readerClientID != "" {
-		reader, err := cobotusr.New(cobotusr.Config{
+		reader, err := yufu.New(yufu.Config{
 			Issuer:       cfg.issuer,
 			ClientID:     cfg.readerClientID,
 			ClientSecret: cfg.readerClientSecret,
@@ -230,7 +230,7 @@ func TestLiveAuthorizationCodeFlow(t *testing.T) {
 			t.Fatalf("new reader client: %v", err)
 		}
 		defer reader.Close()
-		introspection, err := reader.Introspect(ctx, tokens.AccessToken, cobotusr.TokenTypeAccessToken)
+		introspection, err := reader.Introspect(ctx, tokens.AccessToken, yufu.TokenTypeAccessToken)
 		if err != nil {
 			t.Fatalf("introspect: %v", err)
 		}
@@ -242,19 +242,19 @@ func TestLiveAuthorizationCodeFlow(t *testing.T) {
 		}
 	}
 
-	if err := client.Revoke(ctx, refreshed.RefreshToken, cobotusr.TokenTypeRefreshToken); err != nil {
+	if err := client.Revoke(ctx, refreshed.RefreshToken, yufu.TokenTypeRefreshToken); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if _, err := client.Refresh(ctx, refreshed.RefreshToken); err == nil {
 		t.Fatal("refresh succeeded after the refresh token was revoked")
 	} else {
-		var sdkErr *cobotusr.Error
+		var sdkErr *yufu.Error
 		if errors.As(err, &sdkErr) {
 			t.Logf("refresh after revocation rejected with %q", sdkErr.Code)
 		}
 	}
 
-	endSession, err := client.EndSessionURL(ctx, cobotusr.EndSessionOptions{
+	endSession, err := client.EndSessionURL(ctx, yufu.EndSessionOptions{
 		PostLogoutRedirectURI: cfg.postLogoutRedirectURI,
 		IDTokenHint:           tokens.IDToken,
 	})

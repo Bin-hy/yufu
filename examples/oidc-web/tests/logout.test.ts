@@ -31,7 +31,7 @@ import { createApp } from '../src/server.js'
 import { PendingStore, ProfileDirectory, SessionStore } from '../src/session.js'
 
 const ISSUER = 'https://id.example.com'
-const CLIENT_ID = 'cobotrix-web-example'
+const CLIENT_ID = 'yufu-web-example'
 
 const config: WebConfig = {
   port: 3000,
@@ -42,7 +42,7 @@ const config: WebConfig = {
   postLogoutRedirectUri: 'https://app.example.com/',
   scope: 'openid profile email',
   sessionSecret: 's'.repeat(32),
-  readerClientId: 'cobotrix-web-reader',
+  readerClientId: 'yufu-web-reader',
   readerClientSecret: 'reader-secret',
   allowInsecureLoopback: false,
 }
@@ -312,7 +312,7 @@ describe('local write protection', () => {
     expect(calls[0]?.url).toBe(`${ISSUER}/oidc/introspect`)
     const headers = calls[0]?.init.headers as Record<string, string>
     expect(headers.authorization).toBe(
-      `Basic ${Buffer.from('cobotrix-web-reader:reader-secret').toString('base64')}`,
+      `Basic ${Buffer.from('yufu-web-reader:reader-secret').toString('base64')}`,
     )
     expect(String(calls[0]?.init.body)).not.toContain('reader-secret')
   })
@@ -389,7 +389,7 @@ describe('web example HTTP surface', () => {
 
   it('renders only non-secret validated OIDC evidence', async () => {
     const response = await fetch(`${base}/`, {
-      headers: { cookie: `cobotrix_session=${session.id}` },
+      headers: { cookie: `yufu_session=${session.id}` },
     })
     const html = await response.text()
 
@@ -442,7 +442,7 @@ describe('web example HTTP surface', () => {
     const response = await post(
       '/api/operation',
       { _csrf: 'wrong' },
-      `cobotrix_session=${local.id}`,
+      `yufu_session=${local.id}`,
     )
 
     expect(response.status).toBe(403)
@@ -454,7 +454,7 @@ describe('web example HTTP surface', () => {
     const response = await post(
       '/api/operation',
       { _csrf: csrfToken(local.id, config.sessionSecret) },
-      `cobotrix_session=${local.id}`,
+      `yufu_session=${local.id}`,
     )
 
     expect(response.status).toBe(403)

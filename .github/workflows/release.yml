@@ -1,0 +1,195 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  PYTHONUTF8: '1'
+
+jobs:
+  validate:
+    name: Validate release version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      # Archive tests also record rustc metadata; install it explicitly.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - name: Test release tooling
+        run: python -m unittest discover -s scripts/tests -v
+      - name: Check tag, manifest and lockfile
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/release.py validate --tag "$RELEASE_TAG"
+
+  verify:
+    name: Release quality gate
+    needs: validate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Install locked frontend dependencies
+        run: |
+          npm install --global pnpm@12.10.1
+          pnpm install --frozen-lockfile
+      - name: Build and verify console
+        run: |
+          pnpm build:web
+          pnpm --filter @yufu/web test
+          pnpm --filter @yufu/web check
+          pnpm --filter @yufu/web lint
+      - name: Install integration browser dependencies
+        working-directory: web
+        run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
+      - name: Rust quality checks
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+          cargo test --locked --workspace --all-targets --all-features -- --test-threads=1
+          cargo test --locked --workspace --doc --all-features
+      - name: Dependency and security checks
+        run: |
+          cargo install cargo-machete --version 0.9.2 --locked
+          cargo install cargo-audit --version 0.23.0 --locked
+          cargo machete
+          cargo audit
+
+  build:
+    name: Package ${{ matrix.target }}
+    needs: [validate, verify]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            binary: yufu
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            binary: yufu.exe
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: yufu
+          - os: macos-15
+            target: aarch64-apple-darwin
+            binary: yufu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_COMMIT: ${{ github.sha }}
+      RELEASE_TARGET: ${{ matrix.target }}
+      RELEASE_BINARY: target/${{ matrix.target }}/release/${{ matrix.binary }}
+      MACOSX_DEPLOYMENT_TARGET: '15.0'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - name: Build embedded WebUI
+        run: |
+          npm install --global pnpm@12.10.1
+          pnpm install --frozen-lockfile
+          pnpm build:web
+      - name: Record build environment
+        run: |
+          rustc --version
+          node --version
+          pnpm --version
+          echo "RELEASE_NODE_VERSION=$(node --version)" >> "$GITHUB_ENV"
+          echo "RELEASE_PNPM_VERSION=$(pnpm --version)" >> "$GITHUB_ENV"
+          printf 'Tag: %s\nCommit: %s\nTarget: %s\n' "$RELEASE_TAG" "$RELEASE_COMMIT" "$RELEASE_TARGET"
+      - name: Build binary and smoke test
+        run: |
+          cargo build --locked --release --bin yufu --features webui --target "$RELEASE_TARGET"
+          "$RELEASE_BINARY" --version
+          "$RELEASE_BINARY" --help
+      - name: Record Linux shared libraries
+        if: runner.os == 'Linux'
+        run: ldd "$RELEASE_BINARY"
+      - name: Package and validate archive
+        run: |
+          python scripts/release.py package --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" \
+            --binary "$RELEASE_BINARY" --output release-assets --commit "$RELEASE_COMMIT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    name: Verify assets and publish release
+    needs: [validate, verify, build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_COMMIT: ${{ github.sha }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify packages, stage draft, and publish complete release
+        run: |
+          python scripts/release.py publish --tag "$RELEASE_TAG" --output release-assets \
+            --repo "$RELEASE_REPOSITORY" --commit "$RELEASE_COMMIT"

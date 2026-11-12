@@ -100,7 +100,7 @@ function renderHome(session: SessionRecord | undefined, csrf: string): string {
        </form>
        <p><a href="/logout/central">Sign out of the identity center</a></p>`
     : `<h1>Not signed in</h1>
-       <p><a href="/login">Sign in with Cobotrix</a></p>`
+       <p><a href="/login">Sign in with Yufu</a></p>`
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>oidc-web example</title></head><body>${body}</body></html>`
 }
 

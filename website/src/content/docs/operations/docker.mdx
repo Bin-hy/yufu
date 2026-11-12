@@ -1,0 +1,192 @@
+---
+title: 容器部署
+description: 用 Docker 与 Compose 部署 yufu：镜像构建、配置、私钥、TLS 入口、备份与升级。
+---
+
+本页用仓库自带的 `deploy/docker` 配置，把 PostgreSQL、身份服务和 Caddy TLS 入口组成一个
+Compose 栈。适合单机自托管、内网身份中心与快速验证。
+
+项目目前**不发布预构建镜像**，镜像由本仓库的 Dockerfile 从源码构建：先构建 Vue 控制台，
+再把它嵌入 Rust 二进制，运行层只保留一个可执行文件。
+
+## 部署组成
+
+| 服务 | 镜像 | 暴露 | 职责 |
+| --- | --- | --- | --- |
+| `caddy` | `caddy:2-alpine` | 宿主机 `80` / `443` | 唯一对外入口，自动申请证书并终止 TLS |
+| `yufu` | `deploy/docker/Dockerfile` | 仅内部 `:4000` | 身份服务与内嵌 WebUI |
+| `postgres` | `postgres:18-alpine` | 仅内部 `:5432` | 持久化数据 |
+
+`edge` 网络承载 Caddy 与身份服务；`backend` 网络是 `internal`，数据库没有对外出口。
+身份服务以非 root（uid `10001`）运行，根文件系统只读，丢弃全部 capability。
+
+## 前置要求
+
+- Docker Engine 与 Compose v2（`docker compose`）
+- 一个解析到本机的域名（生产），或使用 `localhost` 试用
+- 容器可出站访问 `UDP/123`：服务启动前会校验认证时钟，失败即退出
+
+## 1. 获取代码
+
+容器镜像从源码构建，因此需要检出仓库：
+
+```bash
+git clone https://github.com/Bin-hy/cobot-for.git
+cd cobot-for/deploy/docker
+```
+
+## 2. 准备环境变量
+
+```bash
+cp env.example .env
+openssl rand -base64 48   # AUTH_SECRET
+openssl rand -base64 24   # POSTGRES_PASSWORD
+```
+
+把结果填入 `.env`，并把 `YUFU_DOMAIN` 改为真实域名：
+
+| 变量 | 说明 |
+| --- | --- |
+| `YUFU_DOMAIN` | 对外域名；`localhost` 表示本地试用 |
+| `YUFU_HTTPS_PORT` / `YUFU_HTTP_PORT` | 宿主映射端口，默认 `443` / `80` |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | 数据库凭据 |
+| `AUTH_SECRET` | CSRF 与会话材料密钥，生产必须替换 |
+| `LOG_LEVEL` | `off` / `error` / `warn` / `info` / `debug` / `trace` |
+
+`.env` 含敏感值且已被 git 忽略，不要提交。密码包含 `@`、`:`、`/`、`?`、`#`、`%`
+等字符时需要 URL 编码后再写入连接串（Compose 会替你拼进 `DATABASE_URL`）。
+
+## 3. 准备服务配置
+
+```bash
+cp yufu.toml.example yufu.toml
+```
+
+必须与 `.env` 保持一致的两处，否则服务拒绝启动或浏览器请求被拒绝：
+
+```toml
+[auth]
+origins = ["https://id.example.com"]
+
+[oidc]
+issuer = "https://id.example.com"
+```
+
+- `issuer` 必须是**公开 HTTPS origin**，且与浏览器地址完全一致（含端口，如果对外不是 443）。
+- `[auth.super_admin]` 设置管理员用户名与强密码，首次登录使用。
+- 数据库连接不写进配置文件：Compose 通过 `DATABASE_URL` 环境变量注入。
+- `[security_clock].servers` 换成你的可信时间源；容器内可先单独诊断：
+
+  ```bash
+  docker compose run --rm yufu --config /etc/yufu/yufu.toml --check-security-clock
+  ```
+
+## 4. 生成签名私钥
+
+生产环境**不会**自动生成 ID Token 签名私钥，缺失时服务拒绝启动：
+
+```bash
+mkdir -p state
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  -out state/oidc_rsa_private.pem
+chmod 600 state/oidc_rsa_private.pem
+sudo chown 10001:10001 state/oidc_rsa_private.pem
+```
+
+`state/` 以绑定挂载方式提供 `/var/lib/yufu`，因此私钥在宿主上可见、可离线备份。
+必须是 PKCS#8 PEM（文件头 `-----BEGIN PRIVATE KEY-----`）；`openssl genpkey` 默认即此格式，
+用 `openssl genrsa` 生成的旧格式会被拒绝。使用 Docker Desktop（macOS/Windows）时通常无需 `chown`。
+
+## 5. 启动与验证
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f yufu
+```
+
+```bash
+curl -fsS https://id.example.com/api/v1/health/ready
+curl -fsS https://id.example.com/.well-known/openid-configuration
+```
+
+`health/ready` 返回 200 且 `security_clock_synchronized=true` 才应接入流量；认证时钟未同步时
+返回 503，这是设计行为，不要用重试绕过。随后打开站点，用配置中的管理员账户登录。
+
+## 本地试用
+
+不准备域名时把入口换成 `localhost`，Caddy 会自动用本地 CA 签发证书（浏览器会提示自签名）：
+
+```bash
+# .env
+YUFU_DOMAIN=localhost
+YUFU_HTTPS_PORT=8443
+```
+
+```toml
+# yufu.toml
+[auth]
+origins = ["https://localhost:8443"]
+
+[oidc]
+issuer = "https://localhost:8443"
+```
+
+访问 `https://localhost:8443`。容器内不能使用 `--allow-insecure-loopback-cookies`：
+该参数要求监听地址是 loopback，而容器必须监听 `0.0.0.0` 才能被 Caddy 代理。
+
+## 接入现有入口
+
+已有反向代理或负载均衡时，可以去掉 `caddy` 服务，只发布身份服务端口：
+
+```yaml
+services:
+    yufu:
+        ports:
+            - "4000:4000"
+```
+
+前置代理必须终止 TLS、保留原始 `Host`，并设置 `X-Forwarded-Proto: https`；
+`issuer` 与 `origins` 仍要写成浏览器看到的公开 origin。端口直接暴露到公网时，
+Cookie 与 Origin 校验都会失败。
+
+## 备份、升级与回滚
+
+```bash
+docker compose exec postgres pg_dump --username yufu yufu > yufu-$(date +%F).sql
+```
+
+必须一起备份：数据库、`state/oidc_rsa_private.pem`（换钥会使已签发令牌与既有客户端校验失效）、
+`.env` 与 `yufu.toml`。`caddy-data` 卷只保存证书，可重新签发。
+
+升级时拉取新代码并重建：
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+启动时自动执行版本化数据库迁移。回滚不能只换回旧镜像：先确认新版本没有执行不可逆迁移，
+再按备份恢复数据库。配置字段有变化时，以 `yufu.toml.example` 为准逐项合并。
+
+## 安全要点
+
+- 只发布 Caddy 的端口；数据库与身份服务保持在内部网络。
+- 私钥、`.env` 与数据库密码只放在宿主文件系统，权限按最小化配置。
+- 生产 `issuer` 必须是 HTTPS；不要为容器配置 loopback 开发开关。
+- 认证时钟来源使用受信网络内的 NTP，不要用公共来源替代部署信任策略。
+
+## 常见问题
+
+| 现象 | 常见原因 |
+| --- | --- |
+| 启动即退出，日志含 `persistent RSA key unavailable` | 私钥不存在，或容器用户（uid `10001`）不可读 |
+| `persistent RSA key invalid` | 私钥不是 PKCS#8 PEM，或文件被截断 |
+| `production issuer requires HTTPS` | `issuer` 仍为空或使用 `http://` |
+| 启动时报 `security clock` 失败 | 容器出站 `UDP/123` 被阻断，或时间源不可达 |
+| 页面能打开但接口 403 或登录后跳转异常 | `[auth].origins` 与浏览器地址不一致（含端口） |
+| 数据库连接失败 | 密码未 URL 编码，或 `postgres` 仍在初始化 |
+| Caddy 反复申请证书失败 | 域名未解析到本机，或 `80`/`443` 被占用 |
+
+相关：[生产部署](/operations/deployment/) · [配置项](/reference/configuration/) ·
+[安全与备份](/operations/security/)

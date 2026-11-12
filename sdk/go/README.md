@@ -1,12 +1,12 @@
-# cobotusr Runtime SDK for Go
+# yufu Runtime SDK for Go
 
-`github.com/Bin-hy/cobot-sdk-go` is the Go reference implementation of the
-cobotusr **Runtime SDK**. It is a thin, dependency-free HTTP/OIDC client for
-applications that integrate with a cobotusr deployment.
+`github.com/Bin-hy/yufu-sdk-go` is the Go reference implementation of the
+yufu **Runtime SDK**. It is a thin, dependency-free HTTP/OIDC client for
+applications that integrate with a yufu deployment.
 
 > Status: v0.1 reference SDK. The module path is provisional while the SDK is
 > developed inside the server repository; it will move to a dedicated
-> `cobot-sdk-go` repository before a public release.
+> `yufu-sdk-go` repository before a public release.
 
 ## Scope
 
@@ -33,20 +33,20 @@ Not included:
 ## Install
 
 ```bash
-go get github.com/Bin-hy/cobot-sdk-go
+go get github.com/Bin-hy/yufu-sdk-go
 ```
 
 While the SDK lives in the server repository, use a `replace` directive:
 
 ```go
-require github.com/Bin-hy/cobot-sdk-go v0.0.0
-replace github.com/Bin-hy/cobot-sdk-go => /path/to/cobot-for/sdk/go
+require github.com/Bin-hy/yufu-sdk-go v0.0.0
+replace github.com/Bin-hy/yufu-sdk-go => /path/to/cobot-for/sdk/go
 ```
 
 ## Quickstart
 
 ```go
-client, err := cobotusr.New(cobotusr.Config{
+client, err := yufu.New(yufu.Config{
     Issuer:       "https://id.example.com",
     ClientID:     "web",
     ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
@@ -58,7 +58,7 @@ if err != nil {
 }
 defer client.Close()
 
-auth, err := client.AuthorizeURL(cobotusr.AuthorizeOptions{})
+auth, err := client.AuthorizeURL(yufu.AuthorizeOptions{})
 if err != nil {
     return err
 }
@@ -87,7 +87,7 @@ the OIDC client id. A resource server must pass the expected audience to
 ## Resource server
 
 ```go
-reader, err := cobotusr.New(cobotusr.Config{
+reader, err := yufu.New(yufu.Config{
     Issuer:       "https://id.example.com",
     ClientID:     os.Getenv("READER_CLIENT_ID"),
     ClientSecret: os.Getenv("READER_CLIENT_SECRET"),
@@ -100,7 +100,7 @@ claims, err := reader.VerifyAccessToken(ctx, bearerToken, "urn:app:production")
 if err != nil {
     return err
 }
-introspection, err := reader.Introspect(ctx, bearerToken, cobotusr.TokenTypeAccessToken)
+introspection, err := reader.Introspect(ctx, bearerToken, yufu.TokenTypeAccessToken)
 if err != nil {
     return err
 }

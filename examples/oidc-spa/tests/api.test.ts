@@ -21,15 +21,15 @@ import { createApi } from '../server/server.js'
 
 const ISSUER = 'https://id.example.com'
 const AUDIENCE = 'urn:app:production'
-const CLIENT_ID = 'cobotrix-spa-example'
-const OTHER_CLIENT_ID = 'cobotrix-other-app'
+const CLIENT_ID = 'yufu-spa-example'
+const OTHER_CLIENT_ID = 'yufu-other-app'
 
 const config: ApiConfig = {
   port: 0,
   issuer: ISSUER,
   audience: AUDIENCE,
   clientId: CLIENT_ID,
-  readerClientId: 'cobotrix-spa-reader',
+  readerClientId: 'yufu-spa-reader',
   readerClientSecret: 'reader-secret',
   allowedOrigin: 'https://spa.example.com',
   allowInsecureLoopback: false,
@@ -535,7 +535,7 @@ describe('reader-authenticated introspection', () => {
     expect(captured?.url).toBe('https://id.example.com/oidc/introspect')
     const headers = new Headers(captured?.init.headers)
     expect(headers.get('authorization')).toBe(
-      `Basic ${Buffer.from('cobotrix-spa-reader:reader-secret').toString('base64')}`,
+      `Basic ${Buffer.from('yufu-spa-reader:reader-secret').toString('base64')}`,
     )
     expect(String(captured?.init.body)).toBe(
       'token=the-access-token&token_type_hint=access_token',

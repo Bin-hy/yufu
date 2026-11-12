@@ -52,7 +52,7 @@ Repeatable static account entries with the same `username` and `password` fields
 | `rsa_private_key_path` | `conf/oidc_rsa_private.local.pem` | RS256 signing key path |
 | `access_token_expire_seconds` | follows `auth.exp_seconds` | Access-token lifetime |
 | `refresh_token_expire_seconds` | follows `auth.refresh_exp_seconds` | Refresh-token lifetime |
-| `email_domain` | `cobotrix.local` | Domain used by UserInfo when a user has no email |
+| `email_domain` | `yufu.local` | Domain used by UserInfo when a user has no email |
 | `signing_algorithm` | `RS256` | `RS256`, or `HS256` for tests |
 | `mcp_token_max_ttl_days` | `90` | Maximum lifetime for long-lived MCP tokens |
 
@@ -111,3 +111,8 @@ sources for a deployment trust policy.
 | `DATABASE_URL` | Default for `[database].url` |
 | `PORT` | Default port for `[http].listen` |
 | `LOG_LEVEL` | Log level |
+| `AUTH_SECRET` | Default for `[auth].secret`; replace in production |
+
+Environment variables apply only when the configuration file omits the field. An explicit
+`[database].url` or `[auth].secret` wins. Container deployments rely on this to keep credentials in
+`.env` instead of the configuration file.

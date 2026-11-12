@@ -1,0 +1,202 @@
+---
+title: Container deployment
+description: Run yufu with Docker and Compose — image build, configuration, signing key, TLS entry point, backup, and upgrade.
+---
+
+This page uses the repository's `deploy/docker` configuration to run PostgreSQL, the identity
+service, and a Caddy TLS entry point as one Compose stack. It fits single-host self-hosting,
+internal identity centers, and quick evaluation.
+
+The project does **not** publish a prebuilt image. The image is built from this repository's
+Dockerfile: the Vue console is built first, embedded into the Rust binary, so the runtime layer
+carries a single executable.
+
+## Stack composition
+
+| Service | Image | Exposure | Role |
+| --- | --- | --- | --- |
+| `caddy` | `caddy:2-alpine` | host `80` / `443` | Only public entry point; obtains certificates and terminates TLS |
+| `yufu` | `deploy/docker/Dockerfile` | internal `:4000` only | Identity service with the embedded web UI |
+| `postgres` | `postgres:18-alpine` | internal `:5432` only | Persistent data |
+
+The `edge` network carries Caddy and the identity service; `backend` is `internal`, so the database
+has no outbound route. The service runs as non-root (uid `10001`) with a read-only root filesystem
+and all capabilities dropped.
+
+## Prerequisites
+
+- Docker Engine with Compose v2 (`docker compose`)
+- A domain name pointing at the host (production), or `localhost` for a trial
+- Outbound `UDP/123`: the service validates the security clock before serving and exits if it fails
+
+## 1. Get the code
+
+The image is built from source, so check out the repository:
+
+```bash
+git clone https://github.com/Bin-hy/cobot-for.git
+cd cobot-for/deploy/docker
+```
+
+## 2. Prepare environment variables
+
+```bash
+cp env.example .env
+openssl rand -base64 48   # AUTH_SECRET
+openssl rand -base64 24   # POSTGRES_PASSWORD
+```
+
+Fill the results into `.env` and set `YUFU_DOMAIN` to the real host name:
+
+| Variable | Purpose |
+| --- | --- |
+| `YUFU_DOMAIN` | Public host name; `localhost` for a local trial |
+| `YUFU_HTTPS_PORT` / `YUFU_HTTP_PORT` | Host ports, `443` / `80` by default |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Database credentials |
+| `AUTH_SECRET` | CSRF and session material; replace in production |
+| `LOG_LEVEL` | `off` / `error` / `warn` / `info` / `debug` / `trace` |
+
+`.env` holds secrets and is git-ignored; never commit it. If the password contains `@`, `:`, `/`,
+`?`, `#`, or `%`, URL-encode it before it is used in the connection string.
+
+## 3. Prepare the service configuration
+
+```bash
+cp yufu.toml.example yufu.toml
+```
+
+Two values must match `.env`, otherwise the service refuses to start or browsers are rejected:
+
+```toml
+[auth]
+origins = ["https://id.example.com"]
+
+[oidc]
+issuer = "https://id.example.com"
+```
+
+- `issuer` must be the **public HTTPS origin** and match the browser address exactly, including the
+  port when it is not 443.
+- Set `[auth.super_admin]` to the administrator name and a strong password for the first login.
+- The database URL stays out of the file: Compose injects `DATABASE_URL` instead.
+- Point `[security_clock].servers` at your trusted time sources and diagnose them in the container:
+
+  ```bash
+  docker compose run --rm yufu --config /etc/yufu/yufu.toml --check-security-clock
+  ```
+
+## 4. Generate the signing key
+
+Production never generates the ID token signing key automatically; a missing key aborts startup:
+
+```bash
+mkdir -p state
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  -out state/oidc_rsa_private.pem
+chmod 600 state/oidc_rsa_private.pem
+sudo chown 10001:10001 state/oidc_rsa_private.pem
+```
+
+`state/` is bind-mounted at `/var/lib/yufu`, so the key stays visible on the host for offline
+backup. It must be a PKCS#8 PEM file (`-----BEGIN PRIVATE KEY-----`), which `openssl genpkey` writes
+by default; the older format produced by `openssl genrsa` is rejected. Docker Desktop on macOS and
+Windows normally needs no `chown`.
+
+## 5. Start and verify
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f yufu
+```
+
+```bash
+curl -fsS https://id.example.com/api/v1/health/ready
+curl -fsS https://id.example.com/.well-known/openid-configuration
+```
+
+Only route traffic once `health/ready` returns 200 with `security_clock_synchronized=true`; an
+untrusted clock answers 503 by design, so do not retry around it. Then open the site and sign in
+with the administrator account from the configuration.
+
+## Local trial
+
+Without a domain, use `localhost` and Caddy issues a certificate from its local CA (the browser
+shows a self-signed warning):
+
+```bash
+# .env
+YUFU_DOMAIN=localhost
+YUFU_HTTPS_PORT=8443
+```
+
+```toml
+# yufu.toml
+[auth]
+origins = ["https://localhost:8443"]
+
+[oidc]
+issuer = "https://localhost:8443"
+```
+
+Browse `https://localhost:8443`. `--allow-insecure-loopback-cookies` cannot be used in a container:
+it requires a loopback listener, while the service must listen on `0.0.0.0` to be reachable from Caddy.
+
+## Behind an existing entry point
+
+If you already run a reverse proxy or load balancer, drop the `caddy` service and publish the
+service port instead:
+
+```yaml
+services:
+    yufu:
+        ports:
+            - "4000:4000"
+```
+
+The upstream proxy must terminate TLS, preserve the original `Host`, and set
+`X-Forwarded-Proto: https`; `issuer` and `origins` must still be the public origin the browser sees.
+Publishing the service port directly to the internet breaks both cookie and Origin validation.
+
+## Backup, upgrade, and rollback
+
+```bash
+docker compose exec postgres pg_dump --username yufu yufu > yufu-$(date +%F).sql
+```
+
+Back up the database, `state/oidc_rsa_private.pem` (rotating the key invalidates issued tokens and
+existing client verification), `.env`, and `yufu.toml` together. The `caddy-data` volume only
+holds certificates and can be reissued.
+
+To upgrade, pull the new code and rebuild:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Startup runs the versioned database migrations. A rollback is not just an older image: confirm the
+new version performed no irreversible migration and restore the database from backup. Merge new
+configuration fields against `yufu.toml.example`.
+
+## Security notes
+
+- Publish only Caddy's ports; keep the database and identity service on the internal network.
+- Keep the signing key, `.env`, and database password on the host filesystem with minimal permissions.
+- Production `issuer` must be HTTPS; never enable the loopback development switch for the container.
+- Use NTP sources inside your trust boundary instead of public servers.
+
+## Troubleshooting
+
+| Symptom | Usual cause |
+| --- | --- |
+| Exits at startup with `persistent RSA key unavailable` | Key missing, or unreadable by uid `10001` |
+| `persistent RSA key invalid` | Key is not PKCS#8 PEM, or the file is truncated |
+| `production issuer requires HTTPS` | `issuer` is empty or still `http://` |
+| Startup fails on the `security clock` | Outbound `UDP/123` blocked, or the time sources are unreachable |
+| UI loads but API calls return 403 or login redirects fail | `[auth].origins` does not match the browser origin, including the port |
+| Database connection fails | Password not URL-encoded, or `postgres` is still initializing |
+| Caddy keeps failing certificate issuance | DNS does not point at the host, or `80`/`443` are taken |
+
+Related: [Production deployment](/en/operations/deployment/) ·
+[Configuration](/en/reference/configuration/) · [Security and backup](/en/operations/security/)

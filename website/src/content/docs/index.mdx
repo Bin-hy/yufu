@@ -1,10 +1,10 @@
 ---
-title: cobotusr
+title: yufu
 description: 单企业统一身份与 SSO 平台：标准 OIDC、细粒度授权、自托管部署。
 template: splash
 head:
   - tag: title
-    content: cobotusr — 单企业统一身份与 SSO 平台
+    content: yufu — 单企业统一身份与 SSO 平台
 hero:
   tagline: 为内网应用提供统一登录、授权与审计。一个 Rust 二进制加 PostgreSQL，按标准 OIDC 接入。
   actions:
@@ -35,7 +35,7 @@ import consent from '../../assets/console-consent.png';
 </p>
 
 <div class="shot-wrap">
-  <Image src={dashboard} alt="cobotusr 当前工作台，包含账户中心、开发者控制台和企业管理入口（演示数据）" />
+  <Image src={dashboard} alt="yufu 当前工作台，包含账户中心、开发者控制台和企业管理入口（演示数据）" />
 </div>
 <p class="shot-caption">当前工作台：账户中心、开发者控制台与企业管理入口（演示数据）</p>
 <p class="shot-caption"><a href="/guides/console/">查看控制台使用指南与更多界面截图 →</a></p>
@@ -45,7 +45,7 @@ import consent from '../../assets/console-consent.png';
 ## 一个 issuer，覆盖全部身份入口
 
 <p class="lead">
-  cobotusr 是单企业独立部署的统一身份与 SSO 平台。账户中心、开发者控制台和企业管理控制台属于同一个产品，
+  yufu 是单企业独立部署的统一身份与 SSO 平台。账户中心、开发者控制台和企业管理控制台属于同一个产品，
   应用接入采用企业邀约与审批制，不提供公开应用市场。
 </p>
 
@@ -79,7 +79,7 @@ import consent from '../../assets/console-consent.png';
 <div class="steps">
   <div class="step">
     <h3>部署身份中心</h3>
-    <p>启动 PostgreSQL，配置 issuer 与 RSA 签名密钥，运行 cobotusr 并完成首次管理员登录。</p>
+    <p>启动 PostgreSQL，配置 issuer 与 RSA 签名密钥，运行 yufu 并完成首次管理员登录。</p>
   </div>
   <div class="step">
     <h3>注册并审批应用</h3>
@@ -114,12 +114,12 @@ git clone https://github.com/Bin-hy/cobot-for.git
 cd cobot-for
 
 pnpm install --frozen-lockfile
-pnpm build:cobotusr
+pnpm build:web
 docker compose up -d
 
-cp conf/cobotusr.example.toml conf/cobotusr.local.toml
-cargo run --bin cobotusr --features webui -- \
-  --config conf/cobotusr.local.toml \
+cp conf/yufu.example.toml conf/yufu.local.toml
+cargo run --bin yufu --features webui -- \
+  --config conf/yufu.local.toml \
   --allow-insecure-loopback-cookies
 ```
 
@@ -152,7 +152,7 @@ cargo run --bin cobotusr --features webui -- \
 <section>
 
 <div class="shot-wrap">
-  <Image src={consent} alt="cobotusr 当前授权同意页，列出账户身份、用户名与邮箱权限（演示数据）" />
+  <Image src={consent} alt="yufu 当前授权同意页，列出账户身份、用户名与邮箱权限（演示数据）" />
 </div>
 <p class="shot-caption">当前授权同意页：账户身份、用户名与邮箱权限逐项披露（演示数据）</p>
 

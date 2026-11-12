@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	cobotusr "github.com/Bin-hy/cobot-sdk-go"
+	yufu "github.com/Bin-hy/yufu-sdk-go"
 )
 
 type testSigner struct {
@@ -213,7 +213,7 @@ func (f *fakeIssuer) logoutToken(jti, sid, sub string) string {
 
 func TestExampleAuthorizationCodeFlow(t *testing.T) {
 	issuer := newFakeIssuer(t)
-	client, err := cobotusr.New(cobotusr.Config{
+	client, err := yufu.New(yufu.Config{
 		Issuer: issuer.server.URL, ClientID: "web", ClientSecret: "secret",
 		RedirectURI: "https://app.example/callback",
 		Scopes:      []string{"openid", "profile", "email"},
@@ -222,7 +222,7 @@ func TestExampleAuthorizationCodeFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	reader, err := cobotusr.New(cobotusr.Config{
+	reader, err := yufu.New(yufu.Config{
 		Issuer: issuer.server.URL, ClientID: "reader", ClientSecret: "reader-secret",
 	})
 	if err != nil {
@@ -240,7 +240,7 @@ func TestExampleAuthorizationCodeFlow(t *testing.T) {
 		},
 		client:  client,
 		reader:  reader,
-		pending: make(map[string]*cobotusr.AuthorizationRequest),
+		pending: make(map[string]*yufu.AuthorizationRequest),
 		seenJTI: make(map[string]time.Time),
 	}
 	mux := http.NewServeMux()

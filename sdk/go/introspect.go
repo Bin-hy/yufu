@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bin-hy/cobot-sdk-go/internal/jose"
+	"github.com/Bin-hy/yufu-sdk-go/internal/jose"
 )
 
 // TokenTypeHint is an optional RFC 7662 / RFC 7009 hint.
@@ -37,7 +37,7 @@ type Introspection struct {
 // Resource servers should construct a client with reader credentials.
 func (c *Client) Introspect(ctx context.Context, token string, hint ...TokenTypeHint) (*Introspection, error) {
 	if strings.TrimSpace(token) == "" {
-		return nil, errors.New("cobotusr: token is required")
+		return nil, errors.New("yufu: token is required")
 	}
 	discovery, err := c.Discover(ctx)
 	if err != nil {

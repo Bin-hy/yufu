@@ -1,0 +1,9 @@
+{
+  "date": "2026-11-08",
+  "changedLockImporters": [
+    "web"
+  ],
+  "sharedSourceChanges": [],
+  "scope": "yufu app; added runtime and testing dependencies; other importer versions unchanged",
+  "workspacePolicyChange": "playwright-webkit install script disabled; browser installation explicit"
+}

@@ -11,7 +11,7 @@ import {
 } from '../server/protection.js'
 
 const ISSUER = 'https://id.example.com'
-const CLIENT_ID = 'cobotrix-spa-example'
+const CLIENT_ID = 'yufu-spa-example'
 const WALL = 1_000_000
 
 function claims(overrides: Partial<AccessTokenClaims> = {}): AccessTokenClaims {

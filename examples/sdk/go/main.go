@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	cobotusr "github.com/Bin-hy/cobot-sdk-go"
+	yufu "github.com/Bin-hy/yufu-sdk-go"
 )
 
 type config struct {
@@ -34,11 +34,11 @@ type config struct {
 
 type demo struct {
 	cfg    config
-	client *cobotusr.Client
-	reader *cobotusr.Client
+	client *yufu.Client
+	reader *yufu.Client
 
 	mu      sync.Mutex
-	pending map[string]*cobotusr.AuthorizationRequest
+	pending map[string]*yufu.AuthorizationRequest
 
 	logoutMu sync.Mutex
 	seenJTI  map[string]time.Time
@@ -49,7 +49,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	client, err := cobotusr.New(cobotusr.Config{
+	client, err := yufu.New(yufu.Config{
 		Issuer:       cfg.issuer,
 		ClientID:     cfg.clientID,
 		ClientSecret: cfg.clientSecret,
@@ -61,9 +61,9 @@ func main() {
 	}
 	defer client.Close()
 
-	var reader *cobotusr.Client
+	var reader *yufu.Client
 	if cfg.readerClientID != "" {
-		reader, err = cobotusr.New(cobotusr.Config{
+		reader, err = yufu.New(yufu.Config{
 			Issuer:       cfg.issuer,
 			ClientID:     cfg.readerClientID,
 			ClientSecret: cfg.readerClientSecret,
@@ -78,7 +78,7 @@ func main() {
 		cfg:     cfg,
 		client:  client,
 		reader:  reader,
-		pending: make(map[string]*cobotusr.AuthorizationRequest),
+		pending: make(map[string]*yufu.AuthorizationRequest),
 		seenJTI: make(map[string]time.Time),
 	}
 	mux := http.NewServeMux()
@@ -88,7 +88,7 @@ func main() {
 	mux.HandleFunc("/api/me", app.me)
 	mux.HandleFunc("/logout", app.logout)
 	mux.HandleFunc("/oidc/backchannel-logout", app.backchannelLogout)
-	log.Printf("cobotusr Go SDK example listening on http://%s", cfg.addr)
+	log.Printf("yufu Go SDK example listening on http://%s", cfg.addr)
 	log.Fatal(http.ListenAndServe(cfg.addr, mux))
 }
 
@@ -134,16 +134,16 @@ func loadConfig() (config, error) {
 func (d *demo) index(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprintf(w, `<!doctype html>
-<html lang="en"><meta charset="utf-8"><title>cobotusr Go SDK</title>
+<html lang="en"><meta charset="utf-8"><title>yufu Go SDK</title>
 <body>
-<h1>cobotusr Go SDK example</h1>
+<h1>yufu Go SDK example</h1>
 <p><a href="/login">Sign in</a> · <a href="/api/me">Protected API</a> · <a href="/logout">Sign out</a></p>
 <p>Issuer: <code>%s</code></p>
 </body></html>`, d.cfg.issuer)
 }
 
 func (d *demo) login(w http.ResponseWriter, r *http.Request) {
-	auth, err := d.client.AuthorizeURL(cobotusr.AuthorizeOptions{})
+	auth, err := d.client.AuthorizeURL(yufu.AuthorizeOptions{})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -233,7 +233,7 @@ func (d *demo) me(w http.ResponseWriter, r *http.Request) {
 		"expires_at": claims.ExpiresAt,
 	}
 	if d.reader != nil {
-		introspection, err := d.reader.Introspect(r.Context(), token, cobotusr.TokenTypeAccessToken)
+		introspection, err := d.reader.Introspect(r.Context(), token, yufu.TokenTypeAccessToken)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
@@ -251,7 +251,7 @@ func (d *demo) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *demo) logout(w http.ResponseWriter, r *http.Request) {
-	endURL, err := d.client.EndSessionURL(r.Context(), cobotusr.EndSessionOptions{
+	endURL, err := d.client.EndSessionURL(r.Context(), yufu.EndSessionOptions{
 		PostLogoutRedirectURI: d.cfg.postLogoutRedirectURI,
 	})
 	if err != nil {

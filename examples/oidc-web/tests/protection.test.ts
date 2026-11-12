@@ -13,7 +13,7 @@ import {
 import { ProfileDirectory, SessionStore } from '../src/session.js'
 
 const ISSUER = 'https://id.example.com'
-const CLIENT_ID = 'cobotrix-web-example'
+const CLIENT_ID = 'yufu-web-example'
 const WALL = 1_000_000
 
 function protocol(): VerifiedProtocol {

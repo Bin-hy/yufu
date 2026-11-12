@@ -780,79 +780,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
-name = "cobotrix-root"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "auth",
- "axum",
- "base64 0.22.1",
- "bcrypt",
- "chrono",
- "clap",
- "cobotusr",
- "getrandom 0.4.2",
- "jsonwebtoken",
- "portpicker",
- "rand 0.8.6",
- "rcgen",
- "reqwest",
- "rsa",
- "rustls",
- "sea-orm",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "testcontainers",
- "tokio",
- "tokio-rustls",
- "toml",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "cobotusr"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "auth",
- "axum",
- "base64 0.22.1",
- "bcrypt",
- "chrono",
- "futures",
- "getrandom 0.4.2",
- "hex",
- "http",
- "http-body-util",
- "http-log",
- "log",
- "mime_guess",
- "rand 0.8.6",
- "reqwest",
- "rsa",
- "rust-embed",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "url",
- "urlencoding",
- "utoipa",
- "utoipa-swagger-ui",
- "uuid",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5100,6 +5027,79 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "synstructure",
+]
+
+[[package]]
+name = "yufu"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "auth",
+ "axum",
+ "base64 0.22.1",
+ "bcrypt",
+ "chrono",
+ "futures",
+ "getrandom 0.4.2",
+ "hex",
+ "http",
+ "http-body-util",
+ "http-log",
+ "log",
+ "mime_guess",
+ "rand 0.8.6",
+ "reqwest",
+ "rsa",
+ "rust-embed",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "url",
+ "urlencoding",
+ "utoipa",
+ "utoipa-swagger-ui",
+ "uuid",
+]
+
+[[package]]
+name = "yufu-root"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "auth",
+ "axum",
+ "base64 0.22.1",
+ "bcrypt",
+ "chrono",
+ "clap",
+ "getrandom 0.4.2",
+ "jsonwebtoken",
+ "portpicker",
+ "rand 0.8.6",
+ "rcgen",
+ "reqwest",
+ "rsa",
+ "rustls",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "testcontainers",
+ "tokio",
+ "tokio-rustls",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "yufu",
 ]
 
 [[package]]

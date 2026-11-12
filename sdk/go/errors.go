@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"encoding/json"
@@ -26,7 +26,7 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	parts := []string{"cobotusr"}
+	parts := []string{"yufu"}
 	if e.Code != "" {
 		parts = append(parts, e.Code)
 	}
@@ -65,7 +65,7 @@ func (e *Error) Temporary() bool {
 	}
 }
 
-// IsErrorCode reports whether err is a cobotusr Error with the given code.
+// IsErrorCode reports whether err is a yufu Error with the given code.
 func IsErrorCode(err error, code string) bool {
 	var target *Error
 	return errors.As(err, &target) && target.Code == code

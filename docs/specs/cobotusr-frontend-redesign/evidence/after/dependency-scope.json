@@ -1,9 +1,0 @@
-{
-  "date": "2026-11-08",
-  "changedLockImporters": [
-    "cobotweb/apps/cobotusr"
-  ],
-  "sharedSourceChanges": [],
-  "scope": "cobotusr app; added runtime and testing dependencies; other importer versions unchanged",
-  "workspacePolicyChange": "playwright-webkit install script disabled; browser installation explicit"
-}

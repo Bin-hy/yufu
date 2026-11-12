@@ -1,16 +1,16 @@
 services:
-    postgres_cobotusr:
+    postgres_yufu:
         image: postgres:18-alpine
-        container_name: postgres_cobotusr
+        container_name: postgres_yufu
         restart: always
         ports:
-            - "${POSTGRES_USR_PORT:-5433}:5432"
+            - "${POSTGRES_YUFU_PORT:-5433}:5432"
         environment:
-            POSTGRES_USER: ${POSTGRES_USR_USER:-postgres}
-            POSTGRES_PASSWORD: ${POSTGRES_USR_PASSWORD:-postgres}
-            POSTGRES_DB: ${POSTGRES_USR_DB:-cobotusr}
+            POSTGRES_USER: ${POSTGRES_YUFU_USER:-postgres}
+            POSTGRES_PASSWORD: ${POSTGRES_YUFU_PASSWORD:-postgres}
+            POSTGRES_DB: ${POSTGRES_YUFU_DB:-yufu}
         volumes:
-            - cobotrix_pg_usr:/var/lib/postgresql
+            - yufu_pg:/var/lib/postgresql
 
 volumes:
-    cobotrix_pg_usr:
+    yufu_pg:

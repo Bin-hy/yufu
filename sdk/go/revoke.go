@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 // Revoke revokes an access or refresh token. Revocation is idempotent.
 func (c *Client) Revoke(ctx context.Context, token string, hint ...TokenTypeHint) error {
 	if strings.TrimSpace(token) == "" {
-		return errors.New("cobotusr: token is required")
+		return errors.New("yufu: token is required")
 	}
 	discovery, err := c.Discover(ctx)
 	if err != nil {

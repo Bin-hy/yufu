@@ -325,7 +325,7 @@ where
 /// JWT verification middleware using a [`JwksClient`] (RS256, public-key only).
 ///
 /// Use this in services that consume tokens issued by another service (e.g.
-/// cobotrix consuming resource-app-issued tokens). Validated [`crate::claims::AccessTokenClaims`]
+/// yufu consuming resource-app-issued tokens). Validated [`crate::claims::AccessTokenClaims`]
 /// is inserted into request extensions so handlers can extract it.
 pub async fn access_middleware_rs256(
     State(jwks): State<Arc<JwksClient>>,
@@ -436,7 +436,7 @@ pub trait PermissionChecker: Send + Sync {
 ///
 /// **Two modes** (checked in order):
 /// 1. If `Arc<dyn PermissionChecker>` is in request extensions, calls it for an
-///    async PDP check (e.g. cobotrix calling resource-app's `/api/v1/enforce`).
+///    async PDP check (e.g. yufu calling resource-app's `/api/v1/enforce`).
 /// 2. Otherwise falls back to checking `AccessTokenClaims.permissions` embedded
 ///    in the JWT (backward compatible with resource-app).
 ///

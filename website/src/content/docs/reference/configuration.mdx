@@ -1,6 +1,6 @@
 ---
 title: 配置项
-description: cobotusr 配置文件字段、默认值与命令行参数。
+description: yufu 配置文件字段、默认值与命令行参数。
 ---
 
 配置文件使用 TOML，通过 `--config <path>` 指定。未填写的字段使用默认值。
@@ -52,7 +52,7 @@ description: cobotusr 配置文件字段、默认值与命令行参数。
 | `rsa_private_key_path` | `conf/oidc_rsa_private.local.pem` | RS256 签名私钥路径 |
 | `access_token_expire_seconds` | 跟随 `auth.exp_seconds` | access token 有效期 |
 | `refresh_token_expire_seconds` | 跟随 `auth.refresh_exp_seconds` | refresh token 有效期 |
-| `email_domain` | `cobotrix.local` | 用户无邮箱时 UserInfo 使用的域名 |
+| `email_domain` | `yufu.local` | 用户无邮箱时 UserInfo 使用的域名 |
 | `signing_algorithm` | `RS256` | `RS256` 或测试用 `HS256` |
 | `mcp_token_max_ttl_days` | `90` | MCP 长期令牌最大有效天数 |
 
@@ -108,3 +108,7 @@ public_client = true
 | `DATABASE_URL` | `[database].url` 的默认值 |
 | `PORT` | `[http].listen` 的默认端口 |
 | `LOG_LEVEL` | 日志级别 |
+| `AUTH_SECRET` | `[auth].secret` 的默认值，生产必须替换 |
+
+环境变量只在配置文件**缺少**对应字段时生效；文件中写了 `[database].url` 或 `[auth].secret`
+就以文件为准。容器部署常用这种方式把凭据留在 `.env`，不写进配置文件。

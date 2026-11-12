@@ -8,7 +8,7 @@ importers:
 
   .: {}
 
-  cobotweb/apps/cobotusr:
+  web:
     dependencies:
       '@lucide/vue':
         specifier: 1.70.0

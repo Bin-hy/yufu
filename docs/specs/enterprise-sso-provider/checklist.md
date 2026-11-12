@@ -32,19 +32,19 @@ fixture 提供可销毁 PostgreSQL、真实 OP 和中心 UI、Web A、SPA B 及�
 
 | 标识 | 执行命令 | 主要验证 |
 | --- | --- | --- |
-| V_RULE | `cargo test -p cobotusr domain::identity`；`cargo test -p auth` | 纯规则、身份/签名/CSRF 的独立验证 |
-| V_ACCOUNT | `cargo test -p cobotrix-root --all-features identity_account -- --test-threads=1` | 受控开户、资料、密码、资格及 action |
-| V_APP | `cargo test -p cobotrix-root --all-features identity_application -- --test-threads=1` | 注册、成员、版本、审批、秘密和停用 |
-| V_ASSIGN | `cargo test -p cobotrix-root --all-features identity_assignment -- --test-threads=1` | 直接/组来源、测试用户、最终失权与并发 |
-| V_SESSION | `cargo test -p cobotrix-root --all-features identity_session -- --test-threads=1` | 中心/RP 根、撤销、预算、通知、清理与故障 |
-| V_PROTOCOL | `cargo test -p cobotrix-root --all-features identity_protocol -- --test-threads=1` | 授权、代码/刷新、claims、内省、标准退出与响应 |
-| V_MIGRATION | `cargo test -p cobotrix-root --all-features identity_migration -- --test-threads=1` | 全新/旧库、固定主体/key、bootstrap 与显式纳管 |
-| V_HTTP | `cargo test -p cobotrix-root --all-features identity_ -- --test-threads=1` | 身份 HTTP 权限与最小披露矩阵，包含对应的并发/故障用例 |
-| V_REGRESSION | `cargo test -p cobotrix-root --all-features auth -- --test-threads=1`；`cargo test -p cobotrix-root --all-features security -- --test-threads=1`；`cargo test -p cobotrix-root --all-features oidc -- --test-threads=1`；`cargo test -p cobotrix-root --all-features role -- --test-threads=1`；`cargo test -p cobotrix-root --all-features authority -- --test-threads=1` | 现有登录/重放/MCP/父链/OIDC/通用权限回归 |
-| V_UI | `pnpm --filter @cobotweb/cobotusr test` | 三入口、恢复、flow、草稿/缓存及真实后端状态反馈 |
-| V_WEB | `pnpm --filter @cobotrix/oidc-web test` | 标准 Web 客户端、会话、通知、保护缓存 |
-| V_SPA | `pnpm --filter @cobotrix/oidc-spa test` | 标准 SPA、标签隔离、独立 API 与后端 reader |
-| V_SSO | `pnpm test:sso`；其 Rust 入口为 `cargo test -p cobotrix-root --all-features identity_browser -- --test-threads=1` | 真实 OP 与两个独立站点/保护 API，三引擎 E1—E6 路径 |
+| V_RULE | `cargo test -p yufu domain::identity`；`cargo test -p auth` | 纯规则、身份/签名/CSRF 的独立验证 |
+| V_ACCOUNT | `cargo test -p yufu-root --all-features identity_account -- --test-threads=1` | 受控开户、资料、密码、资格及 action |
+| V_APP | `cargo test -p yufu-root --all-features identity_application -- --test-threads=1` | 注册、成员、版本、审批、秘密和停用 |
+| V_ASSIGN | `cargo test -p yufu-root --all-features identity_assignment -- --test-threads=1` | 直接/组来源、测试用户、最终失权与并发 |
+| V_SESSION | `cargo test -p yufu-root --all-features identity_session -- --test-threads=1` | 中心/RP 根、撤销、预算、通知、清理与故障 |
+| V_PROTOCOL | `cargo test -p yufu-root --all-features identity_protocol -- --test-threads=1` | 授权、代码/刷新、claims、内省、标准退出与响应 |
+| V_MIGRATION | `cargo test -p yufu-root --all-features identity_migration -- --test-threads=1` | 全新/旧库、固定主体/key、bootstrap 与显式纳管 |
+| V_HTTP | `cargo test -p yufu-root --all-features identity_ -- --test-threads=1` | 身份 HTTP 权限与最小披露矩阵，包含对应的并发/故障用例 |
+| V_REGRESSION | `cargo test -p yufu-root --all-features auth -- --test-threads=1`；`cargo test -p yufu-root --all-features security -- --test-threads=1`；`cargo test -p yufu-root --all-features oidc -- --test-threads=1`；`cargo test -p yufu-root --all-features role -- --test-threads=1`；`cargo test -p yufu-root --all-features authority -- --test-threads=1` | 现有登录/重放/MCP/父链/OIDC/通用权限回归 |
+| V_UI | `pnpm --filter @yufu/web test` | 三入口、恢复、flow、草稿/缓存及真实后端状态反馈 |
+| V_WEB | `pnpm --filter @yufu/oidc-web test` | 标准 Web 客户端、会话、通知、保护缓存 |
+| V_SPA | `pnpm --filter @yufu/oidc-spa test` | 标准 SPA、标签隔离、独立 API 与后端 reader |
+| V_SSO | `pnpm test:sso`；其 Rust 入口为 `cargo test -p yufu-root --all-features identity_browser -- --test-threads=1` | 真实 OP 与两个独立站点/保护 API，三引擎 E1—E6 路径 |
 
 ## 4. 行为和集成检查
 
@@ -216,11 +216,11 @@ fixture 提供可销毁 PostgreSQL、真实 OP 和中心 UI、Web A、SPA B 及�
 
 - [x] **C75** Node/前端/示例依赖使用锁定版本可重现安装，没有隐式 lockfile 改写或未记录的依赖差异。（对应 AC27；验证：运行 `pnpm install --frozen-lockfile`，命令成功且 lockfile 不变；记录实际 Node/pnpm/标准客户端版本。）
 
-- [x] **C76** 中心前端单元/组件测试、类型检查、lint 和构建全部通过，恢复/入口/flow/权限/状态用例实际执行。（对应 AC27；验证：运行 `pnpm --filter @cobotweb/cobotusr test`、`pnpm --filter @cobotweb/cobotusr check`、`pnpm --filter @cobotweb/cobotusr lint`、`pnpm build:cobotusr`，均成功并记录用例数。）
+- [x] **C76** 中心前端单元/组件测试、类型检查、lint 和构建全部通过，恢复/入口/flow/权限/状态用例实际执行。（对应 AC27；验证：运行 `pnpm --filter @yufu/web test`、`pnpm --filter @yufu/web check`、`pnpm --filter @yufu/web lint`、`pnpm build:web`，均成功并记录用例数。）
 
-- [x] **C77** Web 示例类型、构建和协议/会话/退出/保护缓存测试通过，不依赖内部 auth 或中心数据库。（对应 AC23、AC27；验证：执行 V_WEB，并运行 `pnpm --filter @cobotrix/oidc-web check`、`pnpm --filter @cobotrix/oidc-web build`，各命令成功，标准兼容由真实 SSO 补证。）
+- [x] **C77** Web 示例类型、构建和协议/会话/退出/保护缓存测试通过，不依赖内部 auth 或中心数据库。（对应 AC23、AC27；验证：执行 V_WEB，并运行 `pnpm --filter @yufu/oidc-web check`、`pnpm --filter @yufu/oidc-web build`，各命令成功，标准兼容由真实 SSO 补证。）
 
-- [x] **C78** SPA/保护 API 类型、构建和标签隔离/协议/通知/缓存测试通过；public 产物不含 Web/reader/client secret。（对应 AC8、AC23、AC27；验证：执行 V_SPA，并运行 `pnpm --filter @cobotrix/oidc-spa check`、`pnpm --filter @cobotrix/oidc-spa build`，检查产物及命令结果。）
+- [x] **C78** SPA/保护 API 类型、构建和标签隔离/协议/通知/缓存测试通过；public 产物不含 Web/reader/client secret。（对应 AC8、AC23、AC27；验证：执行 V_SPA，并运行 `pnpm --filter @yufu/oidc-spa check`、`pnpm --filter @yufu/oidc-spa build`，检查产物及命令结果。）
 
 - [x] **C79** Rust workspace 格式检查通过。（对应 AC27；验证：运行 `cargo fmt --all -- --check`，返回成功且无格式差异。）
 

@@ -336,7 +336,7 @@ impl IdTokenSigner {
             rsa_public_key_der: Some(pub_der.as_bytes().to_vec()),
             hmac_secret: String::new(),
             expire_seconds,
-            kid: "cobotrix-rsa-1".to_string(),
+            kid: "yufu-rsa-1".to_string(),
         })
     }
 
@@ -348,7 +348,7 @@ impl IdTokenSigner {
             rsa_public_key_der: None,
             hmac_secret: secret.to_string(),
             expire_seconds,
-            kid: "cobotrix-hmac-1".to_string(),
+            kid: "yufu-hmac-1".to_string(),
         }
     }
 

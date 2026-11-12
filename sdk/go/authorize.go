@@ -1,4 +1,4 @@
-package cobotusr
+package yufu
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bin-hy/cobot-sdk-go/internal/pkce"
+	"github.com/Bin-hy/yufu-sdk-go/internal/pkce"
 )
 
 // AuthorizeOptions customizes an authorization request. Empty fields use the
@@ -65,14 +65,14 @@ func (c *Client) AuthorizeURLContext(ctx context.Context, opts AuthorizeOptions)
 		redirectURI = c.cfg.RedirectURI
 	}
 	if redirectURI == "" {
-		return nil, errors.New("cobotusr: RedirectURI is required for authorization")
+		return nil, errors.New("yufu: RedirectURI is required for authorization")
 	}
 	scopes := opts.Scopes
 	if len(scopes) == 0 {
 		scopes = c.cfg.Scopes
 	}
 	if !containsString(scopes, "openid") {
-		return nil, errors.New("cobotusr: scopes must include openid")
+		return nil, errors.New("yufu: scopes must include openid")
 	}
 	state := opts.State
 	if state == "" {
@@ -97,7 +97,7 @@ func (c *Client) AuthorizeURLContext(ctx context.Context, opts AuthorizeOptions)
 	values := url.Values{}
 	for key, items := range opts.Extra {
 		if reservedAuthorizeParams[key] {
-			return nil, fmt.Errorf("cobotusr: authorization parameter %q is reserved", key)
+			return nil, fmt.Errorf("yufu: authorization parameter %q is reserved", key)
 		}
 		for _, item := range items {
 			values.Add(key, item)
@@ -130,13 +130,13 @@ func (c *Client) AuthorizeURLContext(ctx context.Context, opts AuthorizeOptions)
 // ExchangeCode redeems an authorization code with PKCE.
 func (c *Client) ExchangeCode(ctx context.Context, code, codeVerifier string) (*TokenSet, error) {
 	if strings.TrimSpace(code) == "" {
-		return nil, errors.New("cobotusr: code is required")
+		return nil, errors.New("yufu: code is required")
 	}
 	if err := pkce.ValidateVerifier(codeVerifier); err != nil {
 		return nil, err
 	}
 	if c.cfg.RedirectURI == "" {
-		return nil, errors.New("cobotusr: RedirectURI is required for code exchange")
+		return nil, errors.New("yufu: RedirectURI is required for code exchange")
 	}
 	discovery, err := c.Discover(ctx)
 	if err != nil {

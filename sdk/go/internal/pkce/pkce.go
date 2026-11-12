@@ -31,7 +31,7 @@ func Challenge(verifier string) string {
 // ValidateVerifier checks the RFC 7636 syntax and length bounds.
 func ValidateVerifier(verifier string) error {
 	if len(verifier) < 43 || len(verifier) > 128 {
-		return errors.New("cobotusr: PKCE verifier must be between 43 and 128 characters")
+		return errors.New("yufu: PKCE verifier must be between 43 and 128 characters")
 	}
 	for _, r := range verifier {
 		switch {
@@ -40,7 +40,7 @@ func ValidateVerifier(verifier string) error {
 		case r >= '0' && r <= '9':
 		case strings.ContainsRune("-._~", r):
 		default:
-			return errors.New("cobotusr: PKCE verifier contains an invalid character")
+			return errors.New("yufu: PKCE verifier contains an invalid character")
 		}
 	}
 	return nil

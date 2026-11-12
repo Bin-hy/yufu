@@ -145,7 +145,7 @@ tar -czf identity-secrets-$(date +%Y%m%d).tar.gz conf/oidc_rsa_private.local.pem
 
 ### 8.4 可复跑的演练与首次记录
 
-仓库提供与第 8.2 节对应的自动演练（`tests/cobotusr/routes/upgrade_drill.rs`，默认 `#[ignore]`）：
+仓库提供与第 8.2 节对应的自动演练（`tests/yufu/routes/upgrade_drill.rs`，默认 `#[ignore]`）：
 
 ```bash
 cargo test --release --test mod upgrade_drill -- --ignored --nocapture --test-threads=1

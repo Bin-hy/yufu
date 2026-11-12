@@ -1,0 +1,100 @@
+[http]
+# Http Server Listen Address
+listen = "127.0.0.1:4000"
+# api_prefix = "/api/v1"
+
+# Headers["Authorization"] = "Bearer {token}"
+[auth]
+# 默认 Cookie 带 Secure，生产浏览器入口应使用 HTTPS。
+# 本机 HTTP 开发（含 Safari）可以显式打开；监听地址和 issuer 必须是 loopback。
+# 独立启动也可用 CLI --allow-insecure-loopback-cookies，无须修改配置文件。
+# allow_insecure_loopback_cookies = false
+# JSON WEB TOKEN secret
+# secret = "<jwt_secret>"
+# static JWT token, superadmin, debuggger can use this token
+# tokens = ["live777"]
+# expiration_seconds, default 2h.
+exp_seconds = 7200
+# refresh_expiration_seconds, default 7d.
+refresh_exp_seconds = 604800 # 7*24*3600
+
+# CORS origins 列表
+origins = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://example.com"
+]
+
+# add a superadmin
+[auth.super_admin]
+# username = "sadmin"
+# password = "sadmin"
+
+# OIDC / OAuth2 Provider Configuration
+[oidc]
+# Public issuer URL for OIDC discovery (/.well-known/openid-configuration).
+# Clients use this to locate token/userinfo/jwks endpoints.
+# If empty, falls back to http.public, then derived from http.listen.
+# issuer = "https://auth.example.com"
+
+# RSA private key path for ID Token signing (RS256).
+# Auto-generated if the file does not exist.
+rsa_private_key_path = "conf/oidc_rsa_private.local.pem"
+
+# Token lifetimes (optional, defaults to auth.exp_seconds / auth.refresh_exp_seconds)
+access_token_expire_seconds = 3600
+refresh_token_expire_seconds = 604800
+
+# Default email domain for users without an email address.
+# UserInfo endpoint returns "{username}@{email_domain}".
+# email_domain = "yufu.local"
+
+# Algorithm for signing access tokens. RS256 (default) requires rsa_private_key_path;
+# HS256 falls back to auth.secret (handy for tests / no-key dev clusters).
+# signing_algorithm = "RS256"
+
+# Maximum lifetime (days) for long-lived MCP access tokens minted via
+# POST /api/v1/oidc/mcp-tokens. Requested ttl_days is clamped to this. Default 90.
+# mcp_token_max_ttl_days = 90
+
+# Register external applications through the admin UI or explicit bootstrap entries.
+# No business client or permission is granted by default.
+# [[oidc.bootstrap_clients]]
+# client_id = "example-spa"
+# name = "Example application"
+# redirect_uris = ["http://localhost:5174/oauth/callback"]
+# allowed_scopes = ["openid", "profile", "email"]
+# grant_types = ["authorization_code", "refresh_token"]
+# public_client = true
+
+# Admin Dashboard Accounts
+# [[auth.accounts]]
+# username = "live777"
+# password = "live777"
+
+[log]
+# Env: `LOG_LEVEL`
+# Default: info
+# Values: off, error, warn, info, debug, trace
+# level = "warn"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5433/yufu"
+# max connections (Default: 10, unit: second)
+max_connections = 10
+# timeout  (Default: 30 ,unit: second)
+connect_timeout = 30
+
+# 认证时钟健康检查：只测量宿主时间，不设置或校正 OS 时间。
+# 默认至少两个不同 IP 的来源一致且总误差 <= 1 秒，10 秒检查一次。
+# UDP/DNS 不可达、样本过期或时钟跳变时，认证入口返回 503；启动首次检查失败则退出。
+# 独立诊断：yufu --config <path> --check-security-clock（不打开数据库或 HTTP 服务）。
+# 运行后 GET /api/v1/health/ready 仅报告认证时钟就绪状态。
+# 普通 NTP 没有传输认证；生产应使用受信网络中的 NTP 来源，或由宿主通过
+# serve_with_security_clock 注入具备可信健康证据的 Clock。不要填公共来源来替代部署信任策略。
+[security_clock]
+servers = ["time.apple.com:123", "time.cloudflare.com:123", "ntp.aliyun.com:123"]
+min_agreeing_sources = 2
+poll_interval_seconds = 10
+sample_ttl_seconds = 30
+timeout_millis = 1500

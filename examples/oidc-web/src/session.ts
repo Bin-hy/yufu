@@ -2,8 +2,8 @@ import { randomBytes } from 'node:crypto'
 
 import type { IdentityClaims, TokenSet, VerifiedProtocol } from './oidc.js'
 
-export const SESSION_COOKIE = 'cobotrix_session'
-export const PENDING_COOKIE = 'cobotrix_pending'
+export const SESSION_COOKIE = 'yufu_session'
+export const PENDING_COOKIE = 'yufu_pending'
 
 const SESSION_COOKIE_MAX_AGE = 8 * 60 * 60
 const PENDING_COOKIE_MAX_AGE = 10 * 60

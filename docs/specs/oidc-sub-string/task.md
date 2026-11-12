@@ -9,9 +9,9 @@
 | 修改 | `libs/auth/src/claims.rs` | ID Token subject 协议类型 |
 | 修改 | `libs/auth/src/token_manager.rs` | 签发入口和单元测试 |
 | 按需修改 | `libs/auth/Cargo.toml` | 仅测试密钥生成需要且现有依赖无法满足时增加测试依赖 |
-| 修改 | `cobotusr/src/service/oidc.rs` | 授权码与刷新调用方转换 |
-| 修改 | `cobotusr/src/route/oidc.rs` | UserInfo 字符串输出 |
-| 修改 | `tests/cobotusr/routes/oidc.rs` | 完整授权与刷新回归测试 |
+| 修改 | `yufu/src/service/oidc.rs` | 授权码与刷新调用方转换 |
+| 修改 | `yufu/src/route/oidc.rs` | UserInfo 字符串输出 |
+| 修改 | `tests/yufu/routes/oidc.rs` | 完整授权与刷新回归测试 |
 | 修改 | `cobotimx/src/auth/oidc.ts` | UserInfo 接口类型 |
 | 新建 | `cobotimx/src/stores/auth.test.ts` | 字符串 subject 的 store 回归测试 |
 
@@ -28,7 +28,7 @@
 
 ## T2：收紧协议结构与签发接口
 
-**文件：** `libs/auth/src/claims.rs`、`libs/auth/src/token_manager.rs`、`cobotusr/src/service/oidc.rs`
+**文件：** `libs/auth/src/claims.rs`、`libs/auth/src/token_manager.rs`、`yufu/src/service/oidc.rs`
 **依赖：** T1
 **步骤：**
 1. 去除 `IdTokenClaims` 的 ID 泛型，将 `sub` 固定为 `String`。
@@ -37,21 +37,21 @@
 4. T1 测试改为通过新字符串接口传入 subject，保留载荷类型及签名断言。
 5. 更新受影响注释；不修改 Access Token 和内部刷新令牌类型。
 
-**验证：** `cargo test -p auth`、`cargo check -p cobotusr`，预期签发测试通过且调用方编译通过。
+**验证：** `cargo test -p auth`、`cargo check -p yufu`，预期签发测试通过且调用方编译通过。
 
 ## T3：修复 UserInfo 输出
 
-**文件：** `cobotusr/src/route/oidc.rs`
+**文件：** `yufu/src/route/oidc.rs`
 **依赖：** T2
 **步骤：**
 1. 将 `UserInfoResp.sub` 改为 `String`。
 2. 在响应构造处使用 `user_vo.id.to_string()`，保持其他字段行为。
 
-**验证：** `cargo check -p cobotusr`；通过 T4 的 HTTP 测试确认响应实际输出字符串。
+**验证：** `cargo check -p yufu`；通过 T4 的 HTTP 测试确认响应实际输出字符串。
 
 ## T4：扩展授权码与刷新集成场景
 
-**文件：** `tests/cobotusr/routes/oidc.rs`
+**文件：** `tests/yufu/routes/oidc.rs`
 **依赖：** T2、T3
 **步骤：**
 1. 在现有测试辅助方法和场景中复用已知登录用户 ID，按十进制字符串计算预期 subject。

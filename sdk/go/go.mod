@@ -1,3 +1,3 @@
-module github.com/Bin-hy/cobot-sdk-go
+module github.com/Bin-hy/yufu-sdk-go
 
 go 1.22

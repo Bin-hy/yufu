@@ -1,0 +1,38 @@
+# Build context for deploy/docker/Dockerfile.
+# Keep this narrow: the image builds both the console and the Rust service.
+
+.git
+.gitignore
+.github
+.vscode
+.trae
+.reasonix
+.agents
+.codegraph
+.claude
+target
+node_modules
+**/node_modules
+**/dist
+**/dist-ssr
+**/.astro
+website/.astro
+**/test-results
+**/playwright-report
+**/mutants.out
+**/*.dSYM
+
+# The console bundle is rebuilt inside the image; never ship a stale copy.
+assets
+
+# Local configuration, secrets and operator data must not enter an image layer.
+.env
+*.local
+*.local.*
+conf/oidc_rsa_private*.pem
+deploy/docker/state
+data
+storage
+
+.DS_Store
+Thumbs.db

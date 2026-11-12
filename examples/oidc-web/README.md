@@ -26,8 +26,8 @@ cp .env.example .env
 
 ```bash
 pnpm install
-pnpm --filter @cobotrix/oidc-web build
-pnpm --filter @cobotrix/oidc-web start
+pnpm --filter @yufu/oidc-web build
+pnpm --filter @yufu/oidc-web start
 ```
 
 打开 `http://127.0.0.1:3000/`，点击登录，完成中心认证与同意后回到应用。
@@ -51,9 +51,9 @@ pnpm --filter @cobotrix/oidc-web start
 ## 测试
 
 ```bash
-pnpm --filter @cobotrix/oidc-web check
-pnpm --filter @cobotrix/oidc-web test
-pnpm --filter @cobotrix/oidc-web build
+pnpm --filter @yufu/oidc-web check
+pnpm --filter @yufu/oidc-web test
+pnpm --filter @yufu/oidc-web build
 ```
 
 当前单测覆盖配置、授权请求/回调校验、会话、退出、CSRF、内省、缓存时限与后通道通知。真实跨站 TLS 与三浏览器验收（T95—T98）尚未完成，不能据此宣称浏览器级交付。

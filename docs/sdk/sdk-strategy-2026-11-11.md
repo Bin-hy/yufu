@@ -1,4 +1,4 @@
-# cobotusr Runtime SDK 化调研：开发解耦与多语言产出方案
+# yufu Runtime SDK 化调研：开发解耦与多语言产出方案
 
 > - 状态：调研稿，未实施
 > - 基线：`5b8ad81`（2026-11-11）
@@ -23,7 +23,7 @@
 | **Runtime SDK** | 接入的 Web 后端、SPA 后端、资源服务器 | OIDC Discovery、JWKS、RFC 6749/7662/7009/9068、本仓库的 token/introspection 语义 | **本期唯一范围**；手写薄封装 + 成熟 JOSE/OIDC 库 |
 | **Management SDK** | 管理员/开发者自动化、CI、运维平台 | 管理面 OpenAPI | **本期不做**；当前管理面是浏览器 Cookie + CSRF，不适合服务端 SDK |
 
-**价值判断**：在多团队、多语言持续接入的前提下，SDK 的价值成立。它不是替代标准 OIDC 库，而是把 cobotusr 的契约差异、安全默认值、backchannel logout 校验和升级维护集中到一个可版本化的交付物里；如果只是少数内部应用，则应优先做文档 + fixtures，而不是三语言 SDK。
+**价值判断**：在多团队、多语言持续接入的前提下，SDK 的价值成立。它不是替代标准 OIDC 库，而是把 yufu 的契约差异、安全默认值、backchannel logout 校验和升级维护集中到一个可版本化的交付物里；如果只是少数内部应用，则应优先做文档 + fixtures，而不是三语言 SDK。
 
 ### 0.2 已确认决策
 
@@ -62,7 +62,7 @@
 
 ### 1.1 代码与运行时
 
-- Rust workspace：根二进制 `cobotusr`、`cobotusr` crate、`libs/auth`。
+- Rust workspace：根二进制 `yufu`、`yufu` crate、`libs/auth`。
 - Web 框架：Axum 0.8；ORM：SeaORM 2.0-rc；OpenAPI：`utoipa` 6 + `utoipa-swagger-ui` 10。
 - 产品定位：单企业 OIDC/SSO 鉴权中心，外部应用注册 OIDC client，按显式权限和 token audience 接入。
 - 已有接入示例：`examples/oidc-web`（机密 Web 客户端）、`examples/oidc-spa`（公共 SPA + PKCE），但都是 TypeScript 示例，不是后端 SDK。
@@ -92,10 +92,10 @@
 
 | 项目 | 现状 | 证据 |
 |---|---|---|
-| OpenAPI 文档 | `ApiDoc` 只 nest 了 `AuthApi`、`UserApi`、`RoleApi`、`AuthorityApi`、`RecordingApi`、`RbacApi`、`UserAuthorityApi` | `cobotusr/src/swagger_docs.rs:1-30` |
-| Swagger 挂载 | 仅 `openapi` feature 开启时挂到 `/docs`，spec 在 `/api-doc/openapi.json` | `cobotusr/src/lib.rs:435-437` |
-| OIDC 路由 | 未进入 `ApiDoc` | `cobotusr/src/route/oidc.rs`、`cobotusr/src/route/identity_token.rs` |
-| 管理面路由 | 未进入 `ApiDoc` | `cobotusr/src/route/account.rs`、`developer.rs`、`enterprise_admin.rs`、`application_governance.rs` |
+| OpenAPI 文档 | `ApiDoc` 只 nest 了 `AuthApi`、`UserApi`、`RoleApi`、`AuthorityApi`、`RecordingApi`、`RbacApi`、`UserAuthorityApi` | `yufu/src/swagger_docs.rs:1-30` |
+| Swagger 挂载 | 仅 `openapi` feature 开启时挂到 `/docs`，spec 在 `/api-doc/openapi.json` | `yufu/src/lib.rs:435-437` |
+| OIDC 路由 | 未进入 `ApiDoc` | `yufu/src/route/oidc.rs`、`yufu/src/route/identity_token.rs` |
+| 管理面路由 | 未进入 `ApiDoc` | `yufu/src/route/account.rs`、`developer.rs`、`enterprise_admin.rs`、`application_governance.rs` |
 | 返回类型 | 至少 24 处 `Json<serde_json::Value>` / type alias | `grep` 结果；见 1.5 |
 
 ### 1.5 关键代码证据与问题
@@ -106,11 +106,11 @@
 
 至少 24 处路由返回值使用 `Json<serde_json::Value>`，例如：
 
-- `cobotusr/src/route/developer.rs:79`：`ManagementResponse = Result<(HeaderMap, Json<serde_json::Value>), AppError>`
-- `cobotusr/src/route/enterprise_admin.rs:53-189`：多个管理 handler
-- `cobotusr/src/route/account.rs:39-207`：账户面
-- `cobotusr/src/route/application_governance.rs:25-56`：应用治理
-- `cobotusr/src/route/identity_authorization.rs:162-200`
+- `yufu/src/route/developer.rs:79`：`ManagementResponse = Result<(HeaderMap, Json<serde_json::Value>), AppError>`
+- `yufu/src/route/enterprise_admin.rs:53-189`：多个管理 handler
+- `yufu/src/route/account.rs:39-207`：账户面
+- `yufu/src/route/application_governance.rs:25-56`：应用治理
+- `yufu/src/route/identity_authorization.rs:162-200`
 
 `developer.rs:80-90` 的 `response<T>` 虽然内部是 typed `T`，但最后 `serde_json::to_value` 擦除类型；生成器只能看到空对象/任意对象。这是未来 Management SDK 模型质量的最大阻塞；Runtime 不受影响。
 
@@ -123,14 +123,14 @@
 - `get_no_prefix_routes()`：OIDC public routes；
 - `identity_browser::get_routes()`：`/identity/*`、`/account/*`、`/admin/*` 等浏览器面。
 
-见 `cobotusr/src/lib.rs:346-430`、`cobotusr/src/route/mod.rs:24-70`。
+见 `yufu/src/lib.rs:346-430`、`yufu/src/route/mod.rs:24-70`。
 
 #### B3：错误响应不统一
 
-- 身份域错误：`{"code": "...", "request_id": "..."}`，见 `cobotusr/src/error.rs:92-101`。
-- 浏览器拒绝：`{"code": "...", "message": "..."}`，见 `cobotusr/src/error.rs:102-108`。
-- `SecurityError` / `NotFound` / `BadRequest` 等：多数直接返回纯文本，见 `cobotusr/src/error.rs:109-125`。
-- OAuth token 端点：`{"error": "invalid_grant", "request_id": "..."}`，见 `cobotusr/src/route/identity_token.rs:83-100`。
+- 身份域错误：`{"code": "...", "request_id": "..."}`，见 `yufu/src/error.rs:92-101`。
+- 浏览器拒绝：`{"code": "...", "message": "..."}`，见 `yufu/src/error.rs:102-108`。
+- `SecurityError` / `NotFound` / `BadRequest` 等：多数直接返回纯文本，见 `yufu/src/error.rs:109-125`。
+- OAuth token 端点：`{"error": "invalid_grant", "request_id": "..."}`，见 `yufu/src/route/identity_token.rs:83-100`。
 
 结果：未来 Management SDK 无法用一套错误模型覆盖所有端点；生成器也无法从 spec 生成稳定的异常类型。Runtime 只需按 RFC 6749 建模 OAuth 错误。
 
@@ -145,7 +145,7 @@
 5. legacy 签发路径 `OidcService::issue_client_credentials_token` 调用 `sign_access_token_for_client`，而后者使用 `TokenManager::sign_access_token`：
    - header 只设置 `kid`，没有设置 `typ=at+jwt`（`token_manager.rs:576-586`）；
    - claims 是 legacy `AccessTokenClaims`，没有 `token_use`、`principal_kind`、`application`、`bounds` 等字段（`claims.rs:46-63`）；
-   - `aud` 被设为 `client_id`，`scope` 被设为空串（`cobotusr/src/service/oidc.rs:493-499`）。
+   - `aud` 被设为 `client_id`，`scope` 被设为空串（`yufu/src/service/oidc.rs:493-499`）。
 6. managed 资源服务器的严格校验使用 `SecurityAccessClaims`，且 `deny_unknown_fields`（`libs/auth/src/security/credential.rs:108-129`），legacy token 无法通过。
 
 **结论：M2M 不进入本期范围。** 若未来要做，需先决定 managed client 的 `client_credentials` 契约，再发布 SDK。
@@ -204,7 +204,7 @@ SDK 不应把 `/enforce` 作为可承诺能力；本期直接列为非目标。�
 Runtime SDK（Go / Python / Java，手写薄客户端）
         │ OIDC Discovery / OAuth 2.0 / JWKS / RFC 7662 / RFC 7009
         ▼
-cobotusr HTTP 接口
+yufu HTTP 接口
         │
         ▼
 handler → domain / service → DB
@@ -266,8 +266,8 @@ OpenAPI 仍然有价值，但它是未来 Management SDK 的契约，不是 Runt
 
 建议在 `api/openapi/` 下维护：
 
-- `cobotusr.v1.yaml`：canonical，OpenAPI 3.1；
-- `cobotusr.v1.0.3.yaml`：给仍不支持 3.1 的生成器用的兼容产物；
+- `yufu.v1.yaml`：canonical，OpenAPI 3.1；
+- `yufu.v1.0.3.yaml`：给仍不支持 3.1 的生成器用的兼容产物；
 - `CHANGELOG.md`：面向接入方的变更说明；
 - `oasdiff.yaml`：breaking-change 规则/例外。
 
@@ -455,14 +455,14 @@ SDK 是网络客户端，**HTTP + JSON + 标准协议**已经是跨语言最稳�
 3. **OpenAPI emitter**：独立二进制，不启动服务器、不连数据库：
 
 ```rust
-// cobotusr/src/bin/emit-openapi.rs（示意；需在 crate 暴露 pub fn openapi_document()）
+// yufu/src/bin/emit-openapi.rs（示意；需在 crate 暴露 pub fn openapi_document()）
 fn main() {
-    let spec = cobotusr::openapi_document();
+    let spec = yufu::openapi_document();
     println!("{}", spec.to_pretty_json().expect("serialize OpenAPI"));
 }
 ```
 
-4. **spec 产物**：CI 生成 `api/openapi/cobotusr.v1.json`；与已提交版本 diff 必须为空。
+4. **spec 产物**：CI 生成 `api/openapi/yufu.v1.json`；与已提交版本 diff 必须为空。
 5. **兼容产物**：若生成器不支持 3.1，用 `@openapi-spec/downgrader` 生成 3.0.3 输入；不要手改两份 spec。
 
 当前 `utoipa` 6 默认输出 OpenAPI 3.1.0，因此未来 Management SDK 的 canonical 3.1 改造成本最低；3.0.3 只作为生成器的兼容输入。
@@ -480,15 +480,15 @@ sdk/
     jwks.json
     logout-token.jwt
   go/
-    cobotusr/                 # public facade（手写）
+    yufu/                 # public facade（手写）
     internal/oidc/            # 协议实现（手写，不对外）
     go.mod
   python/
-    src/cobotusr_sdk/         # public facade（手写）
+    src/yufu_sdk/         # public facade（手写）
     tests/
     pyproject.toml
   java/
-    src/main/java/com/cobotusr/sdk/   # public facade（手写）
+    src/main/java/com/yufu/sdk/   # public facade（手写）
     src/test/java/...
     pom.xml
   management/                 # 未来 Management SDK
@@ -500,15 +500,15 @@ sdk/
 - **Runtime 全部手写**，不设 `gen/`；公开 API 保持稳定，内部实现可重构。
 - **fixtures 是共享契约**：任何字段/错误码变化先改 fixtures，再改服务端与三语言 SDK。
 - **未来 Management 生成代码**放 `management/gen/`，文件头标注生成器版本与源 spec，CI 重新生成并检查 diff。
-- 生成文件头示例：`// Code generated by oapi-codegen v2.8.2 from cobotusr.v1.yaml; DO NOT EDIT.`
+- 生成文件头示例：`// Code generated by oapi-codegen v2.8.2 from yufu.v1.yaml; DO NOT EDIT.`
 
 ### 4.6 打包与发布
 
 | 语言 | 包形态 | 发布 | 关键点 |
 |---|---|---|---|
-| Go | module `github.com/<org>/cobot-sdk-go` | Git tag `v0.1.0`（v2+ 才需要 `/v2`） | module path 一旦发布不要改；`go vet` + `go test`；避免 cgo |
-| Python | wheel + sdist，包名 `cobotusr-sdk` | PyPI Trusted Publishing（OIDC） | `py.typed`；支持 3.10+；httpx；同步/异步 |
-| Java | Maven `com.cobotusr:cobotusr-sdk` | Maven Central `central-publishing-maven-plugin` | Java 17；sources/javadoc；GPG 签名；OkHttp 4.x |
+| Go | module `github.com/<org>/yufu-sdk-go` | Git tag `v0.1.0`（v2+ 才需要 `/v2`） | module path 一旦发布不要改；`go vet` + `go test`；避免 cgo |
+| Python | wheel + sdist，包名 `yufu-sdk` | PyPI Trusted Publishing（OIDC） | `py.typed`；支持 3.10+；httpx；同步/异步 |
+| Java | Maven `com.yufu:yufu-sdk` | Maven Central `central-publishing-maven-plugin` | Java 17；sources/javadoc；GPG 签名；OkHttp 4.x |
 | 文档 | 每语言 README + Quickstart + API reference | 与包同版本 | 示例必须可运行；不要复制过期片段 |
 
 发布流水线建议：
@@ -536,7 +536,7 @@ sdk/
 **Go**
 
 ```go
-client, err := cobotusr.New(cobotusr.Config{
+client, err := yufu.New(yufu.Config{
     Issuer:       "https://auth.example.com",
     ClientID:     "web",
     ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
@@ -545,7 +545,7 @@ client, err := cobotusr.New(cobotusr.Config{
 if err != nil { return err }
 defer client.Close()
 
-authURL, verifier, err := client.AuthorizeURL(cobotusr.AuthorizeOptions{
+authURL, verifier, err := client.AuthorizeURL(yufu.AuthorizeOptions{
     Scopes: []string{"openid", "profile", "email"},
 })
 tokens, err := client.ExchangeCode(ctx, code, verifier)
@@ -555,7 +555,7 @@ claims, err := client.VerifyAccessToken(ctx, tokens.AccessToken)
 **Python**
 
 ```python
-async with CobotUsrClient(
+async with YufuClient(
     issuer="https://auth.example.com",
     client_id="web",
     client_secret=os.environ["OIDC_CLIENT_SECRET"],
@@ -569,7 +569,7 @@ async with CobotUsrClient(
 **Java**
 
 ```java
-try (CobotUsrClient client = CobotUsrClient.builder()
+try (YufuClient client = YufuClient.builder()
         .issuer("https://auth.example.com")
         .clientId("web")
         .clientSecret(System.getenv("OIDC_CLIENT_SECRET"))
@@ -607,7 +607,7 @@ try (CobotUsrClient client = CobotUsrClient.builder()
         OIDC / runtime endpoints      /api/v1 management
                │                            │
         ┌──────┴────────────────────────────┴──────┐
-        │ cobotusr (Axum)                           │
+        │ yufu (Axum)                           │
         │ handler → contract DTO → domain/service   │
         └──────────────────┬───────────────────────┘
                            ▼
@@ -825,18 +825,18 @@ try (CobotUsrClient client = CobotUsrClient.builder()
 
 - `README.md`
 - `CLAUDE.md`
-- `Cargo.toml`、`cobotusr/Cargo.toml`
-- `cobotusr/src/lib.rs`
-- `cobotusr/src/route/oidc.rs`
-- `cobotusr/src/route/identity_token.rs`
-- `cobotusr/src/route/identity_browser.rs`
-- `cobotusr/src/route/developer.rs`
-- `cobotusr/src/route/enterprise_admin.rs`
-- `cobotusr/src/route/application_governance.rs`
-- `cobotusr/src/error.rs`
-- `cobotusr/src/swagger_docs.rs`
-- `cobotusr/src/service/permission.rs`
-- `cobotusr/src/service/identity/legacy_client.rs`
+- `Cargo.toml`、`yufu/Cargo.toml`
+- `yufu/src/lib.rs`
+- `yufu/src/route/oidc.rs`
+- `yufu/src/route/identity_token.rs`
+- `yufu/src/route/identity_browser.rs`
+- `yufu/src/route/developer.rs`
+- `yufu/src/route/enterprise_admin.rs`
+- `yufu/src/route/application_governance.rs`
+- `yufu/src/error.rs`
+- `yufu/src/swagger_docs.rs`
+- `yufu/src/service/permission.rs`
+- `yufu/src/service/identity/legacy_client.rs`
 - `libs/auth/src/token_manager.rs`
 - `libs/auth/src/security/credential.rs`
 - `docs/integration/enterprise-oidc.md`
@@ -901,9 +901,9 @@ try (CobotUsrClient client = CobotUsrClient.builder()
 首期 Go 参考实现已落地，范围严格限定为 Runtime：
 
 - `sdk/go`：零第三方依赖的 Go module，覆盖 Discovery、Authorization Code + PKCE、Code Exchange、Refresh single-flight、UserInfo、JWKS 缓存与 RS256 校验、Access/ID Token 校验、Introspection、Revocation、End Session、Back-channel Logout 校验、OAuth/HTTP 错误映射。
-- `examples/sdk/go`：可运行的 Web 示例（登录、回调、保护 API、退出、后通道退出）、mock issuer 契约测试，以及 `//go:build integration` 的真实联调测试。`go test ./...` 只跑离线契约测试，不依赖真实服务或 Docker；真实联调必须显式运行 `./run-integration.sh`，缺少配置会直接失败而不是跳过。脚本默认自建本地 harness（生成 `issuer = http://127.0.0.1:14000` 并启动真实服务）；设置 `COBOTUSR_ISSUER` 后改为测试既有部署，不再启动本地服务。SDK 本身不读取环境变量、不提供默认 issuer。
+- `examples/sdk/go`：可运行的 Web 示例（登录、回调、保护 API、退出、后通道退出）、mock issuer 契约测试，以及 `//go:build integration` 的真实联调测试。`go test ./...` 只跑离线契约测试，不依赖真实服务或 Docker；真实联调必须显式运行 `./run-integration.sh`，缺少配置会直接失败而不是跳过。脚本默认自建本地 harness（生成 `issuer = http://127.0.0.1:14000` 并启动真实服务）；设置 `YUFU_ISSUER` 后改为测试既有部署，不再启动本地服务。SDK 本身不读取环境变量、不提供默认 issuer。
 - 真实联调覆盖：管理员登录、通过管理 API 注册 browser SPA 应用、Discovery、授权码 + PKCE、ID/access token 验签、错误 nonce/audience 拒绝、UserInfo、Refresh、Revoke 后 Refresh 失败、End Session URL。
-- 服务端 Discovery 已补 `backchannel_logout_supported` 与 `backchannel_logout_session_supported`，并在 `tests/cobotusr/routes/identity_cors.rs` 增加断言。
+- 服务端 Discovery 已补 `backchannel_logout_supported` 与 `backchannel_logout_session_supported`，并在 `tests/yufu/routes/identity_cors.rs` 增加断言。
 - 未纳入：M2M/`client_credentials`、权限同步、`/enforce`、Management SDK。
 
 验证命令：
@@ -911,7 +911,7 @@ try (CobotUsrClient client = CobotUsrClient.builder()
 ```sh
 (cd sdk/go && go test ./... && go vet ./...)
 (cd examples/sdk/go && go test ./... && go vet ./...)
-(cd examples/sdk/go && ./run-integration.sh)  # 需要 Docker；启动真实 cobotusr 联调
+(cd examples/sdk/go && ./run-integration.sh)  # 需要 Docker；启动真实 yufu 联调
 ```
 
 已知服务端限制：confidential client 的 `client_secret` 校验（bcrypt）会超过 `MAX_SECURITY_BUDGET`（2s），换 token 返回 `503 deadline_exceeded`。联调因此使用 public browser SPA client + PKCE；SDK 本身支持 `ClientSecret`，该问题不属于 SDK 范围。
