@@ -40,6 +40,8 @@ async fn identity_protocol_discovery_matches_current_implemented_capabilities_an
         metadata["end_session_endpoint"],
         format!("{}/oidc/end-session", f.base_url)
     );
+    assert_eq!(metadata["backchannel_logout_supported"], true);
+    assert_eq!(metadata["backchannel_logout_session_supported"], true);
     for (key, path) in [
         ("authorization_endpoint", "/oidc/authorize"),
         ("token_endpoint", "/oidc/token"),

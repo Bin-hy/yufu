@@ -14,6 +14,8 @@ Rust workspace 包含根 CLI、`cobotusr` 和 `libs/auth`，唯一二进制是 `
 
 `examples/oidc-web` 是 `openid-client` 服务端 Web 参考实现（含独立保护 API），`examples/oidc-spa` 是 `oidc-client-ts` 浏览器 SPA 参考实现；两者可作为第三方接入的起点。
 
+`sdk/go` 是 Runtime SDK 的 Go 参考实现（Discovery、PKCE、Token、JWKS、Introspection、Revocation、Back-channel Logout），`examples/sdk/go` 提供 mock issuer 契约测试与真实 issuer 联调示例。`go test ./...` 只跑离线契约测试；真实联调用 `examples/sdk/go/run-integration.sh`（需要 Docker），缺少配置会直接失败而不是跳过。
+
 ## 本机开发
 
 ```sh
@@ -54,6 +56,9 @@ pnpm build:cobotusr
 cargo build --bin cobotusr --features webui --release
 cargo machete
 cargo audit
+(cd sdk/go && go test ./... && go vet ./...)
+(cd examples/sdk/go && go test ./... && go vet ./...)
+(cd examples/sdk/go && ./run-integration.sh)  # 真实 cobotusr 联调，需要 Docker
 ```
 
 集成测试使用 testcontainers 创建隔离 PostgreSQL，需要可用的 Docker 兼容容器运行时，不连接本地业务数据库。企业 SSO 的定位、实现计划与逐项验收见 `docs/specs/enterprise-sso-provider/`，尚未完成的缺口集中在 `docs/specs/enterprise-sso-provider/gaps.md`，早期精简验收见 `docs/specs/auth-center-only/`。

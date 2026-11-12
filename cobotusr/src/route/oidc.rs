@@ -36,6 +36,10 @@ pub struct OidcDiscovery {
     pub scopes_supported: Vec<String>,
     pub claims_supported: Vec<String>,
     pub code_challenge_methods_supported: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backchannel_logout_supported: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backchannel_logout_session_supported: Option<bool>,
 }
 
 /// Unified token request — fields are optional depending on grant_type
@@ -257,6 +261,7 @@ pub fn get_revocation_routes() -> Router<AppState> {
 
 async fn openid_configuration(State(state): State<AppState>) -> Result<Json<OidcDiscovery>> {
     let base = get_issuer_base(&state);
+    let supports_backchannel_logout = state.id_token_signer.algorithm() == "RS256";
     let resp = OidcDiscovery {
         issuer: base.clone(),
         authorization_endpoint: format!("{}/oidc/authorize", base),
@@ -265,7 +270,7 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
         jwks_uri: Some(format!("{}/.well-known/jwks.json", base)),
         revocation_endpoint: format!("{}/oidc/revoke", base),
         introspection_endpoint: format!("{}/oidc/introspect", base),
-        end_session_endpoint: (state.id_token_signer.algorithm() == "RS256")
+        end_session_endpoint: supports_backchannel_logout
             .then(|| format!("{}/oidc/end-session", base)),
         response_types_supported: vec!["code".to_string()],
         response_modes_supported: vec!["query".into()],
@@ -310,6 +315,8 @@ async fn openid_configuration(State(state): State<AppState>) -> Result<Json<Oidc
             "sid".into(),
         ],
         code_challenge_methods_supported: vec!["S256".to_string()],
+        backchannel_logout_supported: Some(supports_backchannel_logout),
+        backchannel_logout_session_supported: Some(supports_backchannel_logout),
     };
     Ok(Json(resp))
 }
