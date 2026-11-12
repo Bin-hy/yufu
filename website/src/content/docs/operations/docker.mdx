@@ -6,8 +6,16 @@ description: 用 Docker 与 Compose 部署 yufu：镜像构建、配置、私钥
 本页用仓库自带的 `deploy/docker` 配置，把 PostgreSQL、身份服务和 Caddy TLS 入口组成一个
 Compose 栈。适合单机自托管、内网身份中心与快速验证。
 
-项目目前**不发布预构建镜像**，镜像由本仓库的 Dockerfile 从源码构建：先构建 Vue 控制台，
-再把它嵌入 Rust 二进制，运行层只保留一个可执行文件。
+仓库发布 `linux/amd64` 与 `linux/arm64` 镜像，可直接拉取：
+
+```bash
+docker pull ghcr.io/bin-hy/yufu:latest
+```
+
+也可以从本仓库的 Dockerfile 自行构建（先构建 Vue 控制台，再嵌入 Rust 二进制，
+运行层只保留一个可执行文件），两者产生相同的层。把 `.env` 里的 `YUFU_IMAGE` 指向
+`ghcr.io/bin-hy/yufu:latest` 后执行 `docker compose pull yufu && docker compose up -d --no-build`
+即可跳过构建。
 
 ## 部署组成
 

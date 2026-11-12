@@ -13,6 +13,65 @@ run the service, sign in to the admin console, and confirm the protocol endpoint
 - A Docker-compatible container runtime for PostgreSQL
 - HTTPS and trusted NTP sources for production
 
+## Run it with Docker
+
+Images are published for `linux/amd64` and `linux/arm64`, so no local Rust or Node toolchain is needed.
+The bundled Compose stack terminates TLS in Caddy, pulls the identity service from `ghcr.io`, and keeps
+PostgreSQL on an internal network with no published host port.
+
+```bash
+git clone https://github.com/Bin-hy/yufu.git
+cd yufu/deploy/docker
+
+cp env.example .env
+cp yufu.toml.example yufu.toml
+mkdir -p state
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  -out state/oidc_rsa_private.pem
+chmod 600 state/oidc_rsa_private.pem
+```
+
+Replace every `CHANGE_ME` value in `.env` — at least `POSTGRES_PASSWORD` and `AUTH_SECRET` — and point
+the image at the published build so nothing is compiled inside the container:
+
+```dotenv
+YUFU_DOMAIN=localhost
+YUFU_HTTPS_PORT=8443
+YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest
+```
+
+`issuer` and `[auth].origins` must both name the address the browser actually uses. If they disagree,
+logins redirect incorrectly or the API rejects requests on the origin check:
+
+```toml
+[auth]
+origins = ["https://localhost:8443"]
+
+[oidc]
+issuer = "https://localhost:8443"
+```
+
+Pull the image and start the stack:
+
+```bash
+docker compose pull yufu
+docker compose up -d --no-build
+docker compose ps
+```
+
+Open `https://localhost:8443` and sign in with the `[auth.super_admin]` account. The first start runs
+the versioned database migrations.
+
+:::caution
+Inside a container the service can only listen on `0.0.0.0`, so `--allow-insecure-loopback-cookies`
+is unusable and the public entry point must be HTTPS. For local trials Caddy signs a certificate with
+its own local CA, which the browser will report as self-signed. Keep `state/oidc_rsa_private.pem`:
+replacing it invalidates issued tokens and every registered client.
+:::
+
+Use the source path below when you need to change code; domains, certificates, backups and upgrades are
+covered in [container deployment](/en/operations/docker/).
+
 ## 1. Get the code and dependencies
 
 ```bash

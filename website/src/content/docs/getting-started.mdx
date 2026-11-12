@@ -13,6 +13,62 @@ description: 在本机启动 yufu，完成首次登录并验证 OIDC Discovery�
 - Docker 兼容的容器运行时（用于 PostgreSQL）
 - 生产部署需要 HTTPS 与受信 NTP 来源
 
+## 用 Docker 快速跑起来
+
+仓库发布 `linux/amd64` 与 `linux/arm64` 镜像，可以跳过本机的 Rust 与 Node 安装。
+自带的 Compose 栈由 Caddy 终止 TLS、身份服务从 `ghcr.io` 拉取、PostgreSQL 只在内部网络，
+数据库不暴露任何宿主机端口。
+
+```bash
+git clone https://github.com/Bin-hy/yufu.git
+cd yufu/deploy/docker
+
+cp env.example .env
+cp yufu.toml.example yufu.toml
+mkdir -p state
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  -out state/oidc_rsa_private.pem
+chmod 600 state/oidc_rsa_private.pem
+```
+
+`.env` 里带 `CHANGE_ME` 的值都要替换，至少 `POSTGRES_PASSWORD` 与 `AUTH_SECRET`；
+再把镜像指向已发布版本，省掉容器内的编译：
+
+```dotenv
+YUFU_DOMAIN=localhost
+YUFU_HTTPS_PORT=8443
+YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest
+```
+
+`issuer` 与 `[auth].origins` 必须写成浏览器实际访问的地址，两处要完全一致，
+否则登录后跳转或接口会因 Origin 校验失败被拒：
+
+```toml
+[auth]
+origins = ["https://localhost:8443"]
+
+[oidc]
+issuer = "https://localhost:8443"
+```
+
+拉取镜像并启动：
+
+```bash
+docker compose pull yufu
+docker compose up -d --no-build
+docker compose ps
+```
+
+打开 `https://localhost:8443`，用 `[auth.super_admin]` 中的账号登录。首次启动会自动执行版本化数据库迁移。
+
+:::caution
+容器内的服务只能监听 `0.0.0.0`，因此**不能**使用 `--allow-insecure-loopback-cookies`，对外入口必须是 HTTPS。
+本地试用时 Caddy 会用本地 CA 签发证书，浏览器会提示自签名。
+`state/oidc_rsa_private.pem` 必须持久保留，换钥会让已签发的令牌与既有客户端校验失效。
+:::
+
+需要改代码时再用下面的源码方式；域名、证书、备份与升级见[容器部署](/operations/docker/)。
+
 ## 1. 获取代码与依赖
 
 ```bash

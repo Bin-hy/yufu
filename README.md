@@ -164,8 +164,8 @@ PDP 使用 `/enforce`。MCP 令牌必须指定已注册应用的 `aud`，调用�
 ## 部署与运维
 
 - **服务交付**：单个 `yufu` 二进制，可嵌入 WebUI；[systemd 模板](conf/yufu.service)用于独立服务部署。
-- **容器交付**：仓库提供 [`deploy/docker`](deploy/docker/README.md) 参考栈（PostgreSQL + 身份服务 + Caddy TLS），
-  镜像从源码构建；项目不发布预构建镜像。
+- **容器交付**：仓库提供 [`deploy/docker`](deploy/docker/README.md) 参考栈（PostgreSQL + 身份服务 + Caddy TLS）；
+  镜像发布在 `ghcr.io/bin-hy/yufu`（`linux/amd64` / `linux/arm64`），也可从同仓库 Dockerfile 自行构建。
 - **持久化**：PostgreSQL 保存账户、应用、授权、会话与审计数据，启动时执行数据库迁移。
 - **备份恢复**：数据库、签名私钥、部署配置及应用凭据应一并纳入恢复计划，升级前执行备份与演练。
 - **升级兼容**：历史业务数据和既有客户端不会自动删除；旧 RBAC 页面重定向到新控制台，后端旧管理接口为既有客户端保留兼容。

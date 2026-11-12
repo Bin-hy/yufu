@@ -5,7 +5,8 @@
 #
 #   docker build -f deploy/docker/Dockerfile -t yufu:local .
 #
-# The project does not publish a prebuilt image; build it from this checkout.
+# Prebuilt images are published to ghcr.io/bin-hy/yufu by .github/workflows/docker.yml;
+# this Dockerfile is what that workflow builds, so `docker compose build` matches it.
 # Compose usage and the deployment contract live in deploy/docker/README.md.
 
 ARG NODE_IMAGE=node:24-bookworm-slim

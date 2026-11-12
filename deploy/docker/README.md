@@ -1,8 +1,9 @@
 # yufu 容器部署
 
-本目录提供从本仓库构建镜像并运行完整栈的参考配置：PostgreSQL、身份服务、Caddy TLS 入口。
-项目目前**不发布预构建镜像**，镜像由这里的 `Dockerfile` 从源码构建（先构建 Vue 控制台，
-再嵌入 Rust 二进制）。面向阅读的图文说明见
+本目录提供构建镜像并运行完整栈的参考配置：PostgreSQL、身份服务、Caddy TLS 入口。
+镜像发布在 `ghcr.io/bin-hy/yufu`（`linux/amd64` + `linux/arm64`），也可以由这里的 `Dockerfile`
+从源码构建——先构建 Vue 控制台，
+再嵌入 Rust 二进制。面向阅读的图文说明见
 [官网容器部署页](https://yufu-sso.pages.dev/operations/docker/)；发版与安装包见
 [打包手册](../../docs/releases/packaging.md) 与 [二进制安装说明](../../docs/releases/installation.md)。
 
@@ -71,6 +72,9 @@ cp yufu.toml.example yufu.toml
 4. 构建并启动：
 
    ```sh
+   # 用已发布镜像时跳过构建：
+   #   .env 里设 YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest
+   #   docker compose pull yufu && docker compose up -d --no-build
    docker compose up -d --build
    docker compose ps
    docker compose logs -f yufu

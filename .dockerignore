@@ -36,3 +36,6 @@ storage
 
 .DS_Store
 Thumbs.db
+
+# 本地品牌工作目录，不入镜像
+brand

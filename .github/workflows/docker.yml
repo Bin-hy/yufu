@@ -1,0 +1,111 @@
+name: Container image
+
+# Publishes the identity service as a multi-arch image on ghcr.io.
+# The build reuses deploy/docker/Dockerfile, so the published image and a local
+# `docker compose build` produce the same layers.
+#
+# After the first publish the package is private by default. Anonymous
+# `docker pull` only works once it is switched to public in
+# Repository → Packages → yufu → Package settings.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual runs are useful to refresh `latest` without cutting a release.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Additional tag for this build'
+        required: false
+        default: 'latest'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+  DOCKERFILE: deploy/docker/Dockerfile
+
+jobs:
+  publish:
+    name: Build and push linux/amd64 + linux/arm64
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      # arm64 layers are produced under emulation on the amd64 runner.
+      - name: Enable arm64 emulation
+        run: docker run --privileged --rm tonistiigi/binfmt:latest --install arm64
+
+      - name: Log in to ghcr.io
+        run: |
+          printf '%s' "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Resolve image tags
+        id: tags
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tags="${IMAGE}:sha-${SHA:0:7}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ -n "${INPUT_TAG:-}" ]; then
+              tags="${tags},${IMAGE}:${INPUT_TAG}"
+            fi
+          else
+            # v1.2.3-rc.1 keeps only its full version; v1.2.3 also moves 1.2 and latest.
+            tags="${tags},${IMAGE}:${REF_NAME#v}"
+            case "$REF_NAME" in
+              *-*) ;;
+              v*.*.*)
+                minor="${REF_NAME#v}"
+                tags="${tags},${IMAGE}:${minor%.*},${IMAGE}:latest"
+                ;;
+            esac
+          fi
+          printf 'tags=%s\n' "$tags" >> "$GITHUB_OUTPUT"
+          printf 'resolved tags: %s\n' "$tags"
+
+      - name: Build and push
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # A container driver keeps the registry cache across runs without
+          # needing a local image store for a multi-arch result.
+          docker buildx create --driver docker-container --name yufu-image --use
+          tag_args=()
+          IFS=',' read -ra tag_list <<< "$TAGS"
+          for tag in "${tag_list[@]}"; do
+            tag_args+=(--tag "$tag")
+          done
+          docker buildx build \
+            --builder yufu-image \
+            --file "$DOCKERFILE" \
+            --platform linux/amd64,linux/arm64 \
+            "${tag_args[@]}" \
+            --cache-from "type=registry,ref=${IMAGE}:buildcache" \
+            --cache-to "type=registry,ref=${IMAGE}:buildcache,mode=max" \
+            --provenance mode=max \
+            --sbom true \
+            --push .
+
+      - name: Report the pushed tags
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          printf 'Pushed:\n'
+          printf '%s\n' "$TAGS" | tr ',' '\n' | sed 's/^/  /'

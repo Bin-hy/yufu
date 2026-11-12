@@ -7,9 +7,17 @@ This page uses the repository's `deploy/docker` configuration to run PostgreSQL,
 service, and a Caddy TLS entry point as one Compose stack. It fits single-host self-hosting,
 internal identity centers, and quick evaluation.
 
-The project does **not** publish a prebuilt image. The image is built from this repository's
-Dockerfile: the Vue console is built first, embedded into the Rust binary, so the runtime layer
-carries a single executable.
+Images are published for `linux/amd64` and `linux/arm64`:
+
+```bash
+docker pull ghcr.io/bin-hy/yufu:latest
+```
+
+Set `YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest` in `.env`, then run
+`docker compose pull yufu && docker compose up -d --no-build` to skip the build.
+
+Building from this repository's `deploy/docker/Dockerfile` produces the same layers: the Vue console
+is compiled first and embedded into the Rust binary, so the runtime layer carries a single executable.
 
 ## Stack composition
 
