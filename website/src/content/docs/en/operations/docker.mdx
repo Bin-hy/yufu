@@ -19,6 +19,36 @@ Set `YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest` in `.env`, then run
 Building from this repository's `deploy/docker/Dockerfile` produces the same layers: the Vue console
 is compiled first and embedded into the Rust binary, so the runtime layer carries a single executable.
 
+## Two ways to run it
+
+The image behaves differently depending on whether you mount a configuration:
+
+| | Evaluation mode | Production mode |
+| --- | --- | --- |
+| Trigger | no `/etc/yufu/yufu.toml` mounted | your own configuration and the key it references are mounted |
+| Configuration | rendered from environment variables on first start | used verbatim, byte for byte, never rewritten |
+| Signing key | generated into the state volume when absent | you provide it; PKCS#8 PEM required |
+| Fits | local trials, demos, CI checks | any real deployment |
+
+Evaluation mode needs nothing but environment variables:
+
+```bash
+docker run -d --name yufu -p 4000:4000 \
+  -e YUFU_ISSUER=https://id.example.com \
+  -e YUFU_ADMIN_USERNAME=admin -e YUFU_ADMIN_PASSWORD='use-a-strong-one' \
+  -e AUTH_SECRET="$(openssl rand -hex 32)" \
+  -e DATABASE_URL=postgres://user:pass@db:5432/yufu \
+  -v yufu-state:/var/lib/yufu \
+  ghcr.io/bin-hy/yufu:latest
+```
+
+`AUTH_SECRET` and `DATABASE_URL` are deliberately **not** written into the generated configuration: the
+service reads both from the environment, so no secret lands in persistent storage. The remaining
+variables are listed in the [quick start](/en/getting-started/).
+
+Once a configuration is mounted the image only starts the process — it renders nothing and generates
+nothing. The steps below are the production path.
+
 ## Stack composition
 
 | Service | Image | Exposure | Role |

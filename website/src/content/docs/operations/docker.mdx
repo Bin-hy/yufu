@@ -17,6 +17,34 @@ docker pull ghcr.io/bin-hy/yufu:latest
 `ghcr.io/bin-hy/yufu:latest` 后执行 `docker compose pull yufu && docker compose up -d --no-build`
 即可跳过构建。
 
+## 两种运行方式
+
+镜像有两种启动方式，选哪种由你是否挂载配置决定：
+
+| | 评估模式 | 生产模式 |
+| --- | --- | --- |
+| 触发条件 | 未挂载 `/etc/yufu/yufu.toml` | 挂载了自己的配置与该文件引用的私钥 |
+| 配置来源 | 镜像在首次启动时用环境变量生成 | 你写的文件，镜像**逐字节照用**、不做任何修改 |
+| 签名私钥 | 缺失时自动生成到状态卷 | 必须由你提供；文件头需是 PKCS#8 |
+| 适合 | 本地试用、演示、CI 验证 | 任何真实部署 |
+
+评估模式最少只需要环境变量：
+
+```bash
+docker run -d --name yufu -p 4000:4000 \
+  -e YUFU_ISSUER=https://id.example.com \
+  -e YUFU_ADMIN_USERNAME=admin -e YUFU_ADMIN_PASSWORD='换成强密码' \
+  -e AUTH_SECRET="$(openssl rand -hex 32)" \
+  -e DATABASE_URL=postgres://user:pass@db:5432/yufu \
+  -v yufu-state:/var/lib/yufu \
+  ghcr.io/bin-hy/yufu:latest
+```
+
+`AUTH_SECRET` 与 `DATABASE_URL` **不会**被写进生成的配置文件——服务本身就从环境变量读取这两项，
+因此密码不会落到持久化存储里。其余变量见[快速开始](/getting-started/)。
+
+一旦挂载了配置，镜像只负责启动进程：不再渲染配置、不再生成密钥。下面余下步骤都是生产模式。
+
 ## 部署组成
 
 | 服务 | 镜像 | 暴露 | 职责 |

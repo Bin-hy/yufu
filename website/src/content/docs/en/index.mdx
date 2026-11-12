@@ -138,27 +138,52 @@ is the reminder that recognising who you are is not enough; the system also has 
 
 ## Running in five minutes with Docker
 
-Images are published at `ghcr.io/bin-hy/yufu` (`linux/amd64` and `linux/arm64`), so no local Rust or
-Node toolchain is needed. In the Compose stack Caddy terminates TLS, PostgreSQL stays on an internal
-network, and versioned migrations run at startup.
+Images are published at `ghcr.io/bin-hy/yufu` (`linux/amd64` and `linux/arm64`). Every service is an
+official image and **you never clone the repository or write a configuration file** — on first start
+the image renders its configuration from environment variables and issues its own signing key.
 
-Set your own domain and secrets in `.env` and `yufu.toml`, then open `https://localhost:8443` and sign
-in with the `[auth.super_admin]` account. See [Quick start](/en/getting-started/) for every
-configuration key and production deployment.
+Save this as `compose.yaml`, replace the marked password and secret, run `docker compose up -d`, then
+open `https://localhost:8443` and sign in as `admin`. See
+[Quick start](/en/getting-started/) for every variable and the production path.
 
 </div>
 <div>
 
-```bash
-git clone https://github.com/Bin-hy/yufu.git && cd yufu/deploy/docker
+```yaml
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: yufu
+      POSTGRES_PASSWORD: local-dev-password      # replace
+      POSTGRES_DB: yufu
+    volumes: [yufu-pg:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username yufu --dbname yufu"]
+      interval: 5s
+      retries: 12
 
-cp env.example .env && cp yufu.toml.example yufu.toml
-mkdir -p state && openssl genpkey -algorithm RSA \
-  -pkeyopt rsa_keygen_bits:2048 -out state/oidc_rsa_private.pem
+  yufu:
+    image: ghcr.io/bin-hy/yufu:latest
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      YUFU_ISSUER: https://localhost:8443        # must be the browser-facing origin
+      YUFU_ADMIN_USERNAME: admin
+      YUFU_ADMIN_PASSWORD: change-me-now         # replace
+      AUTH_SECRET: 6f1c9a2e4b7d8f30a1c2e3b4d5f60718   # replace, >= 32 chars
+      DATABASE_URL: postgres://yufu:local-dev-password@postgres:5432/yufu
+    volumes: [yufu-state:/var/lib/yufu]
 
-# .env: YUFU_DOMAIN=localhost, YUFU_HTTPS_PORT=8443,
-#       YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest
-docker compose pull yufu && docker compose up -d --no-build
+  caddy:
+    image: caddy:2-alpine
+    depends_on: [yufu]
+    ports: ["8443:8443"]
+    command: caddy reverse-proxy --from https://localhost:8443 --to http://yufu:4000
+
+volumes:
+  yufu-pg:
+  yufu-state:
 ```
 
 </div>

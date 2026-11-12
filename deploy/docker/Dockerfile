@@ -3,6 +3,9 @@
 # yufu container image: the Vue console is built first, then embedded into the
 # Rust identity service, so the runtime layer only carries one binary.
 #
+#   docker run -p 4000:4000 -e YUFU_ISSUER=... -e AUTH_SECRET=... \
+#     -e DATABASE_URL=... ghcr.io/bin-hy/yufu:latest
+#
 #   docker build -f deploy/docker/Dockerfile -t yufu:local .
 #
 # Prebuilt images are published to ghcr.io/bin-hy/yufu by .github/workflows/docker.yml;
@@ -43,9 +46,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 FROM ${RUNTIME_IMAGE} AS runtime
 
 # ca-certificates is required for outbound HTTPS (back-channel logout and
-# discovery); curl backs the readiness healthcheck.
+# discovery); curl backs the readiness healthcheck; openssl lets the entrypoint
+# generate an evaluation signing key when no configuration is mounted.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl \
+    && apt-get install --yes --no-install-recommends ca-certificates curl openssl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --user-group --home-dir /var/lib/yufu \
         --shell /usr/sbin/nologin yufu \
@@ -54,6 +58,9 @@ RUN apt-get update \
 
 COPY --from=build /out/yufu /usr/local/bin/yufu
 COPY --link deploy/docker/yufu.toml.example /usr/share/yufu/yufu.toml.example
+# The entrypoint renders a configuration from environment variables when the
+# operator has not mounted one, so `docker run` alone is enough to evaluate.
+COPY --link --chmod=0755 deploy/docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 USER 10001:10001
 WORKDIR /var/lib/yufu
@@ -66,6 +73,7 @@ VOLUME ["/var/lib/yufu"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl --fail --silent --show-error http://127.0.0.1:4000/api/v1/health/ready || exit 1
 
-# The service handles SIGTERM itself and drains in-flight requests.
-ENTRYPOINT ["/usr/local/bin/yufu"]
-CMD ["--config", "/etc/yufu/yufu.toml"]
+# The service handles SIGTERM itself; `exec` in the entrypoint keeps pid 1 as
+# the binary so the drain still happens.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD []

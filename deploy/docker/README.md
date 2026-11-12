@@ -2,8 +2,12 @@
 
 本目录提供构建镜像并运行完整栈的参考配置：PostgreSQL、身份服务、Caddy TLS 入口。
 镜像发布在 `ghcr.io/bin-hy/yufu`（`linux/amd64` + `linux/arm64`），也可以由这里的 `Dockerfile`
-从源码构建——先构建 Vue 控制台，
-再嵌入 Rust 二进制。面向阅读的图文说明见
+从源码构建——先构建 Vue 控制台，再嵌入 Rust 二进制。
+
+镜像有两种启动方式：
+**评估模式**不挂载任何配置，`docker-entrypoint.sh` 会用环境变量（`YUFU_ISSUER`、`AUTH_SECRET`、
+`DATABASE_URL`、`YUFU_ADMIN_*`）生成配置并签发签名私钥，一条 `docker run` 即可；
+**生产模式**挂载你自己的 `/etc/yufu/yufu.toml`，镜像逐字节照用，不再生成任何东西。面向阅读的图文说明见
 [官网容器部署页](https://yufu-sso.pages.dev/operations/docker/)；发版与安装包见
 [打包手册](../../docs/releases/packaging.md) 与 [二进制安装说明](../../docs/releases/installation.md)。
 

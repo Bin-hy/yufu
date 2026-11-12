@@ -22,59 +22,88 @@ description: 在本机启动 yufu，完成首次登录并验证 OIDC Discovery�
 
 ## 用 Docker 跑起来（推荐）
 
-仓库发布 `linux/amd64` 与 `linux/arm64` 镜像，可以跳过本机的 Rust 与 Node 安装。
-自带的 Compose 栈由 Caddy 终止 TLS、身份服务从 `ghcr.io` 拉取、PostgreSQL 只在内部网络，
-数据库不暴露任何宿主机端口。
+镜像发布在 `ghcr.io/bin-hy/yufu`（`linux/amd64` / `linux/arm64`）。整个栈都是官方镜像，
+**不需要克隆仓库，也不需要手写配置文件**——镜像首次启动时会根据环境变量生成配置并签发签名私钥。
+
+把下面的内容存成 `compose.yaml`，改掉标注的密码与密钥：
+
+```yaml
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: yufu
+      POSTGRES_PASSWORD: local-dev-password      # 换掉
+      POSTGRES_DB: yufu
+    volumes: [yufu-pg:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username yufu --dbname yufu"]
+      interval: 5s
+      retries: 12
+
+  yufu:
+    image: ghcr.io/bin-hy/yufu:latest
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      YUFU_ISSUER: https://localhost:8443        # 必须是浏览器访问的地址
+      YUFU_ADMIN_USERNAME: admin
+      YUFU_ADMIN_PASSWORD: change-me-now         # 换掉
+      AUTH_SECRET: 6f1c9a2e4b7d8f30a1c2e3b4d5f60718   # 换掉，≥32 字符
+      DATABASE_URL: postgres://yufu:local-dev-password@postgres:5432/yufu
+    volumes: [yufu-state:/var/lib/yufu]
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on: [yufu]
+    ports: ["8443:8443"]
+    command: caddy reverse-proxy --from https://localhost:8443 --to http://yufu:4000
+
+volumes:
+  yufu-pg:
+  yufu-state:
+```
 
 ```bash
-git clone https://github.com/Bin-hy/yufu.git
-cd yufu/deploy/docker
-
-cp env.example .env
-cp yufu.toml.example yufu.toml
-mkdir -p state
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
-  -out state/oidc_rsa_private.pem
-chmod 600 state/oidc_rsa_private.pem
+docker compose up -d
 ```
 
-`.env` 里带 `CHANGE_ME` 的值都要替换，至少 `POSTGRES_PASSWORD` 与 `AUTH_SECRET`；
-再把镜像指向已发布版本，省掉容器内的编译：
+打开 `https://localhost:8443`，用 `admin` / `change-me-now` 登录。首次启动会自动执行版本化数据库迁移。
+本地试用时 Caddy 用自带的本地 CA 签发证书，浏览器的自签名警告是预期的。
 
-```dotenv
-YUFU_DOMAIN=localhost
-YUFU_HTTPS_PORT=8443
-YUFU_IMAGE=ghcr.io/bin-hy/yufu:latest
-```
-
-`issuer` 与 `[auth].origins` 必须写成浏览器实际访问的地址，两处要完全一致，
-否则登录后跳转或接口会因 Origin 校验失败被拒：
-
-```toml
-[auth]
-origins = ["https://localhost:8443"]
-
-[oidc]
-issuer = "https://localhost:8443"
-```
-
-拉取镜像并启动：
-
-```bash
-docker compose pull yufu
-docker compose up -d --no-build
-docker compose ps
-```
-
-打开 `https://localhost:8443`，用 `[auth.super_admin]` 中的账号登录。首次启动会自动执行版本化数据库迁移。
+| 环境变量 | 作用 |
+| --- | --- |
+| `YUFU_ISSUER` | OIDC issuer，必须与浏览器实际访问地址完全一致 |
+| `AUTH_SECRET` | 会话与 CSRF 材料密钥，至少 32 字符 |
+| `DATABASE_URL` | PostgreSQL 连接串 |
+| `YUFU_ADMIN_USERNAME` / `YUFU_ADMIN_PASSWORD` | 首次启动创建的超级管理员 |
+| `YUFU_ORIGINS` | 允许的浏览器 origin，默认等于 `YUFU_ISSUER` |
+| `PORT` | 容器内监听端口，默认 `4000` |
 
 :::caution
-容器内的服务只能监听 `0.0.0.0`，因此**不能**使用 `--allow-insecure-loopback-cookies`，对外入口必须是 HTTPS。
-本地试用时 Caddy 会用本地 CA 签发证书，浏览器会提示自签名。
-`state/oidc_rsa_private.pem` 必须持久保留，换钥会让已签发的令牌与既有客户端校验失效。
+容器内的服务只能监听 `0.0.0.0`，因此**不能**使用 `--allow-insecure-loopback-cookies`，对外入口必须是
+HTTPS —— 这就是上面需要 Caddy 的原因。
+
+以上是**评估模式**：配置与签名私钥由镜像生成，私钥留在 `yufu-state` 卷里，重新创建容器不会换钥。
+生产环境应当挂载自己的 `/etc/yufu/yufu.toml` 与签名私钥，镜像检测到挂载配置后会完全以它为准，
+不会再生成任何东西。做法见[容器部署](/operations/docker/)。
 :::
 
-域名、证书、备份、升级与故障排查见[容器部署](/operations/docker/)。
+### 只跑服务，不用 Compose
+
+已经有 PostgreSQL 时，一条命令即可：
+
+```bash
+docker run -d --name yufu -p 4000:4000 \
+  -e YUFU_ISSUER=https://id.example.com \
+  -e YUFU_ADMIN_USERNAME=admin -e YUFU_ADMIN_PASSWORD='换成强密码' \
+  -e AUTH_SECRET="$(openssl rand -hex 32)" \
+  -e DATABASE_URL=postgres://user:pass@db:5432/yufu \
+  -v yufu-state:/var/lib/yufu \
+  ghcr.io/bin-hy/yufu:latest
+```
+
+同样需要在前置一层 HTTPS 终结（反向代理或负载均衡），原因同上。
 
 ## 从源码运行
 
