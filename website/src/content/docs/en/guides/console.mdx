@@ -1,0 +1,89 @@
+---
+title: Using the consoles
+description: Explore the current account center, developer console, enterprise administration, and application consent screens.
+---
+
+import { Image } from 'astro:assets';
+import dashboard from '../../../../assets/console-dashboard.png';
+import account from '../../../../assets/console-account.png';
+import developer from '../../../../assets/console-developer.png';
+import admin from '../../../../assets/console-admin.png';
+import consent from '../../../../assets/console-consent.png';
+
+This guide follows the current Vue frontend. Screenshots were captured on 2026-11-12 from the actual
+pages with isolated demo responses. Accounts, applications, counts, sessions, and approval states are
+fictional. The UI shown is Chinese; available navigation depends on account qualifications.
+
+## Workspace and navigation
+
+After sign-in, the default destination is `/account`; the workspace is at `/dashboard`.
+The sidebar groups account, developer, and enterprise administration tasks. The top bar provides
+page search, theme selection, and the account menu. The workspace shows your identity and available destinations.
+
+<Image src={dashboard} alt="Current workspace with an identity card and navigation grouped by qualification, demo data" />
+
+| User | Entry | Main tasks |
+| --- | --- | --- |
+| Enterprise member | `/account` and its subpages | Maintain your profile, access assigned applications, withdraw data consent, and manage sessions |
+| Qualified developer | `/developer/apps` | Register and maintain applications you can manage; submit production configuration for review |
+| Enterprise administrator | `/admin/accounts`, `/admin/apps`, and related pages | Invite members, manage accounts and groups, approve applications, assign access, and inspect audit events |
+
+These screenshots use an administrator with developer qualification to show all three areas.
+Ordinary members do not have all these permissions. Developer qualification does not grant production application access.
+
+## Account center
+
+Choose “账户资料” (account profile) to open `/account` and update your display name, email, or password.
+Changing your password revokes existing login sessions and requires a new sign-in.
+
+<Image src={account} alt="Account center with profile fields, password settings, and the current identity card, demo data" />
+
+- **可访问应用** (accessible applications), `/account/apps`: application environments explicitly assigned to you.
+- **资料授权** (data consent), `/account/consents`: inspect and withdraw application access to profile scopes.
+- **登录会话** (login sessions), `/account/sessions`: inspect center and application sessions and revoke unused sessions.
+
+Application assignment and data consent are separate conditions. Consenting to profile disclosure does not replace enterprise access assignment.
+
+## Developer console
+
+Choose “我的应用” (my applications) to open `/developer/apps`. The list shows applications on the current page
+and their development and production configuration states. “注册应用” (register application) opens a four-step
+flow: basic information, development, production, and confirmation.
+
+<Image src={developer} alt="Developer console with demo applications, development and production states, and registration entry" />
+
+Development is for integration testing; production configuration needs separate approval.
+Application details provide configuration, membership, and integration credentials.
+Application secrets appear only once in the issuance receipt and belong in server-side configuration.
+See [OIDC integration](/en/guides/oidc-integration/) for parameters and approval prerequisites.
+
+## Enterprise administration
+
+Choose “账户与邀请” (accounts and invitations) to open `/admin/accounts`. Search accounts, issue invitations,
+adjust developer qualification, disable accounts, or issue password reset links. Invitations can create an
+account or extend an existing account's qualifications. Issued links are displayed only once.
+
+<Image src={admin} alt="Enterprise accounts and invitations with search, account states, developer qualification, and actions, demo data" />
+
+| Sidebar entry | Path | Purpose |
+| --- | --- | --- |
+| 用户组 (groups) | `/admin/groups` | Maintain membership and assigned application access |
+| 应用与审批 (applications and approvals) | `/admin/apps` | Review production configuration and manage environments and assignments |
+| 历史接入纳管 (legacy adoption) | `/admin/migrations` | Bring legacy clients with confirmed ownership under governance |
+| 身份审计 (identity audit) | `/admin/audit` | Inspect identity and authorization change summaries |
+| 退出通知 (logout notifications) | `/admin/deliveries` | Inspect back-channel logout delivery and retry failures |
+
+The old user, role, API permission, resource permission, and operation log pages are retired.
+Legacy links redirect to corresponding new consoles. Use the current account, group, application, and audit entries.
+
+## Application consent
+
+An OIDC login initiated by an application shows consent when user approval is needed.
+The screen identifies the application, current account, and requested profile scopes.
+This example requests `openid profile email`; actual fields depend on the request and application configuration.
+
+<Image src={consent} alt="Current consent screen listing identity, profile, and email permissions with reject and approve buttons, demo data" />
+
+Choose “同意授权” (approve) to continue application login, or reject to end this authorization.
+You can later withdraw consent under “账户中心 → 资料授权” (account center → data consent).
+This page requires a valid OIDC flow; directly opening the screenshot's demo flow URL does not create a real authorization.

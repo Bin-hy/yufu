@@ -9,7 +9,7 @@ run the service, sign in to the admin console, and confirm the protocol endpoint
 ## Requirements
 
 - A Rust toolchain (matching the workspace edition and dependencies)
-- Node.js 22+ and pnpm 10+
+- Node.js ≥ 22.23.4 and pnpm 10+
 - A Docker-compatible container runtime for PostgreSQL
 - HTTPS and trusted NTP sources for production
 
@@ -18,7 +18,7 @@ run the service, sign in to the admin console, and confirm the protocol endpoint
 ```bash
 git clone https://github.com/Bin-hy/cobot-for.git
 cd cobot-for
-pnpm install
+pnpm install --frozen-lockfile
 ```
 
 ## 2. Start the database
@@ -71,6 +71,7 @@ issuer to be loopback. Production must use HTTPS and the default secure cookies.
 ## 4. Start the service
 
 ```bash
+pnpm build:cobotusr
 cargo run --bin cobotusr --features webui -- \
   --config conf/cobotusr.local.toml \
   --allow-insecure-loopback-cookies
@@ -89,9 +90,13 @@ http://127.0.0.1:4000
 
 Sign in with the account from `[auth.super_admin]`. After signing in you can reach:
 
-- `/account/*`: your profile, authorized applications, consent, and sessions
+- `/account`: profile; `/account/apps`: accessible applications; `/account/consents`: data consent; `/account/sessions`: login sessions
 - `/developer/*`: registration, configuration, versions, and approvals for your applications
 - `/admin/*`: accounts, applications, groups, assignments, approvals, and audit
+
+Navigation follows account qualifications: all members have the account center, qualified developers
+have the developer console, and enterprise administrators have enterprise administration.
+The workspace is at `/dashboard`. See the [console guide](/en/guides/console/) for screenshots and workflows.
 
 ## 6. Verify discovery
 

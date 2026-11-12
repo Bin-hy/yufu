@@ -35,9 +35,10 @@ import consent from '../../assets/console-consent.png';
 </p>
 
 <div class="shot-wrap">
-  <Image src={dashboard} alt="cobotusr 企业管理控制台" />
+  <Image src={dashboard} alt="cobotusr 当前工作台，包含账户中心、开发者控制台和企业管理入口（演示数据）" />
 </div>
-<p class="shot-caption">企业管理控制台：账户、应用、组、分配、审批与审计</p>
+<p class="shot-caption">当前工作台：账户中心、开发者控制台与企业管理入口（演示数据）</p>
+<p class="shot-caption"><a href="/guides/console/">查看控制台使用指南与更多界面截图 →</a></p>
 
 <section>
 
@@ -112,7 +113,8 @@ import consent from '../../assets/console-consent.png';
 git clone https://github.com/Bin-hy/cobot-for.git
 cd cobot-for
 
-pnpm install
+pnpm install --frozen-lockfile
+pnpm build:cobotusr
 docker compose up -d
 
 cp conf/cobotusr.example.toml conf/cobotusr.local.toml
@@ -150,9 +152,9 @@ cargo run --bin cobotusr --features webui -- \
 <section>
 
 <div class="shot-wrap">
-  <Image src={consent} alt="cobotusr 授权同意页" />
+  <Image src={consent} alt="cobotusr 当前授权同意页，列出账户身份、用户名与邮箱权限（演示数据）" />
 </div>
-<p class="shot-caption">授权同意页：按请求的 scope 逐项披露</p>
+<p class="shot-caption">当前授权同意页：账户身份、用户名与邮箱权限逐项披露（演示数据）</p>
 
 </section>
 

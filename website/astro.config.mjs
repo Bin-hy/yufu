@@ -51,6 +51,11 @@ export default defineConfig({
           translations: { en: 'Guides' },
           items: [
             {
+              label: '控制台使用',
+              translations: { en: 'Using the consoles' },
+              slug: 'guides/console',
+            },
+            {
               label: 'OIDC 接入',
               translations: { en: 'OIDC integration' },
               slug: 'guides/oidc-integration',
