@@ -3,7 +3,7 @@ import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 
 // Set SITE_URL in Cloudflare Pages (or locally) to the public origin.
-const site = process.env.SITE_URL ?? 'https://cobotusr.pages.dev';
+const site = process.env.SITE_URL ?? 'https://yufu-sso.pages.dev';
 
 export default defineConfig({
   site,

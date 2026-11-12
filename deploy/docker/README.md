@@ -3,7 +3,7 @@
 本目录提供从本仓库构建镜像并运行完整栈的参考配置：PostgreSQL、身份服务、Caddy TLS 入口。
 项目目前**不发布预构建镜像**，镜像由这里的 `Dockerfile` 从源码构建（先构建 Vue 控制台，
 再嵌入 Rust 二进制）。面向阅读的图文说明见
-[官网容器部署页](https://cobotusr.pages.dev/operations/docker/)；发版与安装包见
+[官网容器部署页](https://yufu-sso.pages.dev/operations/docker/)；发版与安装包见
 [打包手册](../../docs/releases/packaging.md) 与 [二进制安装说明](../../docs/releases/installation.md)。
 
 ## 目录内容

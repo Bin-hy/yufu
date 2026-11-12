@@ -5,7 +5,7 @@
 # Mounted read-only at /etc/yufu/yufu.toml. The public origin below must
 # equal https://<YUFU_DOMAIN>[:<YUFU_HTTPS_PORT>] from .env: the service
 # refuses to start when the issuer is not an explicit HTTPS origin.
-# Field reference: https://cobotusr.pages.dev/reference/configuration/
+# Field reference: https://yufu-sso.pages.dev/reference/configuration/
 
 [http]
 # Inside the container the service must accept connections from the proxy, so it

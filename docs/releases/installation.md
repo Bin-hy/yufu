@@ -86,7 +86,7 @@ chmod 600 oidc_rsa_private.pem
 配置 `/var/lib/yufu/oidc_rsa_private.pem` 等绝对路径时，须确保运行服务的账户可读。
 备份数据库、私钥、配置与不能重新获取的应用凭据。不要将不同 issuer 的配置交叉用于已有数据库。
 
-完整参考：[快速开始](https://cobotusr.pages.dev/getting-started/) · [配置项](https://cobotusr.pages.dev/reference/configuration/) · [生产部署](https://cobotusr.pages.dev/operations/deployment/)。
+完整参考：[快速开始](https://yufu-sso.pages.dev/getting-started/) · [配置项](https://yufu-sso.pages.dev/reference/configuration/) · [生产部署](https://yufu-sso.pages.dev/operations/deployment/)。
 
 ## 启动与首次登录
 

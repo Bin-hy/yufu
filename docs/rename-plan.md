@@ -99,7 +99,7 @@ cobotweb           → yufu
 
 **保护名单（按要求未改）**
 
-- `cobotusr.pages.dev` —— 官网域名，共 28 处
+- `cobotusr.pages.dev` —— 官网域名，共 28 处（**后续已随用户改名迁移到 `yufu-sso.pages.dev`**）
 - `Bin-hy/cobot-for`、`cobot-for.git`、`/path/to/cobot-for` —— GitHub 仓库名，共 72 处
 
 **排除在替换之外**
@@ -199,7 +199,9 @@ git clean -fd                 # 清理新目录（谨慎）
 
 ## 8. 后续手工项（用户自理）
 
-- [ ] GitHub 仓库 `Bin-hy/cobot-for` → 新名，并更新 README/官网里的 72 处旧地址
-- [ ] Cloudflare Pages 新建项目并绑定新域名，旧 `cobotusr.pages.dev` 保留 301
+- [x] GitHub 仓库改名为 `Bin-hy/yufu`，README/官网/SDK 文档里的 22 处旧地址已同步
+- [x] 官网域名迁移到 `yufu-sso.pages.dev`，24 处引用与 `wrangler.jsonc` 项目名已同步
+- [ ] Cloudflare Pages 侧仍需：新建（或改名）项目为 `yufu-sso` 并绑定该域名，
+      旧 `cobotusr.pages.dev` 保留 301 一段时间
 - [ ] `docs/cobotlet-feat.local/` 属退役产品历史，确认是否长期保留
 - [ ] `brand/logo-lockup-*.svg` 的 `<text>` 转轮廓路径（换平台渲染会飘）

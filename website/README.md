@@ -51,14 +51,14 @@ Create a Pages project from the repository and use:
 | Environment variable | `NODE_VERSION=22.23.4` (or newer) |
 
 `SITE_URL` drives canonical URLs, `hreflang` alternates, and the sitemap.
-Without it the build falls back to `https://cobotusr.pages.dev`.
+Without it the build falls back to `https://yufu-sso.pages.dev`.
 
 ### Wrangler CLI
 
 ```bash
 pnpm --filter @yufu/website build
 pnpm --filter @yufu/website exec wrangler pages deploy dist \
-  --project-name yufu-website
+  --project-name yufu-sso
 ```
 
 Set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` first. The project name

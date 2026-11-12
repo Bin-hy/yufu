@@ -199,5 +199,5 @@ cat yufu-v1.2.3-aarch64-apple-darwin/BUILD-INFO.json    # 核对 tag/commit/targ
 
 项目目前不发布预构建镜像。需要容器部署时用
 [`deploy/docker/Dockerfile`](../../deploy/docker/Dockerfile) 从本仓库构建，
-步骤与 compose 组合见[容器部署](https://cobotusr.pages.dev/operations/docker/)与
+步骤与 compose 组合见[容器部署](https://yufu-sso.pages.dev/operations/docker/)与
 [`deploy/docker/README.md`](../../deploy/docker/README.md)。

@@ -8,7 +8,7 @@
 
 统一账户、应用接入与访问治理，让内部应用共享清晰、可控的身份边界。
 
-[下载 Release](https://github.com/Bin-hy/yufu/releases) · [官网](https://cobotusr.pages.dev/) · [快速开始](https://cobotusr.pages.dev/getting-started/) · [控制台指南](https://cobotusr.pages.dev/guides/console/) · [English Docs](https://cobotusr.pages.dev/en/)
+[下载 Release](https://github.com/Bin-hy/yufu/releases) · [官网](https://yufu-sso.pages.dev/) · [快速开始](https://yufu-sso.pages.dev/getting-started/) · [控制台指南](https://yufu-sso.pages.dev/guides/console/) · [English Docs](https://yufu-sso.pages.dev/en/)
 
 Rust · Vue 3 · PostgreSQL · OpenID Connect · OAuth 2.0 · PKCE
 
@@ -50,7 +50,7 @@ yufu 是**鱼符**的拼音。唐代官员随身佩带鱼形的身份凭证，�
 ![yufu 工作台：账户中心、开发者控制台与企业管理入口（演示数据）](website/src/assets/console-dashboard.png)
 
 > 当前 Vue 前端实截，使用隔离的演示数据；账户、应用、数量与会话状态均为虚构。
-> 更多界面与操作说明见[控制台使用指南](https://cobotusr.pages.dev/guides/console/)。
+> 更多界面与操作说明见[控制台使用指南](https://yufu-sso.pages.dev/guides/console/)。
 
 ## 核心能力
 
@@ -114,7 +114,7 @@ cp conf/yufu.example.toml conf/yufu.local.toml
 
 编辑 `conf/yufu.local.toml`，配置数据库连接、`[auth.super_admin]` 管理员账户、
 `[oidc]` issuer 与签名密钥路径，以及 `[security_clock]` 可信时钟来源。
-完整字段和示例见[快速开始](https://cobotusr.pages.dev/getting-started/)与[配置参考](https://cobotusr.pages.dev/reference/configuration/)。
+完整字段和示例见[快速开始](https://yufu-sso.pages.dev/getting-started/)与[配置参考](https://yufu-sso.pages.dev/reference/configuration/)。
 
 `compose.yaml` 仅启动 PostgreSQL，默认本机端口为 `5433`；数据库默认凭据应按实际部署环境替换。
 
@@ -153,10 +153,10 @@ cargo run --bin yufu --features webui -- \
 
 | 接入方式 | 文档 | 仓库参考 |
 | --- | --- | --- |
-| OIDC 协议与令牌语义 | [OIDC 接入](https://cobotusr.pages.dev/guides/oidc-integration/) | [端点与令牌](https://cobotusr.pages.dev/reference/endpoints/) |
-| 机密 Web 应用 | [Web 接入指南](https://cobotusr.pages.dev/guides/web-app/) | [examples/oidc-web](examples/oidc-web/README.md)，基于 `openid-client`，含独立保护 API |
-| 公共 SPA | [SPA 接入指南](https://cobotusr.pages.dev/guides/spa/) | [examples/oidc-spa](examples/oidc-spa/README.md)，基于 `oidc-client-ts` |
-| Go 服务 | [Go SDK 指南](https://cobotusr.pages.dev/guides/go-sdk/) | [sdk/go](sdk/go/README.md) · [联调示例](examples/sdk/go/README.md) |
+| OIDC 协议与令牌语义 | [OIDC 接入](https://yufu-sso.pages.dev/guides/oidc-integration/) | [端点与令牌](https://yufu-sso.pages.dev/reference/endpoints/) |
+| 机密 Web 应用 | [Web 接入指南](https://yufu-sso.pages.dev/guides/web-app/) | [examples/oidc-web](examples/oidc-web/README.md)，基于 `openid-client`，含独立保护 API |
+| 公共 SPA | [SPA 接入指南](https://yufu-sso.pages.dev/guides/spa/) | [examples/oidc-spa](examples/oidc-spa/README.md)，基于 `oidc-client-ts` |
+| Go 服务 | [Go SDK 指南](https://yufu-sso.pages.dev/guides/go-sdk/) | [sdk/go](sdk/go/README.md) · [联调示例](examples/sdk/go/README.md) |
 
 API 默认前缀为 `/api/v1`。应用权限同步使用 `/application/sync-permissions`，
 PDP 使用 `/enforce`。MCP 令牌必须指定已注册应用的 `aud`，调用者还需具有相应 `mcp:access` 权限。
@@ -170,8 +170,8 @@ PDP 使用 `/enforce`。MCP 令牌必须指定已注册应用的 `aud`，调用�
 - **备份恢复**：数据库、签名私钥、部署配置及应用凭据应一并纳入恢复计划，升级前执行备份与演练。
 - **升级兼容**：历史业务数据和既有客户端不会自动删除；旧 RBAC 页面重定向到新控制台，后端旧管理接口为既有客户端保留兼容。
 
-部署步骤见[生产部署](https://cobotusr.pages.dev/operations/deployment/)、
-[容器部署](https://cobotusr.pages.dev/operations/docker/)和[安全与备份](https://cobotusr.pages.dev/operations/security/)。
+部署步骤见[生产部署](https://yufu-sso.pages.dev/operations/deployment/)、
+[容器部署](https://yufu-sso.pages.dev/operations/docker/)和[安全与备份](https://yufu-sso.pages.dev/operations/security/)。
 已有部署的升级、恢复与容量评估见[企业身份升级运维指南](docs/operations/enterprise-identity-upgrade.md)。
 
 ## 项目结构
@@ -267,7 +267,7 @@ git push origin v1.2.3
 
 本流程不部署官网，也不发布容器镜像，不为安装包签名或公证。
 容器部署由仓库内 [`deploy/docker`](deploy/docker/README.md) 从源码构建镜像，见
-[容器部署](https://cobotusr.pages.dev/operations/docker/)。
+[容器部署](https://yufu-sso.pages.dev/operations/docker/)。
 
 手工构建、打包、校验与发版的完整步骤见[打包与发版操作手册](docs/releases/packaging.md)。
 
