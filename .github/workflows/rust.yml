@@ -4,9 +4,24 @@ on:
     push:
         branches:
             - main
+        # This pipeline compiles the workspace on three operating systems. It has
+        # nothing to check in documentation, the Astro site, the Go SDK or the
+        # container recipe, so those changes must not burn a matrix run.
+        paths-ignore: &ignored
+            - 'docs/**'
+            - '**/*.md'
+            - '*.md'
+            - 'website/**'
+            - 'sdk/go/**'
+            - 'deploy/docker/**'
+            - 'brand/**'
+            - '.gitignore'
+            - '.dockerignore'
+            - '.editorconfig'
     pull_request:
         branches:
             - main
+        paths-ignore: *ignored
 
 env:
     CARGO_TERM_COLOR: always

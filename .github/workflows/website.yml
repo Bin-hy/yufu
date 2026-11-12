@@ -1,0 +1,63 @@
+name: Website
+
+# The docs site is excluded from the CI pipeline (which compiles the Rust
+# workspace on three operating systems and would learn nothing from an Astro
+# page). This workflow is the replacement: it only runs when the site, or the
+# workspace inputs it resolves through, actually change.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'website/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/website.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'website/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/website.yml'
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '12.10.1'
+
+jobs:
+  build:
+    name: Check and build the site
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pnpm and workspace dependencies
+        run: |
+          npm install --global "pnpm@${PNPM_VERSION}"
+          pnpm install --frozen-lockfile
+      - name: Type-check the site
+        run: pnpm check:website
+      - name: Build the site
+        run: pnpm build:website
+      # A broken internal link or a missing page shows up as a missing file in
+      # dist, which the build alone does not treat as fatal.
+      - name: Verify the generated pages
+        run: |
+          set -euo pipefail
+          test -f website/dist/index.html
+          test -f website/dist/en/index.html
+          test -f website/dist/sitemap-index.xml
+          printf 'generated %s pages\n' "$(find website/dist -name '*.html' | wc -l)"
