@@ -154,6 +154,16 @@ async fn identity_console_http_lists_only_own_metadata_and_requires_exact_admin_
         panic!("account")
     };
     tx.commit().await.unwrap();
+    for query in ["ordinary", "Ordinary", &ordinary.user_id.to_string()] {
+        let found = get(&f, &cookies, &format!("/admin/accounts?q={query}"))
+            .await
+            .json::<Value>()
+            .await
+            .unwrap();
+        let items = found["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "search {query}");
+        assert_eq!(items[0]["user_id"], ordinary.user_id);
+    }
     let (_, other_secret) = center_secret(&f, ordinary.user_id).await;
     let mut other = BrowserCookies::default();
     other.0.insert("cobotusr-dev-sso".into(), other_secret);

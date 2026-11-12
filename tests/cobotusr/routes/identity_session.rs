@@ -749,7 +749,6 @@ async fn identity_session_shared_transaction_rolls_back_browser_security_pair_an
                 refresh_ttl_seconds: 3600,
             },
             f.signer.as_ref(),
-            &request_budget,
         )
         .await
         .unwrap();

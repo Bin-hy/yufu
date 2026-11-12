@@ -441,7 +441,7 @@ async fn identity_application_governance_candidates_owner_transfer_and_overlappi
     );
     let service = service(&f);
     let candidates = service
-        .candidates(&owner_secret, 0, 50, &budget(&f))
+        .candidates(&owner_secret, 0, 50, None, &budget(&f))
         .await
         .unwrap();
     assert!(candidates.items.iter().all(|c| c.user_id != target));
@@ -469,10 +469,21 @@ async fn identity_application_governance_candidates_owner_transfer_and_overlappi
         .await
         .unwrap();
     let candidates = service
-        .candidates(&owner_secret, 0, 50, &budget(&f))
+        .candidates(&owner_secret, 0, 50, None, &budget(&f))
         .await
         .unwrap();
     assert!(candidates.items.iter().any(|c| c.user_id == target));
+    let searched = service
+        .candidates(&owner_secret, 0, 50, Some(&target.to_string()), &budget(&f))
+        .await
+        .unwrap();
+    assert_eq!(searched.items.len(), 1);
+    assert_eq!(searched.items[0].user_id, target);
+    let missing = service
+        .candidates(&owner_secret, 0, 50, Some("no-such-candidate"), &budget(&f))
+        .await
+        .unwrap();
+    assert!(missing.items.is_empty());
     service
         .mutate(
             &owner,

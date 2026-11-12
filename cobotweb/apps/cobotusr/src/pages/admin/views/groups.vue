@@ -1,8 +1,8 @@
 <script setup lang="ts">
 defineOptions({ name: 'AdminGroups' })
-import { reactive, ref } from 'vue'
-import { Network, Pencil, Plus, Trash2, UserPlus, Users } from '@lucide/vue'
-import { listGroups, groupChange } from '../api'
+import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { Network, Pencil, Plus, Search, Trash2, UserPlus, Users } from '@lucide/vue'
+import { listGroups, groupChange, searchAccounts } from '../api'
 import type { Group } from '../api/type'
 import { useCursorPage } from '@/composables/use-cursor-page'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
@@ -15,7 +15,24 @@ import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiDialog from '@/components/ui/dialog/dialog.vue'
 import UiFormField from '@/components/ui/form-field/form-field.vue'
-const list = useCursorPage('enterprise-groups', listGroups),
+import EntityPicker from '@/components/ui/entity-picker/entity-picker.vue'
+import type { PickerOption } from '@/components/ui/entity-picker/types'
+import { accountOption } from '@/lib/picker-options'
+const directoryQuery = ref(''),
+    debouncedDirectoryQuery = ref('')
+let directoryTimer: number | undefined
+watch(directoryQuery, (value) => {
+    window.clearTimeout(directoryTimer)
+    directoryTimer = window.setTimeout(() => {
+        debouncedDirectoryQuery.value = value.trim()
+    }, 240)
+})
+onBeforeUnmount(() => window.clearTimeout(directoryTimer))
+const list = useCursorPage(
+    () => `enterprise-groups:${debouncedDirectoryQuery.value}`,
+    (after, signal) =>
+        listGroups(after, signal, debouncedDirectoryQuery.value || undefined),
+),
     { data, status, error, refreshing } = list
 const mutation = useAsyncMutation(),
     { pending, error: writeError } = mutation,
@@ -23,7 +40,19 @@ const mutation = useAsyncMutation(),
 const form = reactive({ name: '', description: '' }),
     selected = ref<Group>(),
     member = ref<number | ''>(''),
+    memberLabel = ref(''),
+    memberSecondary = ref(''),
     editorOpen = ref(false)
+watch(debouncedDirectoryQuery, () => list.first())
+const loadAccountOptions = async (query: string, signal: AbortSignal): Promise<PickerOption[]> => {
+    const page = await searchAccounts(query, signal)
+    return page.items.map(accountOption)
+}
+function chooseMember(option: PickerOption) {
+    member.value = Number(option.value)
+    memberLabel.value = option.label
+    memberSecondary.value = option.secondary ?? ''
+}
 async function change(path: string, method: 'POST' | 'PATCH' | 'DELETE', body: unknown) {
     await mutation.run(
         () => groupChange(path, method, body, key({ path, body })),
@@ -84,6 +113,8 @@ async function addMember(group: Group) {
         expected_revision: group.revision,
     })
     member.value = ''
+    memberLabel.value = ''
+    memberSecondary.value = ''
 }
 async function removeMember(group: Group, userId: number) {
     await change(`/${group.group_id}/members/${userId}`, 'PATCH', {
@@ -103,6 +134,21 @@ async function removeMember(group: Group, userId: number) {
         </PageHeader>
         <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
 
+        <div class="table-toolbar mb-4 rounded-xl border border-border">
+            <div class="search-box">
+                <Search :size="15" aria-hidden="true" />
+                <UiInput
+                    v-model="directoryQuery"
+                    clearable
+                    placeholder="搜索用户组名称或 ID…"
+                    aria-label="搜索用户组"
+                />
+            </div>
+            <span class="toolbar-spacer text-[11px] text-muted-foreground">
+                {{ data?.items.length ?? 0 }} 个用户组
+            </span>
+        </div>
+
         <DataState
             :status="status"
             :error="error"
@@ -120,7 +166,7 @@ async function removeMember(group: Group, userId: number) {
                             <span class="list-icon !h-9 !w-9"><Network :size="16" aria-hidden="true" /></span>
                             <div class="min-w-0">
                                 <h2 class="truncate">{{ group.name }}</h2>
-                                <p class="mono truncate">{{ group.group_id }}</p>
+                                <p class="mono truncate text-[10.5px]" :title="group.group_id">组 ID · {{ group.group_id.slice(0, 8) }}…</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-1">
@@ -151,30 +197,33 @@ async function removeMember(group: Group, userId: number) {
                             </p>
                             <div class="flex flex-wrap gap-1.5">
                                 <button
-                                    v-for="userId in group.members"
-                                    :key="userId"
+                                    v-for="profile in group.member_profiles || group.members.map(id => ({ user_id: id, username: '', nickname: '' }))"
+                                    :key="profile.user_id"
                                     type="button"
-                                    class="group inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-[10.5px] transition-colors hover:border-destructive/30 hover:text-destructive"
+                                    class="group inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-[10.5px] transition-colors hover:border-destructive/30 hover:text-destructive"
                                     :disabled="pending"
-                                    :aria-label="'移除账户 ' + userId"
-                                    @click="removeMember(group, userId)"
+                                    :aria-label="'移除账户 ' + (profile.nickname || profile.username || profile.user_id)"
+                                    @click="removeMember(group, profile.user_id)"
                                 >
-                                    账户 {{ userId }}
+                                    <span class="truncate">{{ profile.nickname || profile.username || '账户 ' + profile.user_id }}</span>
+                                    <span v-if="profile.username" class="truncate opacity-60">@{{ profile.username }}</span>
                                     <span class="opacity-50 group-hover:opacity-100">×</span>
                                 </button>
                                 <span v-if="!group.members.length" class="text-[11px] text-muted-foreground">暂无成员</span>
                             </div>
                         </div>
                         <form class="flex items-end gap-2 border-t border-border pt-4" @submit.prevent="addMember(group)">
-                            <UiFormField :id="'group-member-' + group.group_id" label="新成员账户 ID" class="min-w-0 flex-1">
-                                <UiInput
+                            <UiFormField :id="'group-member-' + group.group_id" label="搜索并添加成员" class="min-w-0 flex-1" hint="按显示名称、用户名或账户 ID 搜索。">
+                                <EntityPicker
                                     :id="'group-member-' + group.group_id"
-                                    v-model.number="member"
-                                    type="number"
-                                    min="1"
-                                    required
-                                    class="!min-h-9"
+                                    :model-value="member"
+                                    :selected-label="memberLabel"
+                                    :selected-secondary="memberSecondary"
+                                    :load="loadAccountOptions"
+                                    placeholder="搜索账户名称或用户名…"
                                     :disabled="pending"
+                                    @update:model-value="(value) => { if (value === null) { member = ''; memberLabel = ''; memberSecondary = '' } }"
+                                    @select="chooseMember"
                                 />
                             </UiFormField>
                             <UiButton type="submit" variant="outline" size="sm" :disabled="pending || !member">

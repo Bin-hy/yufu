@@ -85,12 +85,13 @@ impl ApplicationService {
             AppEnvironmentKind::Development => &request.registration.application.production,
             AppEnvironmentKind::Production => &request.registration.application.development,
         };
-        let other = PreparedEnvironment::new(other_config, budget).await?;
+        let other = PreparedEnvironment::new(other_config).await?;
         let retained_id = Uuid::new_v4();
         let retained_version = Uuid::new_v4();
+        let write_budget = budget.renewed()?;
         let output = execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &AdoptLegacy {
                 service: self,
                 evidence,

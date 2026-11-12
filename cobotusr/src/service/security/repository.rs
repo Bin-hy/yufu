@@ -158,6 +158,13 @@ pub trait SecurityRepository: Send + Sync {
 #[allow(clippy::double_must_use)]
 pub trait SecurityTransaction: Send {
     fn checked_at(&self) -> u64;
+    /// Restart the request-local deadline after a separately bounded CPU step
+    /// (bcrypt). The snapshot, locks and per-statement timeout stay unchanged;
+    /// only the Rust-side deadline for the remaining database work is renewed.
+    fn renew_budget(&mut self) -> Result<(), SecurityError>;
+    /// A renewed budget for work that runs outside this transaction, such as
+    /// session signing after password verification.
+    fn renewed_budget(&self) -> Result<SecurityBudget, SecurityError>;
     /// Plan acting and target account resources before any management lock.
     /// This does not widen the eventual mutation or replace authorization.
     async fn prepare_management_mutation(
@@ -634,6 +641,13 @@ impl SecurityTransaction for PgSecurityTransaction {
     }
     fn checked_at(&self) -> u64 {
         self.checked_at
+    }
+    fn renew_budget(&mut self) -> Result<(), SecurityError> {
+        self.budget = self.budget.renewed()?;
+        Ok(())
+    }
+    fn renewed_budget(&self) -> Result<SecurityBudget, SecurityError> {
+        self.budget.renewed()
     }
     async fn oidc_client(
         &mut self,

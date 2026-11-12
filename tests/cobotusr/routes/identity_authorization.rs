@@ -4,6 +4,7 @@ use cobotusr::service::identity::repository::IdentityRepository;
 use cobotusr::{
     domain::identity::{
         account::{IssuedSecret, SecretDigest},
+        application::ClientKind,
         authorization::AuthorizationParameters,
         error::IdentityError,
         session::AuthorizationOutcome,
@@ -12,6 +13,7 @@ use cobotusr::{
         authorization::{AuthorizationFlowProof, AuthorizationResult, AuthorizationService},
         sso::{LoginFlowProof, SsoService},
     },
+    service::security::lifecycle::CodeExchangeRequest,
 };
 use sea_orm::ConnectionTrait;
 use std::sync::Arc;
@@ -216,6 +218,114 @@ async fn identity_authorization_consent_completion_is_atomic_bound_and_single_us
         )
         .await
         .is_err()
+    );
+    f.close().await;
+}
+
+/// OIDC Core makes `nonce` and PKCE optional for a confidential client. Outline
+/// sends neither, so the whole authorize -> consent -> code -> token path must
+/// work without them and must not invent a nonce claim.
+#[tokio::test]
+async fn identity_authorization_confidential_client_without_nonce_or_pkce_exchanges_code() {
+    let f = IdentityFixture::start().await;
+    let a = app(&f, "auth-no-pkce", false).await;
+    let (_, secret) = center_secret(&f, a.owner).await;
+    let browser = browser();
+    let svc = service(&f);
+    let mut uri = reqwest::Url::parse("https://identity.example/oidc/authorize").unwrap();
+    uri.query_pairs_mut().extend_pairs([
+        ("client_id", "auth-no-pkce-dev"),
+        ("redirect_uri", "https://rp.example/callback"),
+        ("response_type", "code"),
+        ("scope", "openid profile email"),
+        ("state", "state + &"),
+    ]);
+    let (id, proof) = pending(
+        svc.authorize(
+            AuthorizationParameters::parse(uri.query().unwrap()).unwrap(),
+            &SecretDigest::of(&browser),
+            Some(&secret),
+            Uuid::new_v4(),
+            &budget(&f),
+        )
+        .await
+        .unwrap(),
+    );
+    let url = redirect(
+        svc.complete(
+            AuthorizationFlowProof { id, proof: &proof },
+            &write_evidence(&f, Some(&secret), &browser),
+            true,
+            Uuid::new_v4(),
+            &budget(&f),
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(field(&url, "state").as_deref(), Some("state + &"));
+    let code = SecretToken::new(field(&url, "code").unwrap()).unwrap();
+    let client_secret = SecretToken::new("fixture-client-secret".into()).unwrap();
+    let issued = super::identity_token::protocol(&f, f.signer.clone())
+        .exchange(
+            CodeExchangeRequest {
+                code: &code,
+                client_id: "auth-no-pkce-dev",
+                client_secret: Some(&client_secret),
+                redirect_uri: Some("https://rp.example/callback"),
+                code_verifier: None,
+            },
+            Uuid::new_v4(),
+            &budget(&f),
+        )
+        .await
+        .unwrap();
+    assert_eq!(issued.scope, "email openid profile");
+    let claims = super::identity_token::verified(
+        &f,
+        issued.tokens.id_token.as_ref().unwrap().expose_secret(),
+        "auth-no-pkce-dev",
+    );
+    assert_eq!(claims["sub"], a.owner.to_string());
+    assert!(claims.get("nonce").is_none());
+    assert_eq!(claims["preferred_username"], "identity-admin");
+    f.close().await;
+}
+
+/// A browser-only client has no client secret, so PKCE stays mandatory.
+#[tokio::test]
+async fn identity_authorization_browser_spa_without_pkce_is_rejected() {
+    let f = IdentityFixture::start().await;
+    let a = app_kind(&f, "auth-spa-no-pkce", false, ClientKind::BrowserSpa).await;
+    let (_, secret) = center_secret(&f, a.owner).await;
+    let svc = service(&f);
+    let mut uri = reqwest::Url::parse("https://identity.example/oidc/authorize").unwrap();
+    uri.query_pairs_mut().extend_pairs([
+        ("client_id", "auth-spa-no-pkce-dev"),
+        ("redirect_uri", "https://rp.example/callback"),
+        ("response_type", "code"),
+        ("scope", "openid"),
+        ("state", "spa-state"),
+    ]);
+    let url = redirect(
+        svc.authorize(
+            AuthorizationParameters::parse(uri.query().unwrap()).unwrap(),
+            &SecretDigest::of(&browser()),
+            Some(&secret),
+            Uuid::new_v4(),
+            &budget(&f),
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(field(&url, "error").as_deref(), Some("invalid_request"));
+    assert_eq!(field(&url, "state").as_deref(), Some("spa-state"));
+    assert_eq!(
+        scalar(
+            &f,
+            "SELECT COUNT(*)::bigint AS value FROM identity_authorization_flow"
+        )
+        .await,
+        0
     );
     f.close().await;
 }

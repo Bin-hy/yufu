@@ -28,15 +28,15 @@ async fn authenticate(
     auth: &ProtocolClientAuthentication<'_>,
     allow_reader: bool,
     allow_public: bool,
-    budget: &SecurityBudget,
 ) -> Result<QueryBinding, IdentityError> {
     if let Some(client) = tx.oidc_client(auth.id).await? {
         if client.public_client && !allow_public {
             return Err(IdentityError::Unauthenticated);
         }
-        authenticate_session_client(&client, auth.secret, "", budget)
+        authenticate_session_client(&client, auth.secret, "")
             .await
             .map_err(authentication_error)?;
+        tx.renew_budget()?;
         return Ok(QueryBinding {
             client_id: client.client_id,
             environment_id: client.environment_id,
@@ -58,16 +58,11 @@ async fn authenticate(
         .expose_secret()
         .to_owned();
     let hash = reader.secret_hash;
-    let valid = budget
-        .run(tokio::task::spawn_blocking(move || {
-            bcrypt::verify(plaintext, &hash)
-        }))
-        .await?
-        .map_err(|_| IdentityError::DependencyUnavailable)?
-        .map_err(|_| IdentityError::DependencyUnavailable)?;
+    let valid = crate::service::identity::password::verify(plaintext, hash).await?;
     if !valid {
         return Err(IdentityError::Unauthenticated);
     }
+    tx.renew_budget()?;
     let client = tx
         .environment_client(reader.environment_id)
         .await?
@@ -101,7 +96,7 @@ impl ProtocolService {
     ) -> Result<Introspection, IdentityError> {
         let mut tx = self.repository.begin(budget).await?;
         let result = async {
-            let binding = authenticate(tx.as_mut(), &auth, true, false, budget).await?;
+            let binding = authenticate(tx.as_mut(), &auth, true, false).await?;
             let access = match self
                 .lifecycle
                 .identity_protocol_token_in_transaction(
@@ -221,7 +216,6 @@ impl ProtocolService {
                 token,
                 reference: reference.as_ref(),
                 request_id,
-                budget,
             },
         )
         .await
@@ -233,14 +227,13 @@ struct Revoke<'a> {
     token: &'a SecretToken,
     reference: Option<&'a CredentialRef>,
     request_id: Uuid,
-    budget: &'a SecurityBudget,
 }
 #[async_trait::async_trait]
 impl IdentityUnitOfWork for Revoke<'_> {
     type Output = ();
     async fn apply(&self, tx: &mut dyn IdentityTransaction) -> Result<(), IdentityError> {
         let issuer = self.service.config.issuer();
-        let binding = authenticate(tx, &self.auth, false, true, self.budget).await?;
+        let binding = authenticate(tx, &self.auth, false, true).await?;
         let Some(initial) = tx
             .protocol_revocation_target(&issuer, self.token, self.reference)
             .await?
@@ -258,7 +251,7 @@ impl IdentityUnitOfWork for Revoke<'_> {
         };
         let plan = tx.revocation_plan(&scope).await?;
         tx.lock_identity_scope(&plan.locks).await?;
-        let current_binding = authenticate(tx, &self.auth, false, true, self.budget).await?;
+        let current_binding = authenticate(tx, &self.auth, false, true).await?;
         let current = tx
             .protocol_revocation_target(&issuer, self.token, self.reference)
             .await?

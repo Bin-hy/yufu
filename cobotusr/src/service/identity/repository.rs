@@ -50,11 +50,16 @@ pub trait IdentityTransaction: SecurityTransaction {
         &mut self,
         after: Option<Uuid>,
         limit: u32,
+        search: Option<&str>,
     ) -> Result<Vec<Uuid>, IdentityError>;
     async fn assignment_targets(
         &mut self,
         application_id: i32,
     ) -> Result<Vec<AssignmentTarget>, IdentityError>;
+    async fn assignment_target_summaries(
+        &mut self,
+        application_id: i32,
+    ) -> Result<Vec<AssignmentTargetSummary>, IdentityError>;
     async fn application_workspace(
         &mut self,
         application_id: i32,
@@ -73,6 +78,7 @@ pub trait IdentityTransaction: SecurityTransaction {
         requester_id: i32,
         after: i32,
         limit: u32,
+        search: Option<&str>,
     ) -> Result<Vec<CollaborationCandidate>, IdentityError>;
     async fn administrator_application_ids(
         &mut self,
@@ -304,6 +310,8 @@ pub struct ApplicationWorkspace {
 pub struct ApplicationMemberSummary {
     pub user_id: i32,
     pub member_role: String,
+    pub username: String,
+    pub nickname: String,
 }
 #[derive(serde::Serialize)]
 pub struct EnvironmentWorkspace {
@@ -339,6 +347,12 @@ pub struct CollaborationCandidate {
     pub user_id: i32,
     pub username: String,
     pub nickname: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AssignmentTargetSummary {
+    pub target: AssignmentTarget,
+    pub label: String,
+    pub secondary: String,
 }
 #[derive(serde::Serialize)]
 pub struct ConfigVersionSummary {
@@ -453,7 +467,14 @@ pub struct GroupWorkspace {
     pub description: Option<String>,
     pub revision: u64,
     pub members: Vec<i32>,
+    pub member_profiles: Vec<GroupMemberSummary>,
     pub application_ids: Vec<i32>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct GroupMemberSummary {
+    pub user_id: i32,
+    pub username: String,
+    pub nickname: String,
 }
 pub struct OperationReceiptWrite {
     pub id: Uuid,

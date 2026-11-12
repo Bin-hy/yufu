@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 
-import type { IdentityClaims, TokenSet } from './oidc.js'
+import type { IdentityClaims, TokenSet, VerifiedProtocol } from './oidc.js'
 
 export const SESSION_COOKIE = 'cobotrix_session'
 export const PENDING_COOKIE = 'cobotrix_pending'
@@ -55,7 +55,7 @@ export interface SessionRecord {
   id: string
   profile: LocalProfile
   tokens: TokenSet
-  sid?: string
+  protocol: VerifiedProtocol
   createdAt: number
 }
 
@@ -69,12 +69,12 @@ export class SessionStore {
 
   constructor(private readonly clock: () => number = Date.now) {}
 
-  create(profile: LocalProfile, tokens: TokenSet, sid?: string): SessionRecord {
+  create(profile: LocalProfile, tokens: TokenSet, protocol: VerifiedProtocol): SessionRecord {
     const record: SessionRecord = {
       id: newSessionId(),
       profile,
       tokens,
-      sid,
+      protocol,
       createdAt: this.clock(),
     }
     this.#sessions.set(record.id, record)
@@ -94,7 +94,7 @@ export class SessionStore {
   deleteBySid(sid: string): number {
     let removed = 0
     for (const [id, record] of this.#sessions) {
-      if (record.sid === sid) {
+      if (record.protocol.sid === sid) {
         this.#sessions.delete(id)
         this.#inflight.delete(id)
         removed += 1

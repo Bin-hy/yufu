@@ -124,8 +124,27 @@ async fn identity_browser_cross_site_three_engines_login_sso_and_logout() {
         // The browser sees the TLS front end, so the issuer must be that origin
         // even though the OP itself listens on plain HTTP behind the proxy.
         config.oidc.issuer = issuer.clone();
+        // The three-engine suite runs for several minutes while the fixture
+        // clock stays frozen at start-up. Keep the console access token valid
+        // for the whole run instead of letting it expire mid-scenario.
+        config.auth.exp_seconds = 3600;
     })
     .await;
+
+    // Identity codes, flows and access tokens keep their production lifetimes,
+    // but the fixture clock is frozen at start-up. Track the wall clock while
+    // the browsers run so tokens minted minutes later are not already expired.
+    let wall_clock = {
+        let clock = f.clock.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                clock.set_wall_time(chrono::Utc::now().timestamp_millis() as u64);
+            }
+        })
+    };
 
     let login_page = f
         .client
@@ -273,6 +292,8 @@ async fn identity_browser_cross_site_three_engines_login_sso_and_logout() {
         .status()
         .await
         .unwrap();
+
+    wall_clock.abort();
 
     let _ = std::fs::remove_dir_all(&work);
     f.close().await;

@@ -70,6 +70,15 @@ async function close() {
 function preventBusy(event: Event) {
     if (props.busy) event.preventDefault()
 }
+function onPointerDownOutside(event: Event) {
+    const target = (event as CustomEvent<{ originalEvent?: Event }>).detail?.originalEvent
+        ?.target as Element | null
+    if (target?.closest('.entity-picker-menu')) {
+        event.preventDefault()
+        return
+    }
+    preventBusy(event)
+}
 function restoreFocus(event: Event) {
     event.preventDefault()
     void nextTick(() => {
@@ -95,7 +104,7 @@ function restoreFocus(event: Event) {
                 :aria-busy="busy"
                 @open-auto-focus="openFocus"
                 @escape-key-down="preventBusy"
-                @pointer-down-outside="preventBusy"
+                @pointer-down-outside="onPointerDownOutside"
                 @close-auto-focus="restoreFocus"
             >
                 <header class="dialog-header">

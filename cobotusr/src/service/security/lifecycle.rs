@@ -204,8 +204,10 @@ impl CredentialLifecycle {
         let verified = self
             .verify_local_password(request.username, request.password, budget)
             .await?;
-        budget.remaining()?;
-        let mut txn = self.repository.begin(budget).await?;
+        // The bcrypt step has its own CPU allowance; the session write still
+        // starts a fresh, checked two-second database budget.
+        let write_budget = budget.renewed()?;
+        let mut txn = self.repository.begin(&write_budget).await?;
         // The account may have changed while the password was being checked.
         let current = txn
             .local_user(request.username)
@@ -216,7 +218,7 @@ impl CredentialLifecycle {
             return Err(SecurityError::InvalidCredential);
         }
         let tokens = self
-            .mint_local_session(txn.as_mut(), verified.id, config, signer, budget)
+            .mint_local_session(txn.as_mut(), verified.id, config, signer, &write_budget)
             .await?;
         txn.commit().await?;
         Ok(LocalSession {
@@ -245,17 +247,12 @@ impl CredentialLifecycle {
             .clone()
             .ok_or(SecurityError::InvalidCredential)?;
         let password = password.0.clone();
-        let valid = budget
-            .run(tokio::task::spawn_blocking(move || {
-                bcrypt::verify(password, &password_hash)
-            }))
-            .await?
-            .map_err(|_| SecurityError::DependencyUnavailable)?
+        let valid = crate::service::identity::password::verify(password, password_hash)
+            .await
             .map_err(|_| SecurityError::InvalidCredential)?;
         if !valid {
             return Err(SecurityError::InvalidCredential);
         }
-        budget.remaining()?;
         Ok(user)
     }
     /// Identity orchestration owns the commit when a browser root and the
@@ -266,7 +263,6 @@ impl CredentialLifecycle {
         request: LocalLoginRequest<'_>,
         config: &SessionTokenConfig,
         signer: &dyn SessionTokenSigner,
-        budget: &SecurityBudget,
     ) -> Result<LocalSession, SecurityError> {
         validate_local_username(request.username)?;
         let user = txn
@@ -281,18 +277,16 @@ impl CredentialLifecycle {
             .clone()
             .ok_or(SecurityError::InvalidCredential)?;
         let password = request.password.0.clone();
-        let valid = budget
-            .run(tokio::task::spawn_blocking(move || {
-                bcrypt::verify(password, &password_hash)
-            }))
-            .await?
-            .map_err(|_| SecurityError::DependencyUnavailable)?
+        let valid = crate::service::identity::password::verify(password, password_hash)
+            .await
             .map_err(|_| SecurityError::InvalidCredential)?;
         if !valid {
             return Err(SecurityError::InvalidCredential);
         }
+        txn.renew_budget()?;
+        let write_budget = txn.renewed_budget()?;
         let tokens = self
-            .mint_local_session(txn, user.id, config, signer, budget)
+            .mint_local_session(txn, user.id, config, signer, &write_budget)
             .await?;
         Ok(LocalSession {
             tokens,
@@ -437,8 +431,8 @@ impl CredentialLifecycle {
                     .legacy_oidc_client(client_id)
                     .await?
                     .ok_or(SecurityError::InvalidCredential)?;
-                authenticate_session_client(&client, client_secret, "refresh_token", budget)
-                    .await?;
+                authenticate_session_client(&client, client_secret, "refresh_token").await?;
+                txn.renew_budget()?;
                 let binding = txn
                     .session_client(&config.issuer, &client.client_id)
                     .await?
@@ -550,8 +544,8 @@ impl CredentialLifecycle {
         if client.management_state != "legacy_unmanaged" {
             return Err(SecurityError::InvalidCredential);
         }
-        authenticate_session_client(&client, request.client_secret, "authorization_code", budget)
-            .await?;
+        authenticate_session_client(&client, request.client_secret, "authorization_code").await?;
+        txn.renew_budget()?;
         let binding = txn
             .session_client(&config.issuer, &client.client_id)
             .await?
@@ -953,7 +947,6 @@ pub(crate) async fn authenticate_session_client(
     client: &crate::entity::oauth_client::Model,
     secret: Option<&SecretToken>,
     grant: &str,
-    budget: &SecurityBudget,
 ) -> Result<(), SecurityError> {
     use crate::service::oidc::OidcService;
     if !grant.is_empty() && !OidcService::client_allows_grant_type(client, grant) {
@@ -972,17 +965,24 @@ pub(crate) async fn authenticate_session_client(
             .expose_secret()
             .to_owned();
         let hash = client.client_secret_hash.clone();
-        let valid = budget
-            .run(tokio::task::spawn_blocking(move || {
-                bcrypt::verify(secret, &hash).unwrap_or(false)
-            }))
-            .await?
-            .map_err(|_| SecurityError::DependencyUnavailable)?;
+        // Client-secret verification is CPU-bound and must not consume the
+        // database deadline. The caller renews the transaction budget after
+        // this returns.
+        let valid = crate::service::identity::password::verify(secret, hash)
+            .await
+            .map_err(|error| match error {
+                crate::domain::identity::error::IdentityError::DeadlineExceeded => {
+                    SecurityError::DeadlineExceeded
+                }
+                crate::domain::identity::error::IdentityError::CapacityExceeded => {
+                    SecurityError::CapacityExceeded
+                }
+                _ => SecurityError::DependencyUnavailable,
+            })?;
         if !valid {
             return Err(SecurityError::InvalidCredential);
         }
     }
-    budget.remaining()?;
     Ok(())
 }
 fn expiry(at: u64, ttl: u64) -> Result<u64, SecurityError> {

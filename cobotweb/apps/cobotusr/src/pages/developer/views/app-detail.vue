@@ -13,11 +13,11 @@ import {
     getReaders,
     changeReader,
     getApproval,
-    getCandidates,
+    searchCandidates,
     getAppDeliveries,
     getProviderMetadata,
 } from '../api'
-import { getAssignments, setAssignment, setTestUser } from '@/pages/admin/api'
+import { getAssignments, searchAccounts, searchGroups, setAssignment, setTestUser } from '@/pages/admin/api'
 import type { Environment, EnvironmentConfig, Reader } from '../api/type'
 import { validateEnvironmentConfig } from '../api/validation'
 import PageHeader from '@/components/workspace/page-header.vue'
@@ -25,6 +25,9 @@ import DataState from '@/components/workspace/data-state.vue'
 import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiFormField from '@/components/ui/form-field/form-field.vue'
+import EntityPicker from '@/components/ui/entity-picker/entity-picker.vue'
+import type { PickerOption } from '@/components/ui/entity-picker/types'
+import { accountOption, groupOption } from '@/lib/picker-options'
 import ConfigEditor from '../components/config-editor.vue'
 import { emitToast } from '@/utils/toast'
 import { showModal } from '@/utils/modal'
@@ -48,6 +51,8 @@ const selected = ref(''),
     config = ref<EnvironmentConfig>(),
     metadata = reactive({ name: '', description: '' }),
     candidate = ref(0),
+    candidateLabel = ref(''),
+    candidateSecondary = ref(''),
     reason = ref(''),
     limitation = ref(false)
 const env = computed(() =>
@@ -79,26 +84,21 @@ const deliveries = useCursorPage(
     (after, signal) => getAppDeliveries(administrator.value, id.value, selected.value, signal, after),
     () => context.active.value && !!selected.value,
 )
-const candidates = useAsyncQuery({
-    key: 'developer-candidates',
-    active: () => context.active.value && !administrator.value && isOwner.value,
-    loader: (signal) => getCandidates(signal),
-})
-const extraCandidates = ref<{ user_id: number; username: string; nickname: string }[]>([]),
-    candidateCursor = ref<number | null>(null),
-    candidateBusy = ref(false)
-const candidatePeople = computed(() => [
-    ...(candidates.data.value?.items ?? []),
-    ...extraCandidates.value,
-])
-const candidateNext = computed(() => candidateCursor.value ?? candidates.data.value?.next ?? null)
-watch(
-    () => candidates.data.value,
-    () => {
-        extraCandidates.value = []
-        candidateCursor.value = null
-    },
-)
+const loadCandidateOptions = async (
+    query: string,
+    signal: AbortSignal,
+): Promise<PickerOption[]> => {
+    if (administrator.value) {
+        const page = await searchAccounts(query, signal)
+        return page.items.map(accountOption)
+    }
+    const page = await searchCandidates(query, signal)
+    return page.items.map((person) => ({
+        value: person.user_id,
+        label: person.nickname || person.username,
+        secondary: `@${person.username} · #${person.user_id}`,
+    }))
+}
 const deliveryStatusNames: Record<string, string> = {
     pending: '等待发送',
     leased: '发送处理中',
@@ -106,18 +106,6 @@ const deliveryStatusNames: Record<string, string> = {
     delivered: '已送达',
     permanent_failure: '发送失败',
     expired: '已超过期限',
-}
-async function loadMoreCandidates() {
-    const next = candidateNext.value
-    if (next == null || candidateBusy.value) return
-    candidateBusy.value = true
-    try {
-        const page = await getCandidates(undefined, next)
-        extraCandidates.value.push(...page.items)
-        candidateCursor.value = page.next
-    } finally {
-        candidateBusy.value = false
-    }
 }
 const assignments = useAsyncQuery({
     key: () => `assignments:${id.value}`,
@@ -135,8 +123,77 @@ const mutation = useAsyncMutation(),
     operationKey = useOperationKey(),
     secret = useEphemeralResult<{ label: string; value: string }>(),
     shownSecret = secret.value
-const assignment = reactive({ kind: 'user' as 'user' | 'group', target: '', present: true }),
-    testUser = ref(0)
+const assignment = reactive({
+        kind: 'user' as 'user' | 'group',
+        target: '' as string | number,
+        targetLabel: '',
+        targetSecondary: '',
+        present: true,
+    }),
+    testUser = ref<number | ''>(''),
+    testUserLabel = ref(''),
+    testUserSecondary = ref('')
+const ownerMember = computed(() =>
+    data.value?.members.find((member) => member.user_id === data.value?.owner_user_id),
+)
+const ownerName = computed(
+    () =>
+        ownerMember.value?.nickname ||
+        ownerMember.value?.username ||
+        `账户 ${data.value?.owner_user_id ?? ''}`,
+)
+function memberName(member: { user_id: number; username?: string; nickname?: string }) {
+    return member.nickname || member.username || `账户 ${member.user_id}`
+}
+function chooseCandidate(option: PickerOption) {
+    candidate.value = Number(option.value)
+    candidateLabel.value = option.label
+    candidateSecondary.value = option.secondary ?? ''
+}
+function clearCandidate() {
+    candidate.value = 0
+    candidateLabel.value = ''
+    candidateSecondary.value = ''
+}
+const loadAssignmentOptions = async (
+    query: string,
+    signal: AbortSignal,
+): Promise<PickerOption[]> => {
+    if (assignment.kind === 'group') {
+        const page = await searchGroups(query, signal)
+        return page.items.map(groupOption)
+    }
+    const page = await searchAccounts(query, signal)
+    return page.items.map(accountOption)
+}
+const loadAccountOptionsForTest = async (
+    query: string,
+    signal: AbortSignal,
+): Promise<PickerOption[]> => {
+    const page = await searchAccounts(query, signal)
+    return page.items.map(accountOption)
+}
+function chooseAssignmentTarget(option: PickerOption) {
+    assignment.target = assignment.kind === 'group' ? String(option.value) : Number(option.value)
+    assignment.targetLabel = option.label
+    assignment.targetSecondary = option.secondary ?? ''
+}
+function clearAssignmentTarget() {
+    assignment.target = ''
+    assignment.targetLabel = ''
+    assignment.targetSecondary = ''
+}
+function chooseTestUser(option: PickerOption) {
+    testUser.value = Number(option.value)
+    testUserLabel.value = option.label
+    testUserSecondary.value = option.secondary ?? ''
+}
+function clearTestUser() {
+    testUser.value = ''
+    testUserLabel.value = ''
+    testUserSecondary.value = ''
+}
+watch(() => assignment.kind, clearAssignmentTarget)
 const fieldLabels: Record<keyof EnvironmentConfig, string> = {
     client_kind: '客户端类型',
     redirect_uris: '登录回调',
@@ -276,10 +333,10 @@ async function readerChange(reader: Reader | null, reset: boolean) {
     )
 }
 async function assign() {
-    if (!data.value || !assignment.target.trim()) return
+    if (!data.value || assignment.target === '') return
     const target = {
         kind: assignment.kind,
-        id: assignment.kind === 'user' ? Number(assignment.target) : assignment.target.trim(),
+        id: assignment.kind === 'user' ? Number(assignment.target) : String(assignment.target),
     }
     const body = { target, present: assignment.present, revision: data.value.revision }
     await mutation.run(
@@ -287,6 +344,7 @@ async function assign() {
         async () => {
             await state.refresh()
             await assignments.refresh()
+            clearAssignmentTarget()
         },
     )
 }
@@ -295,12 +353,12 @@ async function test(present: boolean) {
     const body = {
         id: id.value,
         env: selected.value,
-        user: testUser.value,
+        user: Number(testUser.value),
         present,
         revision: data.value.revision,
     }
     await mutation.run(
-        () => setTestUser(id.value, selected.value, testUser.value, present, data.value!.revision, operationKey(body)),
+        () => setTestUser(id.value, selected.value, Number(testUser.value), present, data.value!.revision, operationKey(body)),
         () => state.refresh(),
     )
 }
@@ -400,34 +458,36 @@ const envStatus = computed(() => {
                             <div class="surface-body space-y-4 border-t border-border">
                                 <div class="flex flex-wrap items-center justify-between gap-3">
                                     <div>
-                                        <p class="text-xs font-semibold">负责人账户 {{ data.owner_user_id }}</p>
+                                        <p class="text-xs font-semibold">负责人 {{ ownerName }}</p>
+                                        <p class="mt-1 text-[10.5px] text-muted-foreground">负责人账户 {{ data.owner_user_id }}</p>
                                         <p class="mt-1 text-[11px] text-muted-foreground">{{ data.management_mode === 'admin_configured' ? '管理员直接配置' : '开发者维护' }}</p>
                                     </div>
                                     <span class="status-badge" :class="data.active ? 'status-success' : 'status-muted'">{{ data.active ? '应用启用中' : '应用已停用' }}</span>
                                 </div>
                                 <div v-if="isOwner" class="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-muted/25 p-3">
-                                    <UiFormField id="detail-candidate" label="候选账户" class="min-w-[180px] flex-1">
-                                        <select v-if="!administrator" id="detail-candidate" v-model.number="candidate" class="ui-select">
-                                            <option :value="0">选择已授权候选</option>
-                                            <option v-for="person in candidatePeople" :key="person.user_id" :value="person.user_id">{{ person.nickname || person.username }}（{{ person.user_id }}）</option>
-                                        </select>
-                                        <UiInput
-                                            v-else
+                                    <UiFormField id="detail-candidate" label="交接或添加维护者" class="min-w-[220px] flex-1" hint="按显示名称、用户名或账户 ID 搜索。">
+                                        <EntityPicker
                                             id="detail-candidate"
-                                            :model-value="candidate || ''"
-                                            type="number"
-                                            min="1"
-                                            @update:model-value="candidate = Number($event) || 0"
+                                            :model-value="candidate || null"
+                                            :selected-label="candidateLabel"
+                                            :selected-secondary="candidateSecondary"
+                                            :load="loadCandidateOptions"
+                                            placeholder="搜索账户名称或用户名…"
+                                            :disabled="pending"
+                                            @update:model-value="(value) => { if (value === null) clearCandidate() }"
+                                            @select="chooseCandidate"
                                         />
                                     </UiFormField>
-                                    <UiButton v-if="!administrator && candidateNext" variant="ghost" :disabled="candidateBusy" @click="loadMoreCandidates">加载更多候选账户</UiButton>
                                     <UiButton variant="outline" :disabled="pending || !candidate" @click="update('/owner', 'PATCH', { user_id: Number(candidate), expected_revision: data.revision })">交接负责人</UiButton>
                                     <UiButton v-if="!administrator" variant="outline" :disabled="pending || !candidate" @click="update(`/members/${Number(candidate)}`, 'PATCH', { present: true, expected_revision: data.revision })">添加维护者</UiButton>
                                 </div>
-                                <p v-if="candidates.error.value" class="form-alert">{{ candidates.error.value }}</p>
                                 <div class="space-y-2">
                                     <div v-for="member in data.members" :key="member.user_id" class="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs">
-                                        <span>账户 {{ member.user_id }} · {{ member.member_role === 'owner' ? '负责人' : '维护者' }}</span>
+                                        <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-secondary text-[10px] font-semibold">{{ memberName(member).slice(0, 1).toUpperCase() }}</span>
+                                        <span class="min-w-0 flex-1">
+                                            <span class="block font-medium">{{ memberName(member) }}</span>
+                                            <span class="mt-0.5 block text-[10.5px] text-muted-foreground">账户 {{ member.user_id }} · {{ member.member_role === 'owner' ? '负责人' : '维护者' }}<template v-if="member.username"> · @{{ member.username }}</template></span>
+                                        </span>
                                         <UiButton v-if="!administrator && isOwner && member.member_role !== 'owner'" variant="ghost" size="sm" class="ml-auto" :disabled="pending" @click="update(`/members/${member.user_id}`, 'PATCH', { present: false, expected_revision: data.revision })">移除维护者</UiButton>
                                     </div>
                                 </div>
@@ -614,22 +674,45 @@ const envStatus = computed(() => {
                             <div class="surface-body space-y-4">
                                 <p v-if="assignments.error.value" class="inline-error">{{ assignments.error.value }}</p>
                                 <div class="flex flex-wrap gap-1.5">
-                                    <span v-for="target in assignments.data.value" :key="target.kind + ':' + target.id" class="status-badge status-brand">{{ target.kind === 'user' ? '账户' : '用户组' }} {{ target.id }}</span>
+                                    <span v-for="entry in assignments.data.value" :key="entry.target.kind + ':' + entry.target.id" class="flex max-w-full flex-col rounded-lg border border-border bg-muted/30 px-2.5 py-1.5">
+                                        <span class="truncate text-[11px] font-semibold">{{ entry.label }}</span>
+                                        <span class="truncate text-[9.5px] text-muted-foreground">{{ entry.secondary }}</span>
+                                    </span>
                                     <span v-if="!assignments.data.value?.length" class="text-[11px] text-muted-foreground">尚未明确分配</span>
                                 </div>
                                 <form class="flex flex-wrap items-end gap-3" @submit.prevent="assign">
                                     <UiFormField id="assign-kind" label="对象类型" class="w-32">
                                         <select id="assign-kind" v-model="assignment.kind" class="ui-select"><option value="user">账户</option><option value="group">用户组</option></select>
                                     </UiFormField>
-                                    <UiFormField id="assign-id" label="对象 ID" class="min-w-[160px] flex-1">
-                                        <UiInput id="assign-id" v-model="assignment.target" required placeholder="账户或用户组 ID" />
+                                    <UiFormField id="assign-id" label="搜索并选择对象" class="min-w-[220px] flex-1">
+                                        <EntityPicker
+                                            id="assign-id"
+                                            :model-value="assignment.target"
+                                            :selected-label="assignment.targetLabel"
+                                            :selected-secondary="assignment.targetSecondary"
+                                            :load="loadAssignmentOptions"
+                                            :placeholder="assignment.kind === 'group' ? '搜索用户组名称…' : '搜索账户名称或用户名…'"
+                                            :disabled="pending"
+                                            @update:model-value="(value) => { if (value === null) clearAssignmentTarget() }"
+                                            @select="chooseAssignmentTarget"
+                                        />
                                     </UiFormField>
                                     <label class="checkbox-field mb-2"><input v-model="assignment.present" type="checkbox" /><span>授予访问（取消为移除）</span></label>
                                     <UiButton type="submit" :disabled="pending" :loading="pending">更新明确分配</UiButton>
                                 </form>
                                 <div v-if="env?.kind === 'development'" class="flex flex-wrap items-end gap-3 border-t border-border pt-4">
-                                    <UiFormField id="test-user" label="开发测试账户 ID" class="w-40">
-                                        <UiInput id="test-user" v-model.number="testUser" type="number" min="1" />
+                                    <UiFormField id="test-user" label="开发测试账户" class="min-w-[220px] flex-1">
+                                        <EntityPicker
+                                            id="test-user"
+                                            :model-value="testUser"
+                                            :selected-label="testUserLabel"
+                                            :selected-secondary="testUserSecondary"
+                                            :load="loadAccountOptionsForTest"
+                                            placeholder="搜索测试账户名称或用户名…"
+                                            :disabled="pending"
+                                            @update:model-value="(value) => { if (value === null) clearTestUser() }"
+                                            @select="chooseTestUser"
+                                        />
                                     </UiFormField>
                                     <UiButton :disabled="pending || !testUser" :loading="pending" @click="test(true)">添加测试访问</UiButton>
                                     <UiButton variant="outline" :disabled="pending || !testUser" @click="test(false)">移除测试访问</UiButton>

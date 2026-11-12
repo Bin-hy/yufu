@@ -54,16 +54,8 @@ where
             Err(error) => return Err(error.into()),
         };
         let outcome = async {
-            let (client, target) = lock_client(
-                &mut tx,
-                client_id,
-                secret,
-                sync_target,
-                grant,
-                budget,
-                request_id,
-            )
-            .await?;
+            let (client, target) =
+                lock_client(&mut tx, client_id, secret, sync_target, grant, request_id).await?;
             let output = budget
                 .run(change(&tx.transaction, &client, target.as_ref()))
                 .await??;
@@ -131,7 +123,6 @@ async fn lock_client(
     secret: &SecretToken,
     sync_target: Option<&str>,
     grant: &str,
-    budget: &SecurityBudget,
     request_id: Uuid,
 ) -> Result<(oauth_client::Model, Option<application::Model>)> {
     tx.acquire_identity_scope(&IdentityLockScope::new(vec![IdentityLockKey::Policy])?)
@@ -143,7 +134,7 @@ async fn lock_client(
         .ok_or_else(|| AppError::Unauthorized("invalid client authentication".into()))?;
     // Authenticate before resolving the sync target so an unauthenticated
     // caller cannot use the response to probe which application keys exist.
-    authenticate_session_client(&initial, Some(secret), grant, budget)
+    authenticate_session_client(&initial, Some(secret), grant)
         .await
         .map_err(|error| match error {
             SecurityError::InvalidCredential => {
@@ -151,6 +142,7 @@ async fn lock_client(
             }
             error => error.into(),
         })?;
+    tx.renew_budget()?;
     let mut keys = vec![IdentityLockKey::OAuthClient(initial.id)];
     let target = if let Some(app_key) = sync_target {
         let target = tx

@@ -28,9 +28,11 @@ impl ConsoleService {
         kind: ConsoleKind,
         after: Option<&str>,
         limit: u32,
+        search: Option<&str>,
         budget: &SecurityBudget,
     ) -> Result<ConsoleResult, IdentityError> {
         validate_limit(limit)?;
+        let search = super::search::normalize_query(search)?;
         super::sso::validate_opaque(secret)?;
         let mut tx = self.repository.begin(budget).await?;
         let result = async {
@@ -97,6 +99,7 @@ impl ConsoleService {
                 ConsoleKind::Accounts => ConsoleQuery::Accounts {
                     after: integer_cursor()?,
                     limit,
+                    search,
                 },
                 ConsoleKind::Audit => ConsoleQuery::Audit {
                     after: uuid_cursor()?,

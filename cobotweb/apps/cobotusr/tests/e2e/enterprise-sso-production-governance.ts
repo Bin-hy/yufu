@@ -360,6 +360,18 @@ async function registerApplication(
   return { appId: receipt.application_id, production, productionSecret }
 }
 
+async function selectSearchOption(
+  page: Page,
+  inputSelector: string,
+  query: string,
+  value: string,
+): Promise<void> {
+  const input = page.locator(inputSelector)
+  await input.click()
+  await input.fill(query)
+  await page.locator(`.entity-picker-option[data-value="${value}"]`).first().click()
+}
+
 async function assignGroup(
   page: Page,
   cfg: SsoConfig,
@@ -369,7 +381,7 @@ async function assignGroup(
   await page.goto(cfg.opOrigin + `/admin/apps/${appId}`)
   await page.locator('#detail-environment').waitFor({ state: 'visible' })
   await page.selectOption('#assign-kind', 'group')
-  await page.locator('#assign-id').fill(groupId)
+  await selectSearchOption(page, '#assign-id', groupId, groupId)
   const present = page.getByLabel('授予访问（取消为移除）')
   if (!(await present.isChecked())) await present.check()
   const responsePromise = page.waitForResponse(

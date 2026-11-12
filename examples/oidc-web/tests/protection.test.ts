@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { tokenFingerprint, type VerifiedProtocol } from '../src/oidc.js'
+
 import {
   AuthorizationCache,
   authorizeOnlineOperation,
@@ -14,13 +16,26 @@ const ISSUER = 'https://id.example.com'
 const CLIENT_ID = 'cobotrix-web-example'
 const WALL = 1_000_000
 
+function protocol(): VerifiedProtocol {
+  return {
+    issuer: ISSUER,
+    subject: 'user-1',
+    clientId: CLIENT_ID,
+    audience: [CLIENT_ID],
+    sid: 'sid-1',
+    authTime: 1,
+    stateVerified: true,
+    nonceVerified: true,
+  }
+}
+
 function newSession(accessToken = 'access-token-1', expiresAt = WALL + 300_000) {
   const profile = new ProfileDirectory().upsert(
-    { issuer: ISSUER, subject: 'user-1', displayName: 'Alice' },
+    { issuer: ISSUER, subject: 'user-1', displayName: 'Alice', audience: [CLIENT_ID] },
     0,
   )
   const sessions = new SessionStore(() => 0)
-  return sessions.create(profile, { accessToken, expiresAt }, 'sid-1')
+  return sessions.create(profile, { accessToken, expiresAt, accessTokenFingerprint: tokenFingerprint(accessToken) }, protocol())
 }
 
 function activeResult(exp = Math.floor(WALL / 1000) + 300): IntrospectionResult {

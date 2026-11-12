@@ -6,7 +6,11 @@ import {
   assertAuthorizationResponse,
   createOidcClient,
   OidcError,
+  parseAuthorizationOptions,
   pkceChallenge,
+  tokenFingerprint,
+  toIdentityClaims,
+  toProtocolEvidence,
 } from '../src/oidc.js'
 import {
   PendingStore,
@@ -69,6 +73,27 @@ describe('authorization request', () => {
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     expect(url.searchParams.get('code_challenge')).toBe(pkceChallenge(request.codeVerifier))
     expect(url.searchParams.has('client_secret')).toBe(false)
+  })
+
+  it('forwards only whitelisted prompt and max_age values', async () => {
+    const request = await offlineClient().authorizationRequest({
+      prompt: 'login consent',
+      maxAge: 0,
+    })
+    const url = new URL(request.url)
+
+    expect(url.searchParams.get('prompt')).toBe('login consent')
+    expect(url.searchParams.get('max_age')).toBe('0')
+    expect(url.searchParams.get('nonce')).toBe(request.nonce)
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256')
+  })
+
+  it('rejects unsupported prompt and max_age values', () => {
+    expect(() => parseAuthorizationOptions('none login', undefined)).toThrow(OidcError)
+    expect(() => parseAuthorizationOptions('login', '-1')).toThrow(OidcError)
+    expect(() => parseAuthorizationOptions('login', '4294967296')).toThrow(OidcError)
+    expect(parseAuthorizationOptions(undefined, undefined)).toEqual({})
+    expect(parseAuthorizationOptions('none', '0')).toEqual({ prompt: 'none', maxAge: 0 })
   })
 
   it('generates a fresh state and nonce for every attempt', async () => {
@@ -138,15 +163,30 @@ describe('local profile and session', () => {
   it('keys the local profile by (iss, sub)', () => {
     const profiles = new ProfileDirectory()
     const first = profiles.upsert(
-      { issuer: 'https://a.example', subject: 'user-1', displayName: 'Alice' },
+      {
+        issuer: 'https://a.example',
+        subject: 'user-1',
+        displayName: 'Alice',
+        audience: [config.clientId],
+      },
       1_000,
     )
     profiles.upsert(
-      { issuer: 'https://b.example', subject: 'user-1', displayName: 'Alice B' },
+      {
+        issuer: 'https://b.example',
+        subject: 'user-1',
+        displayName: 'Alice B',
+        audience: [config.clientId],
+      },
       1_100,
     )
     const again = profiles.upsert(
-      { issuer: 'https://a.example', subject: 'user-1', displayName: 'Alice A' },
+      {
+        issuer: 'https://a.example',
+        subject: 'user-1',
+        displayName: 'Alice A',
+        audience: [config.clientId],
+      },
       1_200,
     )
 
@@ -156,16 +196,65 @@ describe('local profile and session', () => {
     expect(again.displayName).toBe('Alice A')
   })
 
+  it('keeps validated protocol evidence non-secret', () => {
+    const claims = toIdentityClaims({
+      iss: config.issuer,
+      sub: 'user-1',
+      aud: [config.clientId, 'other-client'],
+      iat: 100,
+      exp: 200,
+      nonce: 'request-nonce',
+      auth_time: 90,
+      sid: 'sid-1',
+      preferred_username: 'alice',
+    } as Parameters<typeof toIdentityClaims>[0])
+    const evidence = toProtocolEvidence(claims, config.clientId)
+
+    expect(evidence).toEqual({
+      issuer: config.issuer,
+      subject: 'user-1',
+      clientId: config.clientId,
+      audience: [config.clientId, 'other-client'],
+      sid: 'sid-1',
+      authTime: 90,
+      stateVerified: true,
+      nonceVerified: true,
+    })
+    expect(JSON.stringify(evidence)).not.toContain('request-nonce')
+    expect(tokenFingerprint('access-token')).toMatch(/^sha256:[0-9a-f]{16}$/)
+    expect(tokenFingerprint('access-token')).not.toContain('access-token')
+    expect(tokenFingerprint('access-token')).not.toBe(tokenFingerprint('other-token'))
+  })
+
   it('refreshes a local session at most once at a time', async () => {
     const sessions = new SessionStore(() => 1_000)
     const profile = new ProfileDirectory().upsert(
-      { issuer: 'https://id.example.com', subject: 'user-1', displayName: 'Alice' },
+      {
+        issuer: 'https://id.example.com',
+        subject: 'user-1',
+        displayName: 'Alice',
+        audience: [config.clientId],
+      },
       1_000,
     )
     const session = sessions.create(
       profile,
-      { accessToken: 'old-access', refreshToken: 'old-refresh', expiresAt: 2_000 },
-      'sid-1',
+      {
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        expiresAt: 2_000,
+        accessTokenFingerprint: tokenFingerprint('old-access'),
+      },
+      toProtocolEvidence(
+        {
+          issuer: 'https://id.example.com',
+          subject: 'user-1',
+          displayName: 'Alice',
+          sid: 'sid-1',
+          audience: [config.clientId],
+        },
+        config.clientId,
+      ),
     )
 
     let release: (() => void) | undefined
@@ -174,7 +263,12 @@ describe('local profile and session', () => {
     })
     const refresher = vi.fn(async () => {
       await gate
-      return { accessToken: 'new-access', refreshToken: 'new-refresh', expiresAt: 9_000 }
+      return {
+        accessToken: 'new-access',
+        refreshToken: 'new-refresh',
+        expiresAt: 9_000,
+        accessTokenFingerprint: tokenFingerprint('new-access'),
+      }
     })
 
     const first = sessions.refresh(session.id, refresher)
@@ -191,12 +285,28 @@ describe('local profile and session', () => {
   it('removes local sessions by central session id', () => {
     const sessions = new SessionStore()
     const profile = new ProfileDirectory().upsert(
-      { issuer: 'https://id.example.com', subject: 'user-1', displayName: 'Alice' },
+      {
+        issuer: 'https://id.example.com',
+        subject: 'user-1',
+        displayName: 'Alice',
+        audience: [config.clientId],
+      },
       1_000,
     )
-    const tokens = { accessToken: 'a', expiresAt: 9_000 }
-    const kept = sessions.create(profile, tokens, 'sid-1')
-    const dropped = sessions.create(profile, tokens, 'sid-2')
+    const tokens = { accessToken: 'a', expiresAt: 9_000, accessTokenFingerprint: 'sha256:a' }
+    const protocol = (sid: string) =>
+      toProtocolEvidence(
+        {
+          issuer: 'https://id.example.com',
+          subject: 'user-1',
+          displayName: 'Alice',
+          sid,
+          audience: [config.clientId],
+        },
+        config.clientId,
+      )
+    const kept = sessions.create(profile, tokens, protocol('sid-1'))
+    const dropped = sessions.create(profile, tokens, protocol('sid-2'))
 
     expect(sessions.deleteBySid('sid-2')).toBe(1)
     expect(sessions.get(kept.id)).toBeDefined()

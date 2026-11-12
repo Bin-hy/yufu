@@ -183,7 +183,11 @@ impl IdentityFixture {
             base_url,
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
-                .timeout(std::time::Duration::from_secs(5))
+                // bcrypt cost 12 can take several seconds per hash on a slow
+                // or loaded host. Password hashing has its own 10s CPU
+                // allowance, so the test client must not impose a shorter
+                // deadline than the server's own budget.
+                .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .unwrap(),
             signer,

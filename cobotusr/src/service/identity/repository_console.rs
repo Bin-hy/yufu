@@ -14,8 +14,16 @@ impl PgSecurityTransaction {
         query: ConsoleQuery,
     ) -> Result<ConsoleResult, IdentityError> {
         match query {
-            ConsoleQuery::Accounts { after, limit } => {
-                let rows=self.identity_rows("SELECT id,username,nickname,enabled,person_kind,developer_enabled,identity_revision FROM \"user\" WHERE id>$1 ORDER BY id LIMIT $2",vec![after.into(),i64::from(limit+1).into()]).await?;
+            ConsoleQuery::Accounts {
+                after,
+                limit,
+                search,
+            } => {
+                let pattern = search.clone();
+                let exact_id = search
+                    .as_deref()
+                    .and_then(|value| value.parse::<i32>().ok());
+                let rows=self.identity_rows("SELECT id,username,nickname,enabled,person_kind,developer_enabled,identity_revision FROM \"user\" u WHERE id>$1 AND ($3::text IS NULL OR u.id=$4 OR POSITION(lower($3) IN lower(u.username))>0 OR POSITION(lower($3) IN lower(COALESCE(u.nickname,'')))>0) ORDER BY id LIMIT $2",vec![after.into(),i64::from(limit+1).into(),pattern.into(),exact_id.into()]).await?;
                 let items = rows
                     .into_iter()
                     .map(|r| {

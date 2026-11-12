@@ -144,13 +144,14 @@ impl ApplicationService {
             return registration_from_receipt(receipt, &request.request_hash);
         }
         let (development, production) = tokio::try_join!(
-            PreparedEnvironment::new(&request.development, budget),
-            PreparedEnvironment::new(&request.production, budget)
+            PreparedEnvironment::new(&request.development),
+            PreparedEnvironment::new(&request.production)
         )?;
         let operation_id = Uuid::new_v4();
+        let write_budget = budget.renewed()?;
         let outcome = execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &Register {
                 service: self,
                 evidence,
@@ -272,16 +273,13 @@ struct PreparedEnvironment {
     hash: Option<SecretToken>,
 }
 impl PreparedEnvironment {
-    async fn new(
-        config: &EnvironmentConfig,
-        budget: &SecurityBudget,
-    ) -> Result<Self, IdentityError> {
+    async fn new(config: &EnvironmentConfig) -> Result<Self, IdentityError> {
         let id = Uuid::new_v4();
         let entropy = config.permits_client_secret().then(rand::random);
         let secret = entropy.map(IssuedSecret::from_entropy);
         let hash = match entropy {
             Some(value) => {
-                Some(hash_secret(&IssuedSecret::from_entropy(value).into_response(), budget).await?)
+                Some(hash_secret(&IssuedSecret::from_entropy(value).into_response()).await?)
             }
             None => None,
         };

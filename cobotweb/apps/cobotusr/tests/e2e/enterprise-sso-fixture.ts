@@ -593,7 +593,19 @@ export async function awaitConsentIfShown(page: Page, cfg: SsoConfig): Promise<v
     }
     await page.waitForTimeout(100)
   }
-  throw new Error(`SSO did not reach consent or a signed-in application; current URL: ${page.url()}`)
+  const body = await page
+    .locator('body')
+    .innerText()
+    .catch(() => '<unavailable>')
+  const cookies = await page
+    .context()
+    .cookies(page.url())
+    .catch(() => [])
+  throw new Error(
+    `SSO did not reach consent or a signed-in application; current URL: ${page.url()}; ` +
+      `cookies: ${cookies.map((cookie) => cookie.name).join(',') || '(none)'}; ` +
+      `body: ${body.replace(/\s+/g, ' ').slice(0, 400)}`,
+  )
 }
 
 export async function loginAtCenter(page: Page, cfg: SsoConfig): Promise<void> {

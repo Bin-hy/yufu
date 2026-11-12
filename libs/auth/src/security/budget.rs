@@ -108,6 +108,29 @@ impl SecurityBudget {
         })
     }
 
+    /// Restart this budget's original duration after a separately bounded CPU
+    /// step. A child budget keeps the duration it was granted, so a remote
+    /// remaining-budget header is never widened to the local maximum.
+    pub fn renewed(&self) -> Result<Self, SecurityError> {
+        let now = healthy_reading(self.clock.as_ref())?;
+        let duration = self
+            .deadline
+            .checked_sub(self.started_at)
+            .ok_or(SecurityError::DeadlineExceeded)?
+            .min(MAX_SECURITY_BUDGET);
+        if duration.is_zero() {
+            return Err(SecurityError::DeadlineExceeded);
+        }
+        Ok(Self {
+            clock: self.clock.clone(),
+            started_at: now.monotonic,
+            deadline: now
+                .monotonic
+                .checked_add(duration)
+                .ok_or(SecurityError::DeadlineExceeded)?,
+        })
+    }
+
     /// Bound a security dependency wait, not the physical device operation itself.
     pub async fn run<F: Future>(&self, future: F) -> Result<F::Output, SecurityError> {
         let left = self.remaining()?;
@@ -172,6 +195,18 @@ pub(crate) mod tests {
             parent.remaining(),
             Err(SecurityError::DependencyUnavailable)
         );
+    }
+
+    #[test]
+    fn security_t05_renewed_child_keeps_its_granted_duration() {
+        let clock = Arc::new(ManualClock::new());
+        let parent = SecurityBudget::new(clock.clone()).unwrap();
+        let child = parent.child(Duration::from_millis(100)).unwrap();
+        clock.advance(50);
+        let renewed = child.renewed().unwrap();
+        assert_eq!(renewed.remaining().unwrap(), Duration::from_millis(100));
+        clock.advance(100);
+        assert_eq!(renewed.remaining(), Err(SecurityError::DeadlineExceeded));
     }
 
     #[test]

@@ -240,6 +240,48 @@ async fn identity_application_admin_and_assignment_http_require_center_csrf_and_
     let app = first["application_id"].as_i64().unwrap();
     let assigned=f.client.patch(format!("{}/api/v1/admin/apps/{app}/assignments",f.base_url)).header("cookie",cookies.header()).header("origin",&f.base_url).header("x-csrf-token",&csrf).header("idempotency-key","http-group-assign").json(&serde_json::json!({"target":{"kind":"group","id":id},"present":true,"expected_revision":1})).send().await.unwrap();
     assert_eq!(assigned.status(), 200);
+    let groups = f
+        .client
+        .get(format!("{}/api/v1/admin/groups?q=HTTP", f.base_url))
+        .header("cookie", cookies.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(groups.status(), 200);
+    let groups: serde_json::Value = groups.json().await.unwrap();
+    assert_eq!(groups["items"].as_array().unwrap().len(), 1);
+    assert_eq!(groups["items"][0]["name"], "HTTP group");
+    assert_eq!(groups["items"][0]["member_profiles"][0]["user_id"], owner);
+    let group_by_id = f
+        .client
+        .get(format!("{}/api/v1/admin/groups?q={id}", f.base_url))
+        .header("cookie", cookies.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(group_by_id.status(), 200);
+    let group_by_id: serde_json::Value = group_by_id.json().await.unwrap();
+    assert_eq!(group_by_id["items"].as_array().unwrap().len(), 1);
+    assert_eq!(group_by_id["items"][0]["group_id"], id);
+    let assignments = f
+        .client
+        .get(format!(
+            "{}/api/v1/admin/apps/{app}/assignments",
+            f.base_url
+        ))
+        .header("cookie", cookies.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(assignments.status(), 200);
+    let assignments: serde_json::Value = assignments.json().await.unwrap();
+    let items = assignments.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    let group_entry = items
+        .iter()
+        .find(|item| item["label"] == "HTTP group")
+        .unwrap();
+    assert!(group_entry["secondary"].as_str().unwrap().contains(id));
     let missing=f.client.patch(format!("{}/api/v1/admin/apps/{app}/assignments",f.base_url)).header("cookie",cookies.header()).header("origin",&f.base_url).header("idempotency-key","missing-csrf").json(&serde_json::json!({"target":{"kind":"user","id":owner},"present":false,"expected_revision":2})).send().await.unwrap();
     assert_eq!(missing.status(), 403);
     f.close().await;

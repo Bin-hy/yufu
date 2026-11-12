@@ -37,12 +37,13 @@ impl ApplicationService {
             return registration_from_receipt(receipt, &request.application.request_hash);
         }
         let (development, production) = tokio::try_join!(
-            PreparedEnvironment::new(&request.application.development, budget),
-            PreparedEnvironment::new(&request.application.production, budget)
+            PreparedEnvironment::new(&request.application.development),
+            PreparedEnvironment::new(&request.application.production)
         )?;
+        let write_budget = budget.renewed()?;
         let outcome = execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &Register {
                 service: self,
                 evidence,

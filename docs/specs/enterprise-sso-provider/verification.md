@@ -448,4 +448,48 @@ cargo test -p cobotrix-root --features webui --test mod identity_browser_cross_s
 | `pnpm --filter @cobotweb/cobotusr lint` | 通过 |
 | `pnpm build:cobotusr` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
 
-C70 已勾选。C71 开始的 E4 仍待按 checklist 逐项取证。
+C70 已勾选。
+
+## E4 跨站 SSO 与协议投影（C71，2026-11-11）
+
+C71 要求用户从 Web A 发起授权、接受邀请并完成标准回调，再在不同站点的新标签进入 SPA B；两个应用映射同一身份而使用独立 token/sid，刷新、并发、清标签 token 后恢复以及 `prompt`/`max_age`/`none` 均符合要求。本轮不修改中心 Provider 协议，只补齐两个标准客户端的可观测投影与真实浏览器证据：新增 `cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-cross-site-protocol.spec.ts` 与共享场景 `enterprise-sso-cross-site-protocol.ts`，并把该场景接入外部 WebKit 1.61 脚本。
+
+Web A（`examples/oidc-web`）新增 `AuthorizationPrompt`/`AuthorizationRequestOptions`，`/login` 只接受白名单 `prompt`（`none`、`login`、`consent`、`login consent`）与非负整数 `max_age`，其他取值直接 400，不做通用参数转发；`VerifiedProtocol` 保存经 state/nonce/PKCE 校验后的 `iss`、`sub`、`client_id`、`aud`、`sid`、`auth_time`，页面与 `/api/me` 只投影这些非秘密 claim 和访问令牌的截断 SHA-256 指纹。SPA B（`examples/oidc-spa`）在内存投影中增加同类字段，首次回调要求 nonce 回显，刷新响应没有 nonce 时标记 `nonceVerified=false`；`filterProtocolClaims: false` 仅用于保留已验证的非秘密协议 claim，页面投影仍不包含 `idToken`/`refreshToken`，单测继续断言 SPA 不保存这两个凭据。
+
+```text
+cargo test -p cobotrix-root --features webui identity_browser_cross_site_three_engines_login_sso_and_logout -- --test-threads=1 --nocapture
+```
+
+结果：退出码 0。Playwright 18 项通过（Chromium、Firefox 各 9 项，2.4 分钟），外部 WebKit 1.61 的准入、C68、C69、C70、E4 跨站协议、跨客户端 SSO、本地/中心退出与后通道投递全部通过；Rust 验收 1 项通过，总计 224.30 秒。三引擎 E4 脱敏证据一致：
+
+| 引擎 | 共享身份 | 独立 client | 独立 sid | 独立访问令牌 | `prompt=none`（匿名/已登录） | `prompt=login` | `prompt=consent` | `max_age=0` | profile 修改后主体 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Chromium | `https://127.0.0.1:62456` / `sub=1` | `web-a-dev`、`spa-b-dev` | true | true | `login_required` / 直接恢复 | 重新认证 | 重新展示同意 | 重新认证 | 保持 `iss/sub` |
+| Firefox | 同上 | 同上 | true | true | 同上 | 重新认证 | 重新展示同意 | 重新认证 | 保持 `iss/sub` |
+| WebKit 1.61 | 同上 | 同上 | true | true | 同上 | 重新认证 | 重新展示同意 | 重新认证 | 保持 `iss/sub` |
+
+断言覆盖：
+
+- 两个首次授权流都在中心登录前发起；登录 Web A 后，SPA B 在同一浏览器 context 的新标签直接完成 SSO，不再输入密码。
+- 两个应用得到相同 `iss/sub`，但 `client_id`、`aud`、`sid` 与访问令牌指纹均不同；`state-validated`、`nonce-validated` 均为 true。
+- Web A 使用服务端 `cobotrix_session` Cookie 且 `sessionStorage` 为空；SPA B 使用 tab 级 `sessionStorage`，没有应用会话 Cookie。
+- 关闭 SPA 标签后新开标签可经中心 Cookie 恢复；清空 SPA `sessionStorage` 后重新登录同样恢复，且不丢失企业会话。
+- 匿名 `prompt=none` 返回 `login_required` 而不是登录表单；已登录 `prompt=none` 直接恢复。`prompt=consent` 重新展示同意页；`prompt=login` 与 `max_age=0` 都产生新的 `sid` 和新的访问令牌指纹。
+- 中心 profile 修改后再次授权，`iss/sub` 保持不变。
+- 页面只展示非秘密协议投影与 `sha256:` 前缀的 16 位十六进制指纹，不展示完整 token、code 或 secret。
+
+测试 fixture 使用固定的 `SecurityTestClock`，`auth_time` 不随真实时间推进，因此重新认证以 `sid` 和访问令牌指纹变化为证据，不断言 `auth_time` 增大。
+
+当前源码下的补充门禁：
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `pnpm --filter @cobotrix/oidc-web test` | 4 个文件、59 项通过 |
+| `pnpm --filter @cobotrix/oidc-spa test` | 4 个文件、62 项通过 |
+| `pnpm --filter @cobotweb/cobotusr test` | 11 个文件、92 项通过 |
+| `pnpm build:cobotusr` | 通过；仅提示 Browserslist 数据 6 个月未更新 |
+| `cargo fmt --all -- --check` | 通过 |
+| `cargo clippy -p cobotrix-root --features webui --all-targets -- -D warnings` | 通过；仅既有 `proc-macro-error2` future-incompat 提示 |
+| `node --check cobotweb/apps/cobotusr/tests/e2e/enterprise-sso-webkit.mjs`、`git diff --check` | 均通过 |
+
+C71 已勾选。C72—C74 仍待按 checklist 逐项取证。

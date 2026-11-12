@@ -1,12 +1,26 @@
 import { ref } from 'vue'
 import { sessionEpoch } from '@/workspace/session'
+
+const codeMessages: Record<string, string> = {
+    deadline_exceeded: '认证服务响应超时，请稍后重试',
+    dependency_unavailable: '认证服务暂时不可用，请稍后重试',
+    capacity_exceeded: '当前请求量过大，请稍后重试',
+    commit_uncertain: '提交结果尚未确认，请刷新后核对',
+}
+
 export function errorMessage(error: unknown): string {
     const e = error as { response?: { data?: unknown }; message?: string }
-    if (typeof e?.response?.data === 'string') return e.response.data
-    if (e?.response?.data && typeof e.response.data === 'object' && 'message' in e.response.data)
-        return String(e.response.data.message)
+    const data = e?.response?.data
+    if (typeof data === 'string' && data.trim()) return data
+    if (data && typeof data === 'object') {
+        if ('message' in data && typeof data.message === 'string' && data.message.trim())
+            return data.message
+        if ('code' in data && typeof data.code === 'string' && codeMessages[data.code])
+            return codeMessages[data.code]!
+    }
     return e?.message || '操作失败，请稍后重试'
 }
+
 export function useAsyncMutation() {
     const pending = ref(false)
     const error = ref<string | null>(null)

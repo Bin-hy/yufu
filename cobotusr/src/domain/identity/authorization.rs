@@ -77,17 +77,25 @@ impl AuthorizationParameters {
                 .0
                 .get("response_mode")
                 .is_some_and(|mode| mode != "query")
-            || self.required("code_challenge_method")? != "S256"
         {
             return Err(IdentityError::InvalidInput);
         }
-        let challenge = self.required("code_challenge")?;
-        let bytes = URL_SAFE_NO_PAD
-            .decode(challenge)
-            .map_err(|_| IdentityError::InvalidInput)?;
-        if bytes.len() != 32 || URL_SAFE_NO_PAD.encode(bytes) != challenge {
-            return Err(IdentityError::InvalidInput);
-        }
+        let challenge = match (
+            self.optional("code_challenge")?,
+            self.optional("code_challenge_method")?,
+        ) {
+            (None, None) => None,
+            (Some(challenge), Some("S256")) => {
+                let bytes = URL_SAFE_NO_PAD
+                    .decode(challenge)
+                    .map_err(|_| IdentityError::InvalidInput)?;
+                if bytes.len() != 32 || URL_SAFE_NO_PAD.encode(bytes) != challenge {
+                    return Err(IdentityError::InvalidInput);
+                }
+                Some(challenge.to_owned())
+            }
+            _ => return Err(IdentityError::InvalidInput),
+        };
         let max_age = self
             .0
             .get("max_age")
@@ -105,11 +113,24 @@ impl AuthorizationParameters {
             redirect_uri: self.required("redirect_uri")?.into(),
             scopes: IdentityScopeSet::parse(self.required("scope")?)?,
             state: self.required("state")?.into(),
-            nonce: self.required("nonce")?.into(),
-            code_challenge: challenge.into(),
+            nonce: self.optional("nonce")?.map(str::to_owned),
+            code_challenge: challenge,
             prompt: Prompt::parse(self.0.get("prompt").map(String::as_str))?,
             max_age,
         })
+    }
+    fn optional(&self, field: &str) -> Result<Option<&str>, IdentityError> {
+        match self.0.get(field) {
+            None => Ok(None),
+            Some(value)
+                if value.is_empty()
+                    || value.len() > 2048
+                    || value.chars().any(char::is_control) =>
+            {
+                Err(IdentityError::InvalidInput)
+            }
+            Some(value) => Ok(Some(value)),
+        }
     }
     fn required(&self, field: &str) -> Result<&str, IdentityError> {
         self.0
@@ -126,8 +147,8 @@ pub struct AuthorizationRequest {
     pub redirect_uri: String,
     pub scopes: IdentityScopeSet,
     pub state: String,
-    pub nonce: String,
-    pub code_challenge: String,
+    pub nonce: Option<String>,
+    pub code_challenge: Option<String>,
     pub prompt: Prompt,
     pub max_age: Option<u64>,
 }
@@ -231,9 +252,28 @@ mod tests {
                 .unwrap()
                 .validate()
                 .unwrap()
-                .nonce,
-            "request-nonce"
+                .nonce
+                .as_deref(),
+            Some("request-nonce")
         );
+    }
+    #[test]
+    fn identity_protocol_request_allows_confidential_clients_without_nonce_or_pkce() {
+        let mut parameters = parameters();
+        parameters.0.remove("nonce");
+        parameters.0.remove("code_challenge");
+        parameters.0.remove("code_challenge_method");
+        let request = parameters.validate().unwrap();
+        assert!(request.nonce.is_none());
+        assert!(request.code_challenge.is_none());
+    }
+    #[test]
+    fn identity_protocol_request_requires_paired_s256_pkce_fields() {
+        for field in ["code_challenge", "code_challenge_method"] {
+            let mut parameters = parameters();
+            parameters.0.remove(field);
+            assert!(parameters.validate().is_err(), "accepted unpaired {field}");
+        }
     }
     #[test]
     fn identity_protocol_request_rejects_unsupported_and_missing_security_parameters() {
@@ -259,14 +299,7 @@ mod tests {
             parameters.0.insert(field.into(), value.into());
             assert!(parameters.validate().is_err(), "accepted {field}");
         }
-        for field in [
-            "state",
-            "nonce",
-            "code_challenge",
-            "code_challenge_method",
-            "scope",
-            "response_type",
-        ] {
+        for field in ["state", "scope", "response_type"] {
             let mut parameters = parameters();
             parameters.0.remove(field);
             assert!(parameters.validate().is_err(), "missing {field}");

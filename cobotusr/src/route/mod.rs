@@ -21,6 +21,7 @@ mod identity_migration;
 pub mod identity_status;
 pub mod identity_token;
 pub mod identity_userinfo;
+mod logout_page;
 pub mod mcp;
 pub mod oidc;
 pub mod oidc_admin;

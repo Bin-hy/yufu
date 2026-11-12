@@ -17,6 +17,8 @@ import {
   createOidcClient,
   OidcError,
   type OidcClient,
+  parseAuthorizationOptions,
+  toProtocolEvidence,
 } from './oidc.js'
 import {
   AuthorizationCache,
@@ -69,11 +71,25 @@ function cookiesOf(request: Request): Record<string, string | undefined> {
   return header ? parseCookie(header) : {}
 }
 
+function evidenceText(value: string | number | undefined): string {
+  return value === undefined || value === '' ? '—' : String(value)
+}
+
 function renderHome(session: SessionRecord | undefined, csrf: string): string {
   const body = session
     ? `<h1>Signed in</h1>
        <p data-testid="display-name">${escapeHtml(session.profile.displayName)}</p>
        <p data-testid="local-subject">${escapeHtml(session.profile.subject)}</p>
+       <section aria-label="Verified OIDC evidence">
+         <p data-testid="issuer">${escapeHtml(session.protocol.issuer)}</p>
+         <p data-testid="client-id">${escapeHtml(session.protocol.clientId)}</p>
+         <p data-testid="audience">${escapeHtml(session.protocol.audience.join(', '))}</p>
+         <p data-testid="sid">${escapeHtml(evidenceText(session.protocol.sid))}</p>
+         <p data-testid="auth-time">${escapeHtml(evidenceText(session.protocol.authTime))}</p>
+         <p data-testid="state-validated">${session.protocol.stateVerified}</p>
+         <p data-testid="nonce-validated">${session.protocol.nonceVerified}</p>
+         <p data-testid="access-token-fingerprint">${escapeHtml(session.tokens.accessTokenFingerprint)}</p>
+       </section>
        <form method="post" action="/api/operation">
          <input type="hidden" name="_csrf" value="${escapeHtml(csrf)}">
          <button type="submit">Run protected operation</button>
@@ -113,7 +129,17 @@ export function createApp(deps: WebAppDependencies): express.Express {
   })
 
   app.get('/login', async (request, response) => {
-    const authorization = await oidc.authorizationRequest()
+    const prompt = request.query.prompt
+    const maxAge = request.query.max_age
+    if (
+      (prompt !== undefined && typeof prompt !== 'string') ||
+      (maxAge !== undefined && typeof maxAge !== 'string')
+    ) {
+      response.status(400).type('html').send('<h1>Invalid login options</h1>')
+      return
+    }
+    const options = parseAuthorizationOptions(prompt, maxAge)
+    const authorization = await oidc.authorizationRequest(options)
     pending.put({
       state: authorization.state,
       nonce: authorization.nonce,
@@ -143,7 +169,11 @@ export function createApp(deps: WebAppDependencies): express.Express {
     })
 
     const profile = profiles.upsert(result.claims, now())
-    const session = sessions.create(profile, result.tokens, result.claims.sid)
+    const session = sessions.create(
+      profile,
+      result.tokens,
+      toProtocolEvidence(result.claims, config.clientId),
+    )
     response.setHeader('Set-Cookie', [
       sessionCookie(session.id, secure),
       clearCookie(PENDING_COOKIE, secure),
@@ -162,6 +192,8 @@ export function createApp(deps: WebAppDependencies): express.Express {
       subject: session.profile.subject,
       displayName: session.profile.displayName,
       email: session.profile.email,
+      protocol: session.protocol,
+      accessTokenFingerprint: session.tokens.accessTokenFingerprint,
     })
   })
 

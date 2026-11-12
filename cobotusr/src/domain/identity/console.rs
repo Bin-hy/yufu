@@ -40,6 +40,7 @@ pub enum ConsoleQuery {
     Accounts {
         after: i32,
         limit: u32,
+        search: Option<String>,
     },
     Audit {
         after: Option<Uuid>,

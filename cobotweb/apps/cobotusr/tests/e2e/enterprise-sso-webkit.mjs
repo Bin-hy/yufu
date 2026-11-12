@@ -16,6 +16,7 @@ import setup, {
   signToken,
   startGeneratedExamples,
 } from './enterprise-sso-fixture.ts'
+import { runCrossSiteProtocolScenario } from './enterprise-sso-cross-site-protocol.ts'
 import { runProductionGovernanceScenario } from './enterprise-sso-production-governance.ts'
 
 const cfg = config()
@@ -29,6 +30,13 @@ async function waitForText(locator, expected, timeout = 20_000) {
     await delay(100)
   }
   throw new Error(`expected text ${JSON.stringify(expected)}, observed ${JSON.stringify(observed)}`)
+}
+
+async function selectSearchOption(page, inputSelector, query, value) {
+  const input = page.locator(inputSelector)
+  await input.click()
+  await input.fill(query)
+  await page.locator(`.entity-picker-option[data-value="${value}"]`).first().click()
 }
 
 async function waitForTextContaining(locator, expected, timeout = 20_000) {
@@ -733,7 +741,7 @@ async function assertDeveloperOnboarding(browser) {
     await a.page.goto(cfg.opOrigin + `/developer/apps/${webReceipt.appId}`)
     const candidate = a.page.locator('#detail-candidate')
     await candidate.waitFor({ state: 'visible' })
-    await candidate.selectOption(String(b.userId))
+    await selectSearchOption(a.page, '#detail-candidate', String(b.userId), String(b.userId))
     await a.page.getByRole('button', { name: '添加维护者' }).click()
     await waitForTextContaining(
       a.page.getByText(`账户 ${b.userId} · 维护者`),
@@ -761,7 +769,7 @@ async function assertDeveloperOnboarding(browser) {
 
     await a.page.reload()
     await a.page.locator('#detail-candidate').waitFor({ state: 'visible' })
-    await a.page.locator('#detail-candidate').selectOption(String(b.userId))
+    await selectSearchOption(a.page, '#detail-candidate', String(b.userId), String(b.userId))
     await a.page.getByRole('button', { name: '交接负责人' }).click()
     await waitForTextContaining(
       a.page.getByText(`负责人账户 ${b.userId}`),
@@ -907,6 +915,7 @@ try {
   await assertEnterpriseOnboarding(browser)
   await assertDeveloperOnboarding(browser)
   await runProductionGovernanceScenario(browser, 'webkit-1.61')
+  await runCrossSiteProtocolScenario(browser, 'webkit-1.61')
   await assertLoginAndSso(browser)
   await assertLocalAndCentralLogout(browser)
   await assertBackchannelLogout(browser)

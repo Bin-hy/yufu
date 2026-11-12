@@ -2,7 +2,7 @@
 defineOptions({ name: 'AdminMigrations' })
 import { reactive, ref } from 'vue'
 import { ArrowRight, ScanSearch, ShieldCheck } from '@lucide/vue'
-import { listMigrations, scanMigrations, adoptLegacy } from '../api'
+import { listMigrations, scanMigrations, adoptLegacy, searchAccounts } from '../api'
 import type { LegacyClient, Adoption } from '../api/type'
 import { emptyConfig, type RegistrationReceipt } from '@/pages/developer/api/type'
 import { validateRegistration } from '@/pages/developer/api/validation'
@@ -17,6 +17,9 @@ import UiButton from '@/components/ui/button/button.vue'
 import UiSelect from '@/components/ui/select/select.vue'
 import UiFormField from '@/components/ui/form-field/form-field.vue'
 import ConfigEditor from '@/pages/developer/components/config-editor.vue'
+import EntityPicker from '@/components/ui/entity-picker/entity-picker.vue'
+import type { PickerOption } from '@/components/ui/entity-picker/types'
+import { accountOption } from '@/lib/picker-options'
 const list = useCursorPage('legacy-adoption', listMigrations),
     { data, status, error, refreshing } = list
 const mutation = useAsyncMutation(),
@@ -24,7 +27,47 @@ const mutation = useAsyncMutation(),
     key = useOperationKey()
 const selected = ref<LegacyClient>(),
     retained = ref<'development' | 'production'>('development'),
-    assignmentIds = ref('')
+    assignmentOptions = ref<PickerOption[]>([]),
+    assignmentPicker = ref<number | null>(null),
+    ownerLabel = ref(''),
+    ownerSecondary = ref('')
+const loadAccountOptions = async (
+    query: string,
+    signal: AbortSignal,
+): Promise<PickerOption[]> => {
+    const page = await searchAccounts(query, signal)
+    return page.items.map(accountOption)
+}
+function chooseOwner(option: PickerOption) {
+    form.owner = Number(option.value)
+    ownerLabel.value = option.label
+    ownerSecondary.value = option.secondary ?? ''
+}
+function addAssignment(option: PickerOption) {
+    const id = Number(option.value)
+    if (!assignmentOptions.value.some((entry) => Number(entry.value) === id))
+        assignmentOptions.value.push({ ...option, value: id })
+    assignmentPicker.value = null
+}
+function removeAssignment(id: number | string) {
+    assignmentOptions.value = assignmentOptions.value.filter(
+        (entry) => entry.value !== id,
+    )
+}
+async function resolveOwner(id: number) {
+    ownerLabel.value = `账户 ${id}`
+    ownerSecondary.value = '正在读取账户信息…'
+    try {
+        const page = await searchAccounts(String(id))
+        const account = page.items.find((item) => item.user_id === id)
+        if (account) {
+            ownerLabel.value = account.nickname || account.username
+            ownerSecondary.value = `@${account.username} · #${account.user_id}`
+        }
+    } catch {
+        ownerSecondary.value = ''
+    }
+}
 const form = reactive({
     app_key: '',
     name: '',
@@ -50,6 +93,8 @@ function select(client: LegacyClient) {
     form.name = client.name
     form.app_key = ''
     form.owner = client.candidate_owner_id
+    assignmentOptions.value = []
+    void resolveOwner(client.candidate_owner_id)
     form.development = emptyConfig()
     form.production = emptyConfig()
     form.development.client_kind = form.production.client_kind = client.public_client
@@ -73,11 +118,10 @@ async function adopt() {
                 production: form.production,
             },
             owner_user_id: form.owner,
-            assignments: assignmentIds.value
-                .split(',')
-                .map((value) => value.trim())
-                .filter(Boolean)
-                .map((value) => ({ kind: 'user' as const, id: Number(value) })),
+            assignments: assignmentOptions.value.map((option) => ({
+                kind: 'user' as const,
+                id: Number(option.value),
+            })),
             accept_logout_limitation: form.limitation,
         },
     }
@@ -90,6 +134,7 @@ async function adopt() {
         async (value) => {
             receipt.value = value
             selected.value = undefined
+            assignmentOptions.value = []
             await list.refresh()
             emitToast({ type: 'success', message: '历史客户端已纳入统一治理' })
         },
@@ -156,8 +201,18 @@ const canAdopt = (client: LegacyClient) =>
                     <UiFormField id="adopt-name" label="应用名称" required>
                         <UiInput id="adopt-name" v-model="form.name" required :disabled="pending" />
                     </UiFormField>
-                    <UiFormField id="adopt-owner" label="负责人账户 ID" required>
-                        <UiInput id="adopt-owner" v-model.number="form.owner" type="number" min="1" required :disabled="pending" />
+                    <UiFormField id="adopt-owner" label="负责人账户" required hint="按名称、用户名或账户 ID 搜索。">
+                        <EntityPicker
+                            id="adopt-owner"
+                            :model-value="form.owner || null"
+                            :selected-label="ownerLabel"
+                            :selected-secondary="ownerSecondary"
+                            :load="loadAccountOptions"
+                            placeholder="搜索负责人姓名或用户名…"
+                            :disabled="pending"
+                            @update:model-value="(value) => { if (value === null) { form.owner = 0; ownerLabel = ''; ownerSecondary = '' } }"
+                            @select="chooseOwner"
+                        />
                     </UiFormField>
                     <UiFormField id="adopt-retained" label="保留历史客户端的环境">
                         <UiSelect id="adopt-retained" v-model="retained" :disabled="pending">
@@ -165,8 +220,22 @@ const canAdopt = (client: LegacyClient) =>
                             <option value="production">生产环境</option>
                         </UiSelect>
                     </UiFormField>
-                    <UiFormField id="adopt-users" label="明确生产分配账户 ID" optional hint="逗号分隔，可留空">
-                        <UiInput id="adopt-users" v-model="assignmentIds" :disabled="pending" placeholder="12, 18" />
+                    <UiFormField id="adopt-users" label="明确生产分配账户" optional hint="搜索并逐个添加；留空表示暂不分配。">
+                        <EntityPicker
+                            id="adopt-users"
+                            :model-value="assignmentPicker"
+                            :load="loadAccountOptions"
+                            placeholder="搜索要分配访问的账户…"
+                            :disabled="pending"
+                            @update:model-value="(value) => { assignmentPicker = value === null ? null : Number(value) }"
+                            @select="addAssignment"
+                        />
+                        <div v-if="assignmentOptions.length" class="mt-2 flex flex-wrap gap-1.5">
+                            <span v-for="option in assignmentOptions" :key="option.value" class="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-[10.5px]">
+                                {{ option.label }}
+                                <button type="button" class="ml-0.5 text-muted-foreground hover:text-destructive" :aria-label="'移除 ' + option.label" @click="removeAssignment(option.value)">×</button>
+                            </span>
+                        </div>
                     </UiFormField>
                 </div>
                 <div class="grid gap-6 lg:grid-cols-2">

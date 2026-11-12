@@ -47,15 +47,18 @@ impl PgSecurityTransaction {
         requester: i32,
         after: i32,
         limit: u32,
+        search: Option<&str>,
     ) -> Result<Vec<CollaborationCandidate>, IdentityError> {
-        self.identity_rows("SELECT u.id,u.username,u.nickname FROM \"user\" u WHERE u.id>$2 AND u.enabled AND u.developer_enabled AND (u.id=$1 OR EXISTS (SELECT 1 FROM identity_collaboration_candidate c WHERE c.requester_user_id=$1 AND c.candidate_user_id=u.id) OR EXISTS (SELECT 1 FROM identity_app_member m JOIN identity_app_member own ON own.application_id=m.application_id AND own.user_id=$1 WHERE m.user_id=u.id)) ORDER BY u.id LIMIT $3",vec![requester.into(),after.into(),i64::from(limit).into()]).await?.into_iter().map(|row|Ok(CollaborationCandidate { user_id:get(&row,"id")?,username:get(&row,"username")?,nickname:get(&row,"nickname")? })).collect()
+        let pattern = search.map(str::to_owned);
+        let exact_id = search.and_then(|value| value.parse::<i32>().ok());
+        self.identity_rows("SELECT u.id,u.username,u.nickname FROM \"user\" u WHERE u.id>$2 AND u.enabled AND u.developer_enabled AND (u.id=$1 OR EXISTS (SELECT 1 FROM identity_collaboration_candidate c WHERE c.requester_user_id=$1 AND c.candidate_user_id=u.id) OR EXISTS (SELECT 1 FROM identity_app_member m JOIN identity_app_member own ON own.application_id=m.application_id AND own.user_id=$1 WHERE m.user_id=u.id)) AND ($4::text IS NULL OR u.id=$5 OR POSITION(lower($4) IN lower(u.username))>0 OR POSITION(lower($4) IN lower(COALESCE(u.nickname,'')))>0) ORDER BY u.id LIMIT $3",vec![requester.into(),after.into(),i64::from(limit).into(),pattern.into(),exact_id.into()]).await?.into_iter().map(|row|Ok(CollaborationCandidate { user_id:get(&row,"id")?,username:get(&row,"username")?,nickname:get(&row,"nickname")? })).collect()
     }
     pub(crate) async fn identity_application_workspace(
         &self,
         application_id: i32,
     ) -> Result<ApplicationWorkspace, IdentityError> {
         let app = self.identity_one("SELECT id,app_key,name,description,management_mode,application_kind,lifecycle,identity_revision FROM application WHERE id=$1 AND management_state='managed'", vec![application_id.into()]).await?;
-        let members = self.identity_rows("SELECT user_id,member_role FROM identity_app_member WHERE application_id=$1 ORDER BY user_id", vec![application_id.into()]).await?;
+        let members = self.identity_rows("SELECT m.user_id,m.member_role,u.username,u.nickname FROM identity_app_member m JOIN \"user\" u ON u.id=m.user_id WHERE m.application_id=$1 ORDER BY m.user_id", vec![application_id.into()]).await?;
         let mut keys = vec![IdentityLockKey::Application(application_id)];
         let mut summaries = Vec::new();
         let mut owner_id = None;
@@ -69,6 +72,8 @@ impl PgSecurityTransaction {
             summaries.push(ApplicationMemberSummary {
                 user_id,
                 member_role,
+                username: get(&member, "username")?,
+                nickname: get::<Option<String>>(&member, "nickname")?.unwrap_or_default(),
             });
         }
         for group in self.identity_rows("SELECT group_id FROM identity_app_assignment WHERE application_id=$1 AND group_id IS NOT NULL ORDER BY group_id", vec![application_id.into()]).await? {

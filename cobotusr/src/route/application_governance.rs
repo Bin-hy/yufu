@@ -112,6 +112,7 @@ struct Page {
     after: i32,
     #[serde(default = "page_size")]
     limit: u32,
+    q: Option<String>,
 }
 fn page_size() -> u32 {
     25
@@ -442,7 +443,13 @@ async fn candidates(
         let Query(page) = query.map_err(|_| IdentityError::InvalidInput)?;
         let secret = browser::read_sso_cookie(&state.config, &headers)?;
         applications(&state)?
-            .candidates(&secret, page.after, page.limit, &context.budget)
+            .candidates(
+                &secret,
+                page.after,
+                page.limit,
+                page.q.as_deref(),
+                &context.budget,
+            )
             .await
     }
     .await;

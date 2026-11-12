@@ -82,9 +82,12 @@ impl SsoService {
         budget: &SecurityBudget,
     ) -> Result<PasswordLogin, IdentityError> {
         let verified = self.verify_password(username, password, budget).await?;
+        // Bcrypt is local CPU work and may outlive the request budget under
+        // load. The write still gets a fresh, checked two-second deadline.
+        let write_budget = budget.renewed()?;
         execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &AuthenticatePassword {
                 username,
                 verified: &verified,
@@ -121,17 +124,12 @@ impl SsoService {
         ensure_enabled(&account.account)?;
         let password = password.to_owned();
         let password_hash = account.password_hash.expose_secret().to_owned();
-        let valid = budget
-            .run(tokio::task::spawn_blocking(move || {
-                bcrypt::verify(password, &password_hash)
-            }))
-            .await?
-            .map_err(|_| IdentityError::DependencyUnavailable)?
+        let valid = super::password::verify(password, password_hash)
+            .await
             .map_err(|_| IdentityError::Unauthenticated)?;
         if !valid {
             return Err(IdentityError::Unauthenticated);
         }
-        budget.remaining()?;
         Ok(account)
     }
 }

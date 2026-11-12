@@ -5,7 +5,7 @@ use super::{
 use crate::{
     config::Config,
     domain::identity::{
-        application::ConsentPolicy,
+        application::{ClientKind, ConsentPolicy},
         error::IdentityError,
         session::IdentityRevocationScope,
         token::{validate_refresh_scope, verify_s256},
@@ -324,13 +324,8 @@ impl IdentityUnitOfWork for Refresh<'_> {
         {
             return Err(IdentityError::Unauthenticated);
         }
-        authenticate_session_client(
-            &client,
-            self.request.client_secret,
-            "refresh_token",
-            self.budget,
-        )
-        .await?;
+        authenticate_session_client(&client, self.request.client_secret, "refresh_token").await?;
+        transaction.renew_budget()?;
         validate_protocol_origin(&current_target.config, &issuer, self.origin)?;
         let current = self
             .service
@@ -464,26 +459,23 @@ impl IdentityUnitOfWork for Exchange<'_> {
         {
             return Err(IdentityError::Unauthenticated);
         }
-        authenticate_session_client(
-            &client,
-            self.request.client_secret,
-            "authorization_code",
-            self.budget,
-        )
-        .await
-        .map_err(|error| match error {
-            auth::security::error::SecurityError::InvalidCredential => {
-                IdentityError::Unauthenticated
-            }
-            error => error.into(),
-        })?;
+        authenticate_session_client(&client, self.request.client_secret, "authorization_code")
+            .await
+            .map_err(|error| match error {
+                auth::security::error::SecurityError::InvalidCredential => {
+                    IdentityError::Unauthenticated
+                }
+                error => error.into(),
+            })?;
+        transaction.renew_budget()?;
         let code = transaction
             .authorization_code(self.request.code)
             .await?
             .ok_or(IdentityError::AccessDenied)?;
+        let has_pkce = !code.code_challenge.is_empty() || !code.code_challenge_method.is_empty();
         if code.used
             || code.client_id != self.request.client_id
-            || code.code_challenge_method != "S256"
+            || (has_pkce && code.code_challenge_method != "S256")
             || self.request.redirect_uri != code.redirect_uri.as_deref()
             || !self
                 .request
@@ -492,13 +484,18 @@ impl IdentityUnitOfWork for Exchange<'_> {
         {
             return Err(IdentityError::AccessDenied);
         }
-        verify_s256(
-            &code.code_challenge,
-            self.request
-                .code_verifier
-                .ok_or(IdentityError::AccessDenied)?
-                .expose_secret(),
-        )?;
+        if current_target.config.client_kind == ClientKind::BrowserSpa && !has_pkce {
+            return Err(IdentityError::AccessDenied);
+        }
+        if has_pkce {
+            verify_s256(
+                &code.code_challenge,
+                self.request
+                    .code_verifier
+                    .ok_or(IdentityError::AccessDenied)?
+                    .expose_secret(),
+            )?;
+        }
         let context = transaction.code_token_context(&code).await?;
         if context.admission.principal().issuer() != self.service.config.issuer() {
             return Err(IdentityError::AccessDenied);

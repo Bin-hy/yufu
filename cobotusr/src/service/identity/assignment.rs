@@ -204,16 +204,18 @@ impl AssignmentService {
         secret: &str,
         after: Option<Uuid>,
         limit: u32,
+        search: Option<&str>,
         budget: &SecurityBudget,
     ) -> Result<GroupPage, IdentityError> {
         if limit == 0 || limit > 50 {
             return Err(IdentityError::InvalidInput);
         }
+        let search = super::search::normalize_query(search)?;
         let mut tx = self.repository.begin(budget).await?;
         let result = async {
             self.reader(tx.as_mut(), secret, IdentityOperation::GroupRead)
                 .await?;
-            let mut ids = tx.group_ids(after, limit + 1).await?;
+            let mut ids = tx.group_ids(after, limit + 1, search.as_deref()).await?;
             let next = if ids.len() > limit as usize {
                 ids.truncate(limit as usize);
                 ids.last().copied()
@@ -249,13 +251,13 @@ impl AssignmentService {
         secret: &str,
         app: i32,
         budget: &SecurityBudget,
-    ) -> Result<Vec<AssignmentTarget>, IdentityError> {
+    ) -> Result<Vec<AssignmentTargetSummary>, IdentityError> {
         let mut tx = self.repository.begin(budget).await?;
         let result = async {
             self.reader(tx.as_mut(), secret, IdentityOperation::ApplicationRead)
                 .await?;
             tx.application_workspace(app).await?;
-            tx.assignment_targets(app).await
+            tx.assignment_target_summaries(app).await
         }
         .await;
         finish_read(tx, result, budget).await

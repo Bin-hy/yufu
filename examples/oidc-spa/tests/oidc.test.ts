@@ -4,6 +4,7 @@ import { ApiError, createApiClient } from '../src/api.js'
 import type { SpaConfig } from '../src/config.js'
 import {
   createSpaOidc,
+  tokenFingerprint,
   toSpaSession,
   userManagerSettings,
   type OidcUserLike,
@@ -58,6 +59,10 @@ function user(overrides: Partial<OidcUserLike> = {}): OidcUserLike {
       sub: 'user-1',
       name: 'Alice',
       email: 'alice@example.com',
+      aud: [config.clientId],
+      sid: 'sid-1',
+      auth_time: 90,
+      nonce: 'request-nonce',
     },
     ...overrides,
   }
@@ -93,6 +98,12 @@ describe('public client settings', () => {
     expect(settings.silent_redirect_uri).toBeUndefined()
   })
 
+  it('keeps validated protocol claims instead of filtering them', () => {
+    const settings = userManagerSettings(config, new MemoryStorage() as unknown as Storage)
+
+    expect(settings.filterProtocolClaims).toBe(false)
+  })
+
   it('keeps state and user records in the tab-scoped storage', async () => {
     const storage = new MemoryStorage() as unknown as Storage
     const settings = userManagerSettings(config, storage)
@@ -106,10 +117,18 @@ describe('public client settings', () => {
 })
 
 describe('local session projection', () => {
-  it('exposes only identity, access token and expiry', () => {
-    const session = toSpaSession(user(), 1_000)
+  it('exposes validated protocol evidence without ID or refresh tokens', async () => {
+    const session = await toSpaSession(user(), 1_000, config.clientId)
 
-    expect(Object.keys(session).sort()).toEqual(['accessToken', 'expiresAt', 'identity'])
+    expect(Object.keys(session).sort()).toEqual([
+      'accessToken',
+      'accessTokenFingerprint',
+      'clientId',
+      'expiresAt',
+      'identity',
+      'nonceVerified',
+      'stateVerified',
+    ])
     expect(session).not.toHaveProperty('refreshToken')
     expect(session).not.toHaveProperty('idToken')
     expect(session.identity).toEqual({
@@ -117,13 +136,53 @@ describe('local session projection', () => {
       subject: 'user-1',
       displayName: 'Alice',
       email: 'alice@example.com',
+      audience: [config.clientId],
+      sid: 'sid-1',
+      authTime: 90,
     })
+    expect(session.clientId).toBe(config.clientId)
+    expect(session.stateVerified).toBe(true)
+    expect(session.nonceVerified).toBe(true)
+    expect(session.accessTokenFingerprint).toMatch(/^sha256:[0-9a-f]{16}$/)
     expect(session.expiresAt).toBe(2_000_000)
   })
 
-  it('rejects a user record without iss or sub', () => {
-    expect(() => toSpaSession(user({ profile: { sub: 'user-1' } }), 1_000)).toThrow(/iss/)
-    expect(() => toSpaSession(user({ profile: { iss: config.issuer } }), 1_000)).toThrow(/sub/)
+  it('rejects a user record without iss, sub or a required nonce', async () => {
+    await expect(
+      toSpaSession(user({ profile: { sub: 'user-1', nonce: 'n' } }), 1_000, config.clientId),
+    ).rejects.toThrow(/iss/)
+    await expect(
+      toSpaSession(user({ profile: { iss: config.issuer, nonce: 'n' } }), 1_000, config.clientId),
+    ).rejects.toThrow(/sub/)
+    await expect(
+      toSpaSession(
+        user({ profile: { iss: config.issuer, sub: 'user-1' } }),
+        1_000,
+        config.clientId,
+        { requireNonce: true },
+      ),
+    ).rejects.toThrow(/nonce/)
+  })
+
+  it('marks a refresh response without a nonce as not nonce-verified', async () => {
+    const session = await toSpaSession(
+      user({ profile: { iss: config.issuer, sub: 'user-1', aud: [config.clientId] } }),
+      1_000,
+      config.clientId,
+    )
+
+    expect(session.nonceVerified).toBe(false)
+    expect(session.stateVerified).toBe(true)
+  })
+
+  it('keeps token fingerprints short and distinct', async () => {
+    const one = await tokenFingerprint('access-one')
+    const two = await tokenFingerprint('access-two')
+
+    expect(one).toMatch(/^sha256:[0-9a-f]{16}$/)
+    expect(two).toMatch(/^sha256:[0-9a-f]{16}$/)
+    expect(one).not.toBe(two)
+    expect(one).not.toContain('access-one')
   })
 })
 

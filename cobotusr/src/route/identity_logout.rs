@@ -43,8 +43,10 @@ fn combine(target: &mut HeaderMap, source: HeaderMap) {
     }
 }
 fn finished(result: LogoutResult, headers: HeaderMap) -> Response {
-    match result.redirect { Some(uri) => (headers,Redirect::to(&uri)).into_response(),
-        None => (headers,Html("<!doctype html><html lang=\"zh\"><meta charset=\"utf-8\"><title>退出完成</title><body><p>当前浏览器的统一登录会话已结束。</p></body></html>")).into_response() }
+    match result.redirect {
+        Some(uri) => (headers, Redirect::to(&uri)).into_response(),
+        None => (headers, Html(super::logout_page::completed())).into_response(),
+    }
 }
 async fn start(
     state: &AppState,
@@ -52,6 +54,10 @@ async fn start(
     headers: &HeaderMap,
     request: LogoutRequest,
 ) -> Result<Response, IdentityError> {
+    // The service validates this against the client's registered redirect URIs
+    // before the confirmation page is rendered, so it is safe to use as the
+    // cancel link target.
+    let cancel_url = request.post_logout_redirect_uri.clone();
     let parsed = crate::service::security::browser::cookies(headers)?;
     let center = parsed
         .get(browser::sso_cookie_name(&state.config))
@@ -96,14 +102,15 @@ async fn start(
                 http::header::REFERRER_POLICY,
                 http::HeaderValue::from_static("same-origin"),
             );
-            let name = application_name
-                .as_deref()
-                .map(super::oidc::html_attribute)
-                .unwrap_or_else(|| "当前应用".into());
-            let html = format!(
-                "<!doctype html><html lang=\"zh\"><meta charset=\"utf-8\"><title>确认退出</title><body><p>{name} 请求退出当前浏览器的统一登录会话及其关联应用。</p><form method=\"post\" action=\"/oidc/end-session\"><input type=\"hidden\" name=\"flow_id\" value=\"{}\"><input type=\"hidden\" name=\"csrf_token\" value=\"{}\"><button type=\"submit\">确认退出</button></form></body></html>",
-                flow.id,
-                super::oidc::html_attribute(challenge.csrf_token.expose_secret())
+            let flow_id = flow.id.to_string();
+            let html = super::logout_page::confirmation(
+                application_name.as_deref(),
+                "/oidc/end-session",
+                &[
+                    ("flow_id", flow_id.as_str()),
+                    ("csrf_token", challenge.csrf_token.expose_secret()),
+                ],
+                cancel_url.as_deref(),
             );
             Ok((response_headers, Html(html)).into_response())
         }

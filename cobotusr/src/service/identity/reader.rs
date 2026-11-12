@@ -132,10 +132,11 @@ impl ReaderService {
         let entropy = rand::random();
         let secret = IssuedSecret::from_entropy(entropy);
         let plaintext = IssuedSecret::from_entropy(entropy).into_response();
-        let hash = hash_secret(&plaintext, budget).await?;
+        let hash = hash_secret(&plaintext).await?;
+        let write_budget = budget.renewed()?;
         let outcome = execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &ReaderMutation {
                 service: self,
                 evidence,
@@ -191,12 +192,13 @@ impl ReaderService {
         let secret = entropy.map(IssuedSecret::from_entropy);
         let plaintext = entropy.map(|v| IssuedSecret::from_entropy(v).into_response());
         let hash = match plaintext.as_deref() {
-            Some(value) => Some(hash_secret(value, budget).await?),
+            Some(value) => Some(hash_secret(value).await?),
             None => None,
         };
+        let write_budget = budget.renewed()?;
         let outcome = execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &ReaderMutation {
                 service: self,
                 evidence,
@@ -223,18 +225,9 @@ impl ReaderService {
         })
     }
 }
-pub(crate) async fn hash_secret(
-    plaintext: &str,
-    budget: &SecurityBudget,
-) -> Result<SecretToken, IdentityError> {
+pub(crate) async fn hash_secret(plaintext: &str) -> Result<SecretToken, IdentityError> {
     let plaintext = plaintext.to_owned();
-    let hash = budget
-        .run(tokio::task::spawn_blocking(move || {
-            bcrypt::hash(plaintext, bcrypt::DEFAULT_COST)
-        }))
-        .await?
-        .map_err(|_| IdentityError::DependencyUnavailable)?
-        .map_err(|_| IdentityError::DependencyUnavailable)?;
+    let hash = super::password::hash(plaintext).await?;
     Ok(SecretToken::new(hash)?)
 }
 enum Change<'a> {

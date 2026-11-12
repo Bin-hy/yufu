@@ -2,7 +2,7 @@
 
 日期：2026-11-09，Asia/Shanghai。
 
-状态：本验收清单已于 2026-11-09 经用户“确认”批准，四份设计文档全部确认，进入实现与验证。依据已确认的 [spec.md](spec.md)、[plan.md](plan.md)、[task.md](task.md)。90 项功能/交付检查中，C68、C69、C75—C82、C84、C85 共 12 项已按 2026-11-11 同一源码状态下的门禁与三引擎证据勾选，证据见 [verification.md](verification.md)；其余 78 项仍待实际验证通过后勾选。
+状态：本验收清单已于 2026-11-09 经用户“确认”批准，四份设计文档全部确认，进入实现与验证。依据已确认的 [spec.md](spec.md)、[plan.md](plan.md)、[task.md](task.md)。90 项功能/交付检查中，C68—C71、C75—C82、C84、C85 共 14 项已按 2026-11-11 同一源码状态下的门禁与三引擎证据勾选，证据见 [verification.md](verification.md)；其余 76 项仍待实际验证通过后勾选。
 
 ## 1. 验收范围和完成判定
 
@@ -204,7 +204,7 @@ fixture 提供可销毁 PostgreSQL、真实 OP 和中心 UI、Web A、SPA B 及�
 
 - [x] **C70** E3：提交 A/B 生产配置，由另一管理员审核并给用户组分配；旧 active 与 pending 显示正确，第三方同意和 LocalOnly 退出限制按批准策略执行，自批/无分配不能上线或登录。（对应 AC9、AC10、AC11、AC16、AC22、AC24；验证：执行 V_SSO，所有批准/分配经真实 API/界面；比较申请/active 状态、首访交互、拒绝与审计，三引擎各自完成。）
 
-- [ ] **C71** E4：用户从 A 发起授权、接受邀请并完成标准回调，再在不同站点的新标签进入 B；两应用映射同一身份而使用独立 token/sid，刷新/并发/清标签 token 后恢复及 prompt/max_age/none 均符合要求。（对应 AC2、AC4、AC13、AC14、AC15、AC17、AC23；验证：执行 V_SSO 的完整登录路径；两个标准客户端验证 state/nonce/issuer/audience；三引擎禁用共享 storage/iframe 依赖仍完成跨站 SSO。）
+- [x] **C71** E4：用户从 A 发起授权、接受邀请并完成标准回调，再在不同站点的新标签进入 B；两应用映射同一身份而使用独立 token/sid，刷新/并发/清标签 token 后恢复及 prompt/max_age/none 均符合要求。（对应 AC2、AC4、AC13、AC14、AC15、AC17、AC23；验证：执行 V_SSO 的完整登录路径；两个标准客户端验证 state/nonce/issuer/audience；三引擎禁用共享 storage/iframe 依赖仍完成跨站 SSO。）
 
 - [ ] **C72** E5：无分配、未批准生产、错误回调、未批准范围、无开发者资格、非成员、跨环境秘密和旧入口绕过尝试全部拒绝；本人合法访问可作为同时可用对照。（对应 AC5、AC8、AC9、AC11、AC16、AC17、AC24、AC26；验证：执行 V_SSO 的准入拒绝路径，检查拒绝后没有 token/身份泄露/状态变更，比较直接 API 和页面结果，三引擎重复。）
 

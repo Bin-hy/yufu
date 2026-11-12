@@ -231,15 +231,18 @@ impl AccountService {
                 validate_profile(nickname, None)?;
                 Some((
                     username.to_owned(),
-                    hash_password(password, budget).await?,
+                    hash_password(password).await?,
                     nickname.to_owned(),
                 ))
             }
             InvitationAcceptance::ExistingAccount => None,
         };
+        // Password hashing is local CPU work; the write keeps a fresh
+        // two-second database deadline even when hashing was slow.
+        let write_budget = budget.renewed()?;
         execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &AcceptInvitation {
                 service: self,
                 evidence,
@@ -384,19 +387,12 @@ fn validate_profile(nickname: &str, email: Option<&str>) -> Result<(), IdentityE
 }
 pub(super) async fn hash_password(
     password: &AccountPassword,
-    budget: &SecurityBudget,
 ) -> Result<SecretToken, IdentityError> {
     if password.expose_secret().is_empty() || password.expose_secret().len() > 72 {
         return Err(IdentityError::InvalidInput);
     }
     let password = password.expose_secret().to_owned();
-    let hash = budget
-        .run(tokio::task::spawn_blocking(move || {
-            bcrypt::hash(password, bcrypt::DEFAULT_COST)
-        }))
-        .await?
-        .map_err(|_| IdentityError::DependencyUnavailable)?
-        .map_err(|_| IdentityError::DependencyUnavailable)?;
+    let hash = super::super::password::hash(password).await?;
     SecretToken::new(hash).map_err(Into::into)
 }
 pub(super) fn current_digest(

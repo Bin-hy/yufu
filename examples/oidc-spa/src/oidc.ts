@@ -8,13 +8,25 @@ export interface SpaIdentity {
   subject: string
   displayName: string
   email?: string
+  audience: string[]
+  sid?: string
+  authTime?: number
 }
 
 /** What the page may hold in memory. Refresh secrets stay in tab storage. */
 export interface SpaSession {
   identity: SpaIdentity
+  clientId: string
   accessToken: string
   expiresAt: number
+  stateVerified: true
+  nonceVerified: boolean
+  accessTokenFingerprint: string
+}
+
+export interface SpaSessionOptions {
+  /** A fresh authorization response must echo the nonce sent with the request. */
+  requireNonce?: boolean
 }
 
 export interface OidcUserLike {
@@ -75,6 +87,9 @@ export function userManagerSettings(
     automaticSilentRenew: false,
     monitorSession: false,
     loadUserInfo: false,
+    // Keep the validated protocol claims (nonce, auth_time, sid) available to
+    // the in-memory evidence projection. Tokens are still never projected.
+    filterProtocolClaims: false,
     userStore: stateStore,
     stateStore,
   }
@@ -98,10 +113,36 @@ function stringClaim(profile: Record<string, unknown>, name: string): string | u
   return typeof value === 'string' && value.trim() ? value : undefined
 }
 
-export function toSpaSession(user: OidcUserLike, now: number): SpaSession {
+function audienceClaim(value: unknown): string[] {
+  const audience = Array.isArray(value) ? value : [value]
+  return audience.filter(
+    (entry): entry is string => typeof entry === 'string' && entry.trim() !== '',
+  )
+}
+
+/** A short digest lets tests compare tokens without rendering the credential. */
+export async function tokenFingerprint(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  const hex = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+  return `sha256:${hex.slice(0, 16)}`
+}
+
+export async function toSpaSession(
+  user: OidcUserLike,
+  now: number,
+  clientId: string,
+  options: SpaSessionOptions = {},
+): Promise<SpaSession> {
   const issuer = stringClaim(user.profile, 'iss')
   const subject = stringClaim(user.profile, 'sub')
   if (!issuer || !subject) throw new Error('ID Token is missing iss or sub')
+  const authTime = user.profile.auth_time
+  const nonce = stringClaim(user.profile, 'nonce')
+  if (options.requireNonce && nonce === undefined) {
+    throw new Error('ID Token is missing nonce')
+  }
 
   return {
     identity: {
@@ -112,9 +153,16 @@ export function toSpaSession(user: OidcUserLike, now: number): SpaSession {
         stringClaim(user.profile, 'name') ??
         subject,
       email: stringClaim(user.profile, 'email'),
+      audience: audienceClaim(user.profile.aud),
+      sid: stringClaim(user.profile, 'sid'),
+      authTime: typeof authTime === 'number' ? authTime : undefined,
     },
+    clientId,
     accessToken: user.access_token,
     expiresAt: user.expires_at ? user.expires_at * 1000 : now,
+    stateVerified: true,
+    nonceVerified: nonce !== undefined,
+    accessTokenFingerprint: await tokenFingerprint(user.access_token),
   }
 }
 
@@ -136,7 +184,7 @@ export function createSpaOidc(config: SpaConfig, options: SpaOidcOptions = {}): 
     inflight ??= (async () => {
       const user = await manager.signinSilent()
       if (!user) throw new Error('no active session to refresh')
-      return toSpaSession(user, now())
+      return toSpaSession(user, now(), config.clientId)
     })()
     return inflight.finally(() => {
       inflight = undefined
@@ -150,12 +198,12 @@ export function createSpaOidc(config: SpaConfig, options: SpaOidcOptions = {}): 
 
     async completeSignIn(url) {
       const user = await manager.signinRedirectCallback(url)
-      return toSpaSession(user, now())
+      return toSpaSession(user, now(), config.clientId, { requireNonce: true })
     },
 
     async currentSession() {
       const user = await manager.getUser()
-      return user ? toSpaSession(user, now()) : undefined
+      return user ? await toSpaSession(user, now(), config.clientId) : undefined
     },
 
     refresh,

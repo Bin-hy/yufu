@@ -1,9 +1,9 @@
 <script setup lang="ts">
 defineOptions({ name: 'AdminAccounts' })
-import { computed, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Copy, Link2, Search, UserPlus, Users } from '@lucide/vue'
-import { listAccounts, setAccount, issueInvitation, issueReset, revokeAction, setCandidate } from '../api'
+import { listAccounts, searchAccounts, setAccount, issueInvitation, issueReset, revokeAction, setCandidate } from '../api'
 import type { EnterpriseAccount, IssuedAction } from '../api/type'
 import { useCursorPage } from '@/composables/use-cursor-page'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
@@ -18,42 +18,82 @@ import UiButton from '@/components/ui/button/button.vue'
 import UiSelect from '@/components/ui/select/select.vue'
 import UiFormField from '@/components/ui/form-field/form-field.vue'
 import UiDialog from '@/components/ui/dialog/dialog.vue'
-const list = useCursorPage('enterprise-accounts', listAccounts),
+import EntityPicker from '@/components/ui/entity-picker/entity-picker.vue'
+import type { PickerOption } from '@/components/ui/entity-picker/types'
+import { accountOption } from '@/lib/picker-options'
+const directoryQuery = ref(''),
+    debouncedDirectoryQuery = ref('')
+let directoryTimer: number | undefined
+watch(directoryQuery, (value) => {
+    window.clearTimeout(directoryTimer)
+    directoryTimer = window.setTimeout(() => {
+        debouncedDirectoryQuery.value = value.trim()
+    }, 240)
+})
+onBeforeUnmount(() => window.clearTimeout(directoryTimer))
+const list = useCursorPage<EnterpriseAccount, number>(
+    () => `enterprise-accounts:${debouncedDirectoryQuery.value}`,
+    (after, signal) =>
+        listAccounts(after, signal, debouncedDirectoryQuery.value || undefined),
+),
     { data, status, error, refreshing } = list
+watch(debouncedDirectoryQuery, () => list.first())
+const loadAccountOptions = async (query: string, signal: AbortSignal): Promise<PickerOption[]> => {
+    const page = await searchAccounts(query, signal)
+    return page.items.map(accountOption)
+}
 const mutation = useAsyncMutation(),
     { pending, error: writeError } = mutation,
     user = useUserStore(),
     router = useRouter()
 const opened = ref(false),
-    query = ref(''),
     statusFilter = ref<'all' | 'active' | 'disabled'>('all')
 const form = reactive({
     purpose: 'onboarding' as 'onboarding' | 'qualification',
     target: '' as number | '',
     person_kind: 'employee' as 'employee' | 'collaborator',
     developer_grant: false,
+    targetLabel: '',
+    targetSecondary: '',
 })
 const candidate = reactive({
     requester: '' as number | '',
     target: '' as number | '',
+    requesterLabel: '',
+    requesterSecondary: '',
+    targetLabel: '',
+    targetSecondary: '',
     allowed: true,
 })
 const issued = useEphemeralResult<{ action: IssuedAction; reset: boolean }>(),
     result = issued.value
-const filtered = computed(() => {
-    const keyword = query.value.trim().toLowerCase()
-    return (data.value?.items ?? []).filter((account) => {
-        const matchesStatus =
+const filtered = computed(() =>
+    (data.value?.items ?? []).filter(
+        (account) =>
             statusFilter.value === 'all' ||
-            (statusFilter.value === 'active' ? account.enabled : !account.enabled)
-        const matchesQuery =
-            !keyword ||
-            account.username.toLowerCase().includes(keyword) ||
-            (account.nickname ?? '').toLowerCase().includes(keyword) ||
-            String(account.user_id).includes(keyword)
-        return matchesStatus && matchesQuery
-    })
-})
+            (statusFilter.value === 'active' ? account.enabled : !account.enabled),
+    ),
+)
+function chooseInvitationTarget(option: PickerOption) {
+    form.target = Number(option.value)
+    form.targetLabel = option.label
+    form.targetSecondary = option.secondary ?? ''
+}
+function clearInvitationTarget() {
+    form.target = ''
+    form.targetLabel = ''
+    form.targetSecondary = ''
+}
+function chooseCandidate(kind: 'requester' | 'target', option: PickerOption) {
+    candidate[kind] = Number(option.value)
+    candidate[kind + 'Label'] = option.label
+    candidate[kind + 'Secondary'] = option.secondary ?? ''
+}
+function clearCandidate(kind: 'requester' | 'target') {
+    candidate[kind] = ''
+    candidate[kind + 'Label'] = ''
+    candidate[kind + 'Secondary'] = ''
+}
 const link = computed(() => {
     if (!result.value) return ''
     return (
@@ -74,7 +114,7 @@ async function copyLink() {
 }
 async function invite() {
     if (form.purpose === 'qualification' && !form.target) {
-        emitToast({ type: 'warning', message: '资格邀请必须指定已有账户 ID' })
+        emitToast({ type: 'warning', message: '资格邀请必须选择一个已有账户' })
         document.getElementById('invitation-target')?.focus()
         return
     }
@@ -89,7 +129,7 @@ async function invite() {
         (value) => {
             result.value = { action: value, reset: false }
             opened.value = false
-            form.target = ''
+            clearInvitationTarget()
             form.developer_grant = false
             emitToast({ type: 'success', message: '一次性邀请已签发' })
         },
@@ -154,10 +194,17 @@ async function revoke() {
     )
 }
 async function allowCandidate() {
-    if (!candidate.requester || !candidate.target) return
+    if (!candidate.requester || !candidate.target) {
+        emitToast({ type: 'warning', message: '请选择请求方和候选账户' })
+        return
+    }
     await mutation.run(
         () => setCandidate(Number(candidate.requester), Number(candidate.target), candidate.allowed),
-        () => emitToast({ type: 'success', message: '候选可见性已更新' }),
+        () => {
+            clearCandidate('requester')
+            clearCandidate('target')
+            emitToast({ type: 'success', message: '候选可见性已更新' })
+        },
     )
 }
 </script>
@@ -205,7 +252,7 @@ async function allowCandidate() {
             <div class="table-toolbar">
                 <div class="search-box">
                     <Search :size="15" aria-hidden="true" />
-                    <UiInput v-model="query" clearable placeholder="搜索账户名、用户名或 ID…" aria-label="搜索企业账户" />
+                    <UiInput v-model="directoryQuery" clearable placeholder="搜索全部账户：名称、用户名或 ID…" aria-label="搜索企业账户" />
                 </div>
                 <div class="filter-chips" role="group" aria-label="账户状态筛选">
                     <button class="filter-chip" type="button" :aria-pressed="statusFilter === 'all'" @click="statusFilter = 'all'">全部</button>
@@ -312,17 +359,39 @@ async function allowCandidate() {
                 <Users :size="18" class="text-muted-foreground" aria-hidden="true" />
             </header>
             <form class="surface-body flex flex-wrap items-end gap-3" @submit.prevent="allowCandidate">
-                <UiFormField id="candidate-requester" label="请求方账户 ID" class="w-40">
-                    <UiInput id="candidate-requester" v-model.number="candidate.requester" type="number" min="1" required class="!min-h-9" />
+                <UiFormField id="candidate-requester" label="请求方账户" class="min-w-[220px] flex-1" required hint="需要看到候选人的合作方或开发者。">
+                    <EntityPicker
+                        id="candidate-requester"
+                        :model-value="candidate.requester"
+                        :selected-label="candidate.requesterLabel"
+                        :selected-secondary="candidate.requesterSecondary"
+                        :load="loadAccountOptions"
+                        placeholder="搜索请求方姓名或用户名…"
+                        :disabled="pending"
+                        @update:model-value="(value) => { if (value === null) clearCandidate('requester') }"
+                        @select="(option) => chooseCandidate('requester', option)"
+                    />
                 </UiFormField>
-                <UiFormField id="candidate-target" label="候选账户 ID" class="w-40">
-                    <UiInput id="candidate-target" v-model.number="candidate.target" type="number" min="1" required class="!min-h-9" />
+                <UiFormField id="candidate-target" label="候选账户" class="min-w-[220px] flex-1" required hint="被搜索和选择的合作方账户。">
+                    <EntityPicker
+                        id="candidate-target"
+                        :model-value="candidate.target"
+                        :selected-label="candidate.targetLabel"
+                        :selected-secondary="candidate.targetSecondary"
+                        :load="loadAccountOptions"
+                        placeholder="搜索候选账户姓名或用户名…"
+                        :disabled="pending"
+                        @update:model-value="(value) => { if (value === null) clearCandidate('target') }"
+                        @select="(option) => chooseCandidate('target', option)"
+                    />
                 </UiFormField>
-                <label class="checkbox-field mb-2">
-                    <input v-model="candidate.allowed" type="checkbox" />
-                    <span>允许可见</span>
-                </label>
-                <UiButton type="submit" :disabled="pending" :loading="pending">更新候选范围</UiButton>
+                <div class="flex items-center gap-2 pb-0.5">
+                    <label class="checkbox-field whitespace-nowrap">
+                        <input v-model="candidate.allowed" type="checkbox" />
+                        <span>允许可见</span>
+                    </label>
+                    <UiButton type="submit" :disabled="pending" :loading="pending">保存可见性</UiButton>
+                </div>
             </form>
         </section>
 
@@ -351,12 +420,22 @@ async function allowCandidate() {
                 </UiFormField>
                 <UiFormField
                     id="invitation-target"
-                    label="限定接收账户 ID"
+                    label="指定接收账户"
                     :optional="form.purpose === 'onboarding'"
                     :required="form.purpose === 'qualification'"
-                    hint="开户邀请可留空；资格邀请必须指定已有账户。"
+                    :hint="form.purpose === 'onboarding' ? '留空表示任何持有链接的人都可以开户；选择账户则只允许该账户接受。' : '资格邀请必须选择一个已有账户。'"
                 >
-                    <UiInput id="invitation-target" v-model.number="form.target" type="number" min="0" :required="form.purpose === 'qualification'" />
+                    <EntityPicker
+                        id="invitation-target"
+                        :model-value="form.target"
+                        :selected-label="form.targetLabel"
+                        :selected-secondary="form.targetSecondary"
+                        :load="loadAccountOptions"
+                        placeholder="搜索接收人姓名或用户名…"
+                        :disabled="pending"
+                        @update:model-value="(value) => { if (value === null) clearInvitationTarget() }"
+                        @select="chooseInvitationTarget"
+                    />
                 </UiFormField>
                 <label class="checkbox-field md:mt-7">
                     <input v-model="form.developer_grant" type="checkbox" />

@@ -46,10 +46,11 @@ impl AccountService {
             .sso()?
             .verify_password(&username, old_password.expose_secret(), budget)
             .await?;
-        let hash = hash_password(new_password, budget).await?;
+        let hash = hash_password(new_password).await?;
+        let write_budget = budget.renewed()?;
         execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &PasswordMutation {
                 service: self,
                 evidence,
@@ -72,10 +73,11 @@ impl AccountService {
         budget: &SecurityBudget,
     ) -> Result<AccountContinuation, IdentityError> {
         crate::service::identity::sso::validate_opaque(action.proof.expose_secret())?;
-        let hash = hash_password(new_password, budget).await?;
+        let hash = hash_password(new_password).await?;
+        let write_budget = budget.renewed()?;
         execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &PasswordMutation {
                 service: self,
                 evidence,

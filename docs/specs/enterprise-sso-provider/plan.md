@@ -293,7 +293,7 @@ pub trait IdentityTransaction: SecurityTransaction {
 
 ### 4.3 协议和错误约定
 
-已纳管授权只接受 response_type=code 和 response_mode=query，全部客户端要求 S256 PKCE；scope 必须含 openid，state 非空，nonce 在本产品接入配置中要求提供，参考客户端负责验证 state/nonce/issuer/audience。支持 prompt=login、consent、none 及 max_age；不宣告未实现的 implicit、混合流程、PAR、DPoP、SAML 或动态匿名注册端点。
+已纳管授权只接受 response_type=code 和 response_mode=query；SPA 强制 S256 PKCE，有 client_secret 的服务端客户端可选 PKCE（提供时必须成对且为 S256）；scope 必须含 openid，state 非空，nonce 可选并在提供时回显到 ID Token，参考客户端负责验证 state/nonce/issuer/audience。支持 prompt=login、consent、none 及 max_age；不宣告未实现的 implicit、混合流程、PAR、DPoP、SAML 或动态匿名注册端点。
 
 无效 client_id 或 redirect_uri 直接返回中心错误，不跳转未知地址。只有回调验证后才带原 state 返回 invalid_scope、access_denied、login_required、consent_required 或 interaction_required。prompt=none 不能与其他 prompt 混用；不能满足认证时间时返回 login_required，缺同意返回 consent_required，必要账户选择返回 account_selection_required。界面无交互请求不呈现登录/同意页。
 

@@ -3,6 +3,7 @@ defineOptions({ name: 'DeveloperApps' })
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ArrowRight, Copy, Plus, Search, ShieldCheck, Sparkles, X } from '@lucide/vue'
 import { usePageContext } from '@/workspace/page-context'
+import { searchAccounts } from '@/pages/admin/api'
 import { useUserStore } from '@/pinia/stores/user'
 import { useCursorPage } from '@/composables/use-cursor-page'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
@@ -23,6 +24,9 @@ import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiFormField from '@/components/ui/form-field/form-field.vue'
 import ConfigEditor from '../components/config-editor.vue'
+import EntityPicker from '@/components/ui/entity-picker/entity-picker.vue'
+import type { PickerOption } from '@/components/ui/entity-picker/types'
+import { accountOption } from '@/lib/picker-options'
 import { emitToast } from '@/utils/toast'
 
 type StepId = 'basic' | 'development' | 'production' | 'confirm'
@@ -43,7 +47,25 @@ const registrationSteps: readonly { id: StepId; title: string; description: stri
 ]
 const opened = ref(false)
 const formRef = ref<HTMLFormElement | null>(null)
-const owner = ref(user.centerSession?.user_id ?? 0)
+const owner = ref(user.centerSession?.user_id ?? 0),
+    ownerLabel = ref(user.centerSession?.nickname || user.centerSession?.username || ''),
+    ownerSecondary = ref(
+        user.centerSession
+            ? `@${user.centerSession.username} · #${user.centerSession.user_id}`
+            : '',
+    )
+const loadOwnerOptions = async (
+    query: string,
+    signal: AbortSignal,
+): Promise<PickerOption[]> => {
+    const page = await searchAccounts(query, signal)
+    return page.items.map(accountOption)
+}
+function chooseOwner(option: PickerOption) {
+    owner.value = Number(option.value)
+    ownerLabel.value = option.label
+    ownerSecondary.value = option.secondary ?? ''
+}
 const limitation = ref(false)
 const step = ref<StepId>('basic')
 const unlockedStep = ref(0)
@@ -113,6 +135,10 @@ function resetRegistration() {
         production: emptyConfig(),
     })
     owner.value = user.centerSession?.user_id ?? 0
+    ownerLabel.value = user.centerSession?.nickname || user.centerSession?.username || ''
+    ownerSecondary.value = user.centerSession
+        ? `@${user.centerSession.username} · #${user.centerSession.user_id}`
+        : ''
     limitation.value = false
     step.value = 'basic'
     unlockedStep.value = 0
@@ -137,7 +163,7 @@ async function toggleRegistration() {
 function ownerIssue(): ValidationIssue | null {
     if (!administrator.value) return null
     if (!Number.isInteger(owner.value) || owner.value < 1)
-        return { field: 'owner_user_id', message: '「负责人账户 ID」必须是正整数' }
+        return { field: 'owner_user_id', message: '请选择负责人账户' }
     return null
 }
 
@@ -448,19 +474,18 @@ async function copy(value: string, label: string) {
                                 :disabled="pending"
                             />
                         </UiFormField>
-                        <UiFormField v-if="administrator" id="app-owner" label="负责人账户 ID" required :error="fieldError('owner_user_id')" error-id="app-owner-error">
-                            <UiInput
+                        <UiFormField v-if="administrator" id="app-owner" label="负责人账户" class="md:col-span-2" required :error="fieldError('owner_user_id')" error-id="app-owner-error" hint="按显示名称、用户名或账户 ID 搜索。">
+                            <EntityPicker
                                 id="app-owner"
-                                v-model.number="owner"
-                                type="number"
-                                min="1"
-                                step="1"
-                                inputmode="numeric"
+                                :model-value="owner"
+                                :selected-label="ownerLabel"
+                                :selected-secondary="ownerSecondary"
+                                :load="loadOwnerOptions"
+                                placeholder="搜索负责人姓名或用户名…"
                                 :invalid="!!fieldError('owner_user_id')"
-                                name="app-owner"
-                                required
-                                autocomplete="off"
                                 :disabled="pending"
+                                @update:model-value="(value) => { if (value === null) { owner = 0; ownerLabel = ''; ownerSecondary = '' } }"
+                                @select="chooseOwner"
                             />
                         </UiFormField>
                     </div>
@@ -551,9 +576,9 @@ async function copy(value: string, label: string) {
             <div class="table-toolbar">
                 <div class="search-box">
                     <Search :size="15" aria-hidden="true" />
-                    <UiInput v-model="query" clearable placeholder="搜索应用名称或 Key…" aria-label="搜索应用" />
+                    <UiInput v-model="query" clearable placeholder="筛选当前页应用名称或 Key…" aria-label="筛选当前页应用" />
                 </div>
-                <span class="toolbar-spacer text-[11px] text-muted-foreground">{{ filteredApps.length }} 个应用</span>
+                <span class="toolbar-spacer text-[11px] text-muted-foreground">当前页 {{ filteredApps.length }} 个应用</span>
             </div>
             <DataState
                 :status="status"

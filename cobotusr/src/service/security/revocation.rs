@@ -306,7 +306,8 @@ impl CredentialLifecycle {
                     .oidc_client(request.client_id)
                     .await?
                     .ok_or(SecurityError::InvalidCredential)?;
-                authenticate_session_client(&client, request.client_secret, "", budget).await?;
+                authenticate_session_client(&client, request.client_secret, "").await?;
+                txn.renew_budget()?;
                 let snapshot = match txn.lock_refresh(issuer, request.token).await? {
                     Some(snapshot) => Some(snapshot),
                     None => match request.access_reference {

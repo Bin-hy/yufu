@@ -428,7 +428,6 @@ pub async fn management_tokens_for_user(
                 refresh_ttl_seconds: 3600,
             },
             f.signer.as_ref(),
-            &b,
         )
         .await
         .unwrap();

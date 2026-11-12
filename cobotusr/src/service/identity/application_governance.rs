@@ -192,11 +192,11 @@ struct PreparedMutation {
     operation_id: Uuid,
 }
 impl PreparedMutation {
-    async fn new(needs_secret: bool, budget: &SecurityBudget) -> Result<Self, IdentityError> {
+    async fn new(needs_secret: bool) -> Result<Self, IdentityError> {
         let entropy = needs_secret.then(rand::random);
         let hash = match entropy {
             Some(value) => {
-                Some(hash_secret(&IssuedSecret::from_entropy(value).into_response(), budget).await?)
+                Some(hash_secret(&IssuedSecret::from_entropy(value).into_response()).await?)
             }
             None => None,
         };
@@ -438,10 +438,11 @@ impl ApplicationService {
                 newly_issued_secret: None,
             });
         }
-        let prepared = PreparedMutation::new(needs_secret, budget).await?;
+        let prepared = PreparedMutation::new(needs_secret).await?;
+        let write_budget = budget.renewed()?;
         let output = execute_identity(
             self.repository.as_ref(),
-            budget,
+            &write_budget,
             &MutationUnit {
                 service: self,
                 evidence,
@@ -469,11 +470,13 @@ impl ApplicationService {
         secret: &str,
         after: i32,
         limit: u32,
+        search: Option<&str>,
         budget: &SecurityBudget,
     ) -> Result<CandidatePage, IdentityError> {
         if after < 0 || !(1..=50).contains(&limit) {
             return Err(IdentityError::InvalidInput);
         }
+        let search = super::super::search::normalize_query(search)?;
         super::super::sso::validate_opaque(secret)?;
         let mut tx = self.repository.begin(budget).await?;
         let result = async {
@@ -485,7 +488,12 @@ impl ApplicationService {
             .await?;
             require_developer(&actor)?;
             let mut items = tx
-                .collaboration_candidates(actor.account().user_id, after, limit + 1)
+                .collaboration_candidates(
+                    actor.account().user_id,
+                    after,
+                    limit + 1,
+                    search.as_deref(),
+                )
                 .await?;
             let next = if items.len() > limit as usize {
                 items.truncate(limit as usize);

@@ -238,7 +238,7 @@ export async function authorizeOnlineOperation(
   const entry: CacheEntry = {
     allowed: true,
     subject: input.session.profile.subject,
-    sid: input.session.sid,
+    sid: input.session.protocol.sid,
     clientId: input.expectedClientId,
     verifiedAt,
     tokenExpiresAt: result.exp !== undefined ? result.exp * 1000 : input.session.tokens.expiresAt,

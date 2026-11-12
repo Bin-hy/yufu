@@ -13,7 +13,12 @@ import {
   LogoutReplayGuard,
   LogoutTokenError,
 } from '../src/logout.js'
-import type { OidcClient } from '../src/oidc.js'
+import {
+  tokenFingerprint,
+  type OidcClient,
+  type TokenSet,
+  type VerifiedProtocol,
+} from '../src/oidc.js'
 import {
   authorizeOnlineOperation,
   createIntrospector,
@@ -78,10 +83,27 @@ const verify = createLogoutTokenVerifier({
 function newSessionStore(): { sessions: SessionStore; profile: ReturnType<ProfileDirectory['upsert']> } {
   const sessions = new SessionStore(() => 1_000)
   const profile = new ProfileDirectory().upsert(
-    { issuer: ISSUER, subject: 'user-1', displayName: 'Alice' },
+    { issuer: ISSUER, subject: 'user-1', displayName: 'Alice', audience: [CLIENT_ID] },
     1_000,
   )
   return { sessions, profile }
+}
+
+function protocol(sid = 'sid-1'): VerifiedProtocol {
+  return {
+    issuer: ISSUER,
+    subject: 'user-1',
+    clientId: CLIENT_ID,
+    audience: [CLIENT_ID],
+    sid,
+    authTime: 1,
+    stateVerified: true,
+    nonceVerified: true,
+  }
+}
+
+function tokens(accessToken = 'a', expiresAt = 9_000): TokenSet {
+  return { accessToken, expiresAt, accessTokenFingerprint: tokenFingerprint(accessToken) }
 }
 
 describe('back-channel logout token', () => {
@@ -137,9 +159,9 @@ describe('back-channel logout token', () => {
 describe('back-channel logout application', () => {
   it('clears local sessions by sid and ignores repeats', async () => {
     const { sessions, profile } = newSessionStore()
-    const tokens = { accessToken: 'a', expiresAt: 9_000 }
-    const first = sessions.create(profile, tokens, 'sid-1')
-    const second = sessions.create(profile, tokens, 'sid-2')
+    const credential = tokens()
+    const first = sessions.create(profile, credential, protocol('sid-1'))
+    const second = sessions.create(profile, credential, protocol('sid-2'))
     const guard = new LogoutReplayGuard(60_000, () => 1_000)
     const token = await verify(await signLogout())
 
@@ -155,9 +177,9 @@ describe('back-channel logout application', () => {
 
   it('falls back to sub when the notification has no sid', async () => {
     const { sessions, profile } = newSessionStore()
-    const tokens = { accessToken: 'a', expiresAt: 9_000 }
-    sessions.create(profile, tokens, 'sid-1')
-    sessions.create(profile, tokens, 'sid-2')
+    const credential = tokens()
+    sessions.create(profile, credential, protocol('sid-1'))
+    sessions.create(profile, credential, protocol('sid-2'))
     const token = await verify(await signLogout({ sid: undefined }))
 
     expect(applyBackchannelLogout(sessions, token)).toBe(2)
@@ -212,7 +234,7 @@ describe('local write protection', () => {
 
   it('denies inactive, foreign, mismatched and expired tokens', async () => {
     const { sessions, profile } = newSessionStore()
-    const session = sessions.create(profile, { accessToken: 'a', expiresAt: 9_000 })
+    const session = sessions.create(profile, tokens(), protocol())
     const cases = [
       [{ active: false }, 'inactive_token'],
       [{ active: true, clientId: 'another-client', sub: 'user-1' }, 'wrong_client'],
@@ -235,7 +257,7 @@ describe('local write protection', () => {
 
   it('fails closed when introspection is unavailable', async () => {
     const { sessions, profile } = newSessionStore()
-    const session = sessions.create(profile, { accessToken: 'a', expiresAt: 9_000 })
+    const session = sessions.create(profile, tokens(), protocol())
 
     await expect(
       authorizeOnlineOperation({
@@ -253,7 +275,7 @@ describe('local write protection', () => {
 
   it('allows an active token for this client and subject', async () => {
     const { sessions, profile } = newSessionStore()
-    const session = sessions.create(profile, { accessToken: 'a', expiresAt: 9_000 })
+    const session = sessions.create(profile, tokens(), protocol())
 
     await expect(
       authorizeOnlineOperation({
@@ -299,10 +321,14 @@ describe('local write protection', () => {
 describe('web example HTTP surface', () => {
   const sessions = new SessionStore()
   const profile = new ProfileDirectory().upsert(
-    { issuer: ISSUER, subject: 'user-1', displayName: 'Alice' },
+    { issuer: ISSUER, subject: 'user-1', displayName: 'Alice', audience: [CLIENT_ID] },
     1_000,
   )
-  const session = sessions.create(profile, { accessToken: 'active', expiresAt: 9_000 }, 'sid-1')
+  const session = sessions.create(
+    profile,
+    tokens('active-session-token'),
+    protocol('sid-1'),
+  )
 
   const oidc: OidcClient = {
     authorizationRequest: async () => {
@@ -326,7 +352,7 @@ describe('web example HTTP surface', () => {
     pending: new PendingStore(),
     introspector: {
       introspect: async (token) =>
-        token === 'active'
+        token === 'active-session-token'
           ? { active: true, clientId: CLIENT_ID, sub: 'user-1', exp: 9_000 }
           : { active: false },
     },
@@ -361,6 +387,31 @@ describe('web example HTTP surface', () => {
       redirect: 'manual',
     })
 
+  it('renders only non-secret validated OIDC evidence', async () => {
+    const response = await fetch(`${base}/`, {
+      headers: { cookie: `cobotrix_session=${session.id}` },
+    })
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(html).toContain('data-testid="issuer"')
+    expect(html).toContain(ISSUER)
+    expect(html).toContain('data-testid="client-id"')
+    expect(html).toContain(CLIENT_ID)
+    expect(html).toContain('data-testid="sid"')
+    expect(html).toContain('sid-1')
+    expect(html).toContain('data-testid="access-token-fingerprint"')
+    expect(html).toContain(session.tokens.accessTokenFingerprint)
+    expect(html).not.toContain(session.tokens.accessToken)
+    expect(html).not.toContain('client-secret')
+  })
+
+  it('rejects unsupported login interaction options', async () => {
+    const response = await fetch(`${base}/login?prompt=none%20login`)
+
+    expect(response.status).toBe(400)
+  })
+
   it('rejects a forged back-channel notification', async () => {
     const response = await post('/oidc/backchannel-logout', {
       logout_token: await signLogout({}, other.privateKey),
@@ -387,7 +438,7 @@ describe('web example HTTP surface', () => {
   })
 
   it('rejects a protected write with a bad CSRF token', async () => {
-    const local = sessions.create(profile, { accessToken: 'active', expiresAt: 9_000 }, 'sid-csrf')
+    const local = sessions.create(profile, tokens('active'), protocol('sid-csrf'))
     const response = await post(
       '/api/operation',
       { _csrf: 'wrong' },
@@ -399,7 +450,7 @@ describe('web example HTTP surface', () => {
   })
 
   it('rejects a protected write when introspection is inactive', async () => {
-    const local = sessions.create(profile, { accessToken: 'revoked', expiresAt: 9_000 })
+    const local = sessions.create(profile, tokens('revoked'), protocol())
     const response = await post(
       '/api/operation',
       { _csrf: csrfToken(local.id, config.sessionSecret) },

@@ -7,7 +7,7 @@ use crate::{
     config::Config,
     domain::identity::{
         account::{IssuedSecret, SecretDigest},
-        application::{ConsentPolicy, ExactRedirectUri},
+        application::{ClientKind, ConsentPolicy, ExactRedirectUri},
         authorization::{AuthorizationParameters, AuthorizationRequest},
         error::IdentityError,
         session::*,
@@ -155,6 +155,11 @@ impl AuthorizationService {
                 .authorization_target(&request.client_id, root.as_ref().map(|r| r.user_id))
                 .await?;
             verify_version(&flow, &target)?;
+            if target.config.client_kind == ClientKind::BrowserSpa
+                && request.code_challenge.is_none()
+            {
+                return Err(IdentityError::InvalidInput);
+            }
             trusted_redirect(&target, &parameters)?;
             if !target.enabled {
                 return Err(IdentityError::AccessDenied);
@@ -314,6 +319,13 @@ impl IdentityUnitOfWork for AuthorizationUnit<'_> {
                 ));
             }
         };
+        if target.config.client_kind == ClientKind::BrowserSpa && request.code_challenge.is_none() {
+            return Ok(protocol_error(
+                redirect,
+                Some(request.state),
+                "invalid_request",
+            ));
+        }
         if !request.scopes.is_subset_of(&target.config.identity_scopes) {
             return Ok(protocol_error(
                 redirect,
@@ -565,7 +577,7 @@ impl AuthorizationUnit<'_> {
                 id: self.rp_id,
                 protocol_sid: self.protocol_sid,
                 admission: admission.clone(),
-                nonce: Some(request.nonce),
+                nonce: request.nonce.clone(),
             })
             .await?;
         transaction

@@ -98,14 +98,22 @@ impl IdentityTransaction for PgSecurityTransaction {
         &mut self,
         after: Option<Uuid>,
         limit: u32,
+        search: Option<&str>,
     ) -> Result<Vec<Uuid>, IdentityError> {
-        self.identity_group_ids(after, limit).await
+        self.identity_group_ids(after, limit, search).await
     }
     async fn assignment_targets(
         &mut self,
         application_id: i32,
     ) -> Result<Vec<AssignmentTarget>, IdentityError> {
         self.identity_assignment_targets(application_id).await
+    }
+    async fn assignment_target_summaries(
+        &mut self,
+        application_id: i32,
+    ) -> Result<Vec<AssignmentTargetSummary>, IdentityError> {
+        self.identity_assignment_target_summaries(application_id)
+            .await
     }
     async fn live_rp_ids(&mut self, ids: &[Uuid]) -> Result<Vec<Uuid>, IdentityError> {
         if ids.is_empty() {
@@ -139,8 +147,9 @@ impl IdentityTransaction for PgSecurityTransaction {
         requester_id: i32,
         after: i32,
         limit: u32,
+        search: Option<&str>,
     ) -> Result<Vec<CollaborationCandidate>, IdentityError> {
-        self.identity_collaboration_candidates(requester_id, after, limit)
+        self.identity_collaboration_candidates(requester_id, after, limit, search)
             .await
     }
     async fn administrator_application_ids(

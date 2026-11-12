@@ -15,6 +15,14 @@ function render(session: SpaSession | undefined, message = ''): void {
     ? `<h1>Signed in</h1>
        <p data-testid="display-name">${escapeHtml(session.identity.displayName)}</p>
        <p data-testid="local-subject">${escapeHtml(session.identity.subject)}</p>
+     <p data-testid="issuer">${escapeHtml(session.identity.issuer)}</p>
+     <p data-testid="client-id">${escapeHtml(session.clientId)}</p>
+     <p data-testid="audience">${escapeHtml(session.identity.audience.join(', '))}</p>
+     <p data-testid="sid">${escapeHtml(session.identity.sid ?? '—')}</p>
+     <p data-testid="auth-time">${escapeHtml(String(session.identity.authTime ?? '—'))}</p>
+     <p data-testid="state-validated">${session.stateVerified}</p>
+     <p data-testid="nonce-validated">${session.nonceVerified}</p>
+     <p data-testid="access-token-fingerprint">${escapeHtml(session.accessTokenFingerprint)}</p>
        <button id="operation" type="button">Run protected operation</button>
        <button id="logout-local" type="button">Sign out of this tab</button>
        <button id="logout-central" type="button">Sign out of the identity center</button>`

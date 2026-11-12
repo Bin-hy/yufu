@@ -878,6 +878,183 @@
         color: hsl(var(--success-foreground));
     }
 
+    .entity-picker {
+        position: relative;
+        min-width: 0;
+    }
+
+    .entity-picker-selected {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 40px;
+        padding: 5px 7px;
+        border: 1px solid hsl(var(--input));
+        border-radius: 9px;
+        background: hsl(var(--card));
+        box-shadow: var(--shadow-sm);
+        transition:
+            border-color 130ms ease,
+            box-shadow 130ms ease;
+    }
+
+    .entity-picker-selected:hover,
+    .entity-picker-selected:focus-visible {
+        border-color: hsl(var(--primary) / 0.45);
+        box-shadow: 0 0 0 3px hsl(var(--primary) / 0.08);
+        outline: none;
+    }
+
+    .entity-picker-selected.is-invalid {
+        border-color: hsl(var(--destructive));
+    }
+
+    .entity-picker-selected.is-disabled {
+        opacity: 0.6;
+    }
+
+    .entity-picker-avatar,
+    .entity-picker-option-avatar {
+        width: 28px;
+        height: 28px;
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        background: hsl(var(--secondary));
+        color: hsl(var(--secondary-foreground));
+        font-size: 10.5px;
+        font-weight: 700;
+    }
+
+    .entity-picker-selected-label {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12.5px;
+        font-weight: 600;
+    }
+
+    .entity-picker-selected-meta {
+        display: block;
+        margin-top: 1px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: hsl(var(--muted-foreground));
+        font-size: 10.5px;
+    }
+
+    .entity-picker-change {
+        flex: none;
+        color: hsl(var(--primary));
+        font-size: 10.5px;
+        font-weight: 600;
+    }
+
+    .entity-picker-input {
+        min-height: 40px;
+    }
+
+    .entity-picker-input .ui-input {
+        min-height: 38px;
+        padding-left: 7px;
+    }
+
+    .entity-picker-input.is-invalid {
+        border-color: hsl(var(--destructive));
+    }
+
+    .entity-picker-input.is-disabled {
+        opacity: 0.6;
+    }
+
+    .entity-picker-menu {
+        position: absolute;
+        z-index: 95;
+        pointer-events: auto;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        max-height: 300px;
+        overflow-y: auto;
+        padding: 5px;
+        border: 1px solid hsl(var(--border));
+        border-radius: 11px;
+        background: hsl(var(--popover));
+        color: hsl(var(--popover-foreground));
+        box-shadow: var(--shadow-lg);
+        animation: menu-enter 140ms cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .entity-picker-menu.is-floating {
+        position: fixed;
+    }
+
+    .entity-picker-option {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        width: 100%;
+        padding: 8px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: hsl(var(--foreground));
+    }
+
+    .entity-picker-option[data-active='true'] {
+        background: hsl(var(--accent));
+        color: hsl(var(--accent-foreground));
+    }
+
+    .entity-picker-option:disabled {
+        opacity: 0.45;
+    }
+
+    .entity-picker-option-label {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12.5px;
+        font-weight: 600;
+    }
+
+    .entity-picker-option-meta {
+        display: block;
+        margin-top: 1px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: hsl(var(--muted-foreground));
+        font-size: 10.5px;
+    }
+
+    .entity-picker-state {
+        padding: 18px 12px;
+        text-align: center;
+        color: hsl(var(--muted-foreground));
+        font-size: 11.5px;
+    }
+
+    .entity-picker-hint {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 4px;
+        padding: 7px 9px 3px;
+        border-top: 1px solid hsl(var(--border));
+        color: hsl(var(--muted-foreground));
+        font-size: 9.5px;
+    }
+
+    .entity-picker-hint .kbd + .kbd {
+        margin-left: 2px;
+    }
+
     .search-box {
         position: relative;
         display: flex;

@@ -587,15 +587,6 @@ pub(crate) async fn introspect_legacy(
     }))
 }
 
-pub(super) fn html_attribute(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 /// GET only prepares a confirmation; it never revokes or clears a session.
 async fn end_session(
     State(state): State<AppState>,
@@ -622,11 +613,18 @@ async fn end_session(
         &mut headers,
     )?;
     headers.insert("x-frame-options", http::HeaderValue::from_static("DENY"));
-    let body = format!(
-        "<!doctype html><html><body><form method=\"post\" action=\"/oidc/logout\"><input type=\"hidden\" name=\"client_id\" value=\"{}\"><input type=\"hidden\" name=\"post_logout_redirect_uri\" value=\"{}\"><input type=\"hidden\" name=\"csrf_token\" value=\"{}\"><button type=\"submit\">确认退出当前会话</button></form></body></html>",
-        html_attribute(&query.client_id),
-        html_attribute(&query.post_logout_redirect_uri),
-        proof.expose_secret()
+    let body = super::logout_page::confirmation(
+        Some(client.name.as_str()),
+        "/oidc/logout",
+        &[
+            ("client_id", query.client_id.as_str()),
+            (
+                "post_logout_redirect_uri",
+                query.post_logout_redirect_uri.as_str(),
+            ),
+            ("csrf_token", proof.expose_secret()),
+        ],
+        Some(query.post_logout_redirect_uri.as_str()),
     );
     budget.remaining()?;
     Ok((headers, Html(body)))

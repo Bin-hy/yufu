@@ -2,9 +2,11 @@ import type { Page } from '@/pages/account/api/type'
 export type ClientKind = 'server_web' | 'browser_spa'
 export interface EnvironmentConfig { client_kind: ClientKind; redirect_uris: string[]; post_logout_redirect_uris: string[]; browser_origins: string[]; access_audience: string; identity_scopes: string; consent_policy: 'user_consent' | 'enterprise_preconsent'; logout_capability: 'backchannel_and_online' | 'online' | 'local_only'; backchannel_logout_uri: string | null }
 export interface Environment { environment_id: string; kind: 'development' | 'production'; client_id: string; primary_client_kind: ClientKind; secret_revision: number; revision: number; lifecycle_epoch: number; active_version_id: string | null; latest: { version_id: string; version: number; config: EnvironmentConfig; candidate_client_id: string | null }; active_config: EnvironmentConfig | null; pending_approval: string | null }
-export interface Application { application_id: number; app_key: string; name: string; description: string | null; management_mode: 'developer_managed' | 'admin_configured'; third_party: boolean; active: boolean; revision: number; owner_user_id: number; members: { user_id: number; member_role: string }[]; environments: Environment[] }
+export interface ApplicationMember { user_id: number; member_role: string; username?: string; nickname?: string }
+export interface Application { application_id: number; app_key: string; name: string; description: string | null; management_mode: 'developer_managed' | 'admin_configured'; third_party: boolean; active: boolean; revision: number; owner_user_id: number; members: ApplicationMember[]; environments: Environment[] }
 export interface Registration { app_key: string; name: string; description: string | null; third_party: boolean; development: EnvironmentConfig; production: EnvironmentConfig }
 export interface Assignment { kind: 'user' | 'group'; id: number | string }
+export interface AssignmentSummary { target: Assignment; label: string; secondary: string }
 export interface IssuedEnvironmentSecret { environment_id: string; client_secret: string }
 export interface RegistrationReceipt { operation_id: string; application_id: number; management_mode: string; environments: { environment_id: string; client_id: string; kind: string; active_version_id: string | null }[]; secrets?: IssuedEnvironmentSecret[]; newly_issued_secrets?: IssuedEnvironmentSecret[] }
 export interface ChangeReceipt { operation_id: string; summary: Record<string, string | number | boolean | null>; client_secret?: string }

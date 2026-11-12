@@ -56,6 +56,7 @@ struct Page {
     after: Option<Uuid>,
     #[serde(default = "limit")]
     limit: u32,
+    q: Option<String>,
 }
 fn limit() -> u32 {
     25
@@ -128,6 +129,7 @@ async fn groups(
                 &browser::read_sso_cookie(&state.config, &headers)?,
                 page.after,
                 page.limit,
+                page.q.as_deref(),
                 &context.budget,
             )
             .await

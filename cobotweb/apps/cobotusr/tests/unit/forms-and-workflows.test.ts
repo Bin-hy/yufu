@@ -9,10 +9,30 @@ import UiSelect from '@/components/ui/select/select.vue'
 import Pagination from '@/components/ui/pagination/pagination.vue'
 import { useFormDraft } from '@/composables/use-form-draft'
 import { createStepWorkflow } from '@/composables/use-step-workflow'
+import { errorMessage } from '@/composables/use-async-mutation'
 import { disposeTheme, initializeTheme, useTheme } from '@/composables/use-theme'
 const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/', name: 'form', component: {} }],
+})
+describe('接口错误提示', () => {
+    it('无法解析的 503 代码给出可重试的中文提示', () => {
+        expect(
+            errorMessage({
+                response: { data: { code: 'deadline_exceeded', request_id: 'req-1' } },
+            }),
+        ).toBe('认证服务响应超时，请稍后重试')
+        expect(
+            errorMessage({
+                response: { data: { code: 'dependency_unavailable' } },
+            }),
+        ).toBe('认证服务暂时不可用，请稍后重试')
+    })
+    it('优先使用服务端明确消息', () => {
+        expect(
+            errorMessage({ response: { data: { message: '账号或密码不正确' } } }),
+        ).toBe('账号或密码不正确')
+    })
 })
 describe('表单值与分页', () => {
     it('普通按钮默认为 button，显式 submit 保留', () => {

@@ -49,6 +49,14 @@ struct Page {
     #[serde(default = "default_limit")]
     limit: u32,
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccountsQuery {
+    after: Option<String>,
+    #[serde(default = "default_limit")]
+    limit: u32,
+    q: Option<String>,
+}
 fn default_limit() -> u32 {
     25
 }
@@ -78,6 +86,7 @@ async fn list(
                 kind,
                 page.after.as_deref(),
                 page.limit,
+                None,
                 &context.budget,
             )
             .await
@@ -101,7 +110,29 @@ list_route!(apps, Applications);
 list_route!(consents, Consents);
 list_route!(centers, Centers);
 list_route!(rps, RelyingParties);
-list_route!(accounts, Accounts);
+async fn accounts(
+    State(state): State<AppState>,
+    Extension(context): Extension<IdentityRequest>,
+    headers: HeaderMap,
+    query: Result<Query<AccountsQuery>, QueryRejection>,
+) -> ManagementResponse {
+    let result = async {
+        let Query(page) = query.map_err(|_| IdentityError::InvalidInput)?;
+        let secret = browser::read_sso_cookie(&state.config, &headers)?;
+        console(&state)?
+            .list(
+                &secret,
+                ConsoleKind::Accounts,
+                page.after.as_deref(),
+                page.limit,
+                page.q.as_deref(),
+                &context.budget,
+            )
+            .await
+    }
+    .await;
+    response(result, context.id)
+}
 list_route!(audit, Audit);
 list_route!(deliveries, Deliveries);
 async fn app_deliveries(

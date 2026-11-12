@@ -206,6 +206,18 @@ async function fillProductionDraft(
   await page.locator('#registration-prod-audience').fill(audience)
 }
 
+async function selectSearchOption(
+  page: Page,
+  inputSelector: string,
+  query: string,
+  value: string,
+): Promise<void> {
+  const input = page.locator(inputSelector)
+  await input.click()
+  await input.fill(query)
+  await page.locator(`.entity-picker-option[data-value="${value}"]`).first().click()
+}
+
 async function confirmRegistration(page: Page): Promise<void> {
   await page.getByRole('button', { name: '确认并建立应用', exact: true }).click()
   await expect(page.getByRole('heading', { name: '应用已建立' })).toBeVisible()
@@ -403,7 +415,7 @@ test('a developer registers Web A and SPA B, collaborates, transfers ownership a
     await a.page.goto(cfg.opOrigin + `/developer/apps/${webReceipt.appId}`)
     const candidate = a.page.locator('#detail-candidate')
     await expect(candidate).toBeVisible()
-    await candidate.selectOption(String(b.userId))
+    await selectSearchOption(a.page, '#detail-candidate', String(b.userId), String(b.userId))
     await a.page.getByRole('button', { name: '添加维护者' }).click()
     await expect(a.page.getByText(`账户 ${b.userId} · 维护者`)).toBeVisible()
 
@@ -422,7 +434,7 @@ test('a developer registers Web A and SPA B, collaborates, transfers ownership a
 
     await a.page.reload()
     await expect(a.page.locator('#detail-candidate')).toBeVisible()
-    await a.page.locator('#detail-candidate').selectOption(String(b.userId))
+    await selectSearchOption(a.page, '#detail-candidate', String(b.userId), String(b.userId))
     await a.page.getByRole('button', { name: '交接负责人' }).click()
     await expect(a.page.getByText(`负责人账户 ${b.userId}`)).toBeVisible()
     await expect(a.page.getByText(`账户 ${a.userId} · 维护者`)).toBeVisible()
