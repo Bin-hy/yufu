@@ -53,6 +53,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # A Docker reference must be lowercase, while github.repository keeps the
+      # owner's display casing (here Bin-hy/yufu). Docker rejects the mixed-case
+      # form with "repository name must be lowercase", so normalise it once and
+      # let every later step read the corrected IMAGE from the environment.
+      - name: Normalise the image name
+        run: |
+          set -euo pipefail
+          printf 'IMAGE=%s\n' "$(printf '%s' "$IMAGE" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       # arm64 layers are produced under emulation on the amd64 runner.
       - name: Enable arm64 emulation
         run: docker run --privileged --rm tonistiigi/binfmt:latest --install arm64
