@@ -7,6 +7,7 @@ import {
     AlertDialogTitle,
     AlertDialogDescription,
 } from 'reka-ui'
+import { TriangleAlert } from '@lucide/vue'
 import UiButton from '@/components/ui/button/button.vue'
 import { useId, watch, nextTick } from 'vue'
 import { captureFocusOrigin, returnFocus } from '@/utils/focus'
@@ -58,8 +59,10 @@ function restoreFocus(event: Event) {
                 if (!value) cancel()
             }
         "
-        ><AlertDialogPortal
-            ><AlertDialogOverlay class="dialog-overlay" /><AlertDialogContent
+    >
+        <AlertDialogPortal>
+            <AlertDialogOverlay class="dialog-overlay" />
+            <AlertDialogContent
                 class="dialog-content dialog-md"
                 :aria-busy="busy"
                 @escape-key-down="
@@ -69,25 +72,39 @@ function restoreFocus(event: Event) {
                 "
                 @open-auto-focus="openFocus"
                 @close-auto-focus="restoreFocus"
-                ><header class="dialog-header">
-                    <AlertDialogTitle class="dialog-title">{{ title }}</AlertDialogTitle>
+            >
+                <header class="dialog-header !border-b-0 !pb-0">
+                    <div class="flex items-start gap-3">
+                        <span
+                            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-destructive/10 text-destructive"
+                        >
+                            <TriangleAlert :size="17" aria-hidden="true" />
+                        </span>
+                        <div>
+                            <AlertDialogTitle class="dialog-title">{{ title }}</AlertDialogTitle>
+                            <AlertDialogDescription class="dialog-description">{{
+                                description || '此操作会改变当前对象，请确认后继续。'
+                            }}</AlertDialogDescription>
+                        </div>
+                    </div>
                 </header>
                 <div class="dialog-body">
-                    <AlertDialogDescription class="dialog-description">{{
-                        description || '此操作会改变当前对象，请确认后继续。'
-                    }}</AlertDialogDescription
-                    ><slot />
+                    <slot />
                     <p v-if="error" role="alert" class="inline-error mt-4">{{ error }}</p>
                 </div>
                 <footer class="dialog-footer">
                     <UiButton :id="cancelId" variant="outline" :disabled="busy" @click="cancel">{{
                         cancelText
-                    }}</UiButton
-                    ><UiButton variant="destructive" :disabled="busy" @click="emit('confirm')">{{
-                        busy ? '处理中…' : confirmText
                     }}</UiButton>
-                </footer></AlertDialogContent
-            ></AlertDialogPortal
-        ></AlertDialogRoot
-    >
+                    <UiButton
+                        variant="destructive"
+                        :disabled="busy"
+                        :loading="busy"
+                        @click="emit('confirm')"
+                        >{{ confirmText }}</UiButton
+                    >
+                </footer>
+            </AlertDialogContent>
+        </AlertDialogPortal>
+    </AlertDialogRoot>
 </template>

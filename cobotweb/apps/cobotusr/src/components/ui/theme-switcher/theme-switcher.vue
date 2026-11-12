@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Sun, Moon, Monitor } from '@lucide/vue'
+import { Moon, Monitor, Sun } from '@lucide/vue'
 import { useTheme } from '@/composables/use-theme'
 const { preference, setTheme } = useTheme()
 const themes = [
@@ -20,7 +20,7 @@ const themes = [
             :title="theme.title"
             @click="setTheme(theme.value)"
         >
-            <component :is="theme.icon" :size="16" aria-hidden="true" />
+            <component :is="theme.icon" :size="14" aria-hidden="true" />
         </button>
     </div>
 </template>

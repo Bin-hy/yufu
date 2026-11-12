@@ -3,6 +3,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { defineComponent, ref, nextTick, effectScope } from 'vue'
 import UiButton from '@/components/ui/button/button.vue'
+import UiInput from '@/components/ui/input/input.vue'
+import UiFormField from '@/components/ui/form-field/form-field.vue'
 import UiSelect from '@/components/ui/select/select.vue'
 import Pagination from '@/components/ui/pagination/pagination.vue'
 import { useFormDraft } from '@/composables/use-form-draft'
@@ -16,6 +18,33 @@ describe('表单值与分页', () => {
     it('普通按钮默认为 button，显式 submit 保留', () => {
         expect(mount(UiButton).attributes('type')).toBe('button')
         expect(mount(UiButton, { props: { type: 'submit' } }).attributes('type')).toBe('submit')
+    })
+    it('密码输入可切换可见性，清除按钮发出空值', async () => {
+        const password = mount(UiInput, { props: { modelValue: 'secret', type: 'password' } })
+        expect(password.find('input').attributes('type')).toBe('password')
+        await password.find('[aria-label="显示密码"]').trigger('click')
+        expect(password.find('input').attributes('type')).toBe('text')
+        await password.find('[aria-label="隐藏密码"]').trigger('click')
+        expect(password.find('input').attributes('type')).toBe('password')
+        const clearable = mount(UiInput, { props: { modelValue: 'hello', clearable: true } })
+        await clearable.find('[aria-label="清除输入"]').trigger('click')
+        expect(clearable.emitted('update:modelValue')?.[0]).toEqual([''])
+    })
+    it('按钮 loading 时禁用并暴露 busy 状态', () => {
+        const wrapper = mount(UiButton, { props: { loading: true } })
+        expect(wrapper.attributes('disabled')).toBeDefined()
+        expect(wrapper.attributes('aria-busy')).toBe('true')
+        expect(wrapper.find('.ui-button-spinner').exists()).toBe(true)
+    })
+    it('表单字段错误使用明确 id 并声明 aria-live 角色', () => {
+        const wrapper = mount(UiFormField, {
+            props: { id: 'account-email', label: '邮箱', error: '格式不正确' },
+            slots: { default: '<input id="account-email" />' },
+        })
+        const error = wrapper.find('#account-email-error')
+        expect(error.text()).toContain('格式不正确')
+        expect(error.attributes('role')).toBe('alert')
+        expect(wrapper.find('label').attributes('for')).toBe('account-email')
     })
     it('select 数值与 null 不泄漏为字符串', async () => {
         const wrapper = mount(UiSelect, {

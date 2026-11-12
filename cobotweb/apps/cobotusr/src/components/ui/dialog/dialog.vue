@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { DialogRoot, DialogPortal, DialogOverlay, DialogContent, DialogTitle, DialogDescription } from 'reka-ui'
-import { X, LoaderCircle } from '@lucide/vue'
+import { X } from '@lucide/vue'
 import { nextTick, watch, inject, useId } from 'vue'
 import { pageContextKey } from '@/workspace/page-context'
 import { captureFocusOrigin, returnFocus } from '@/utils/focus'
@@ -99,14 +99,20 @@ function restoreFocus(event: Event) {
                 @close-auto-focus="restoreFocus"
             >
                 <header class="dialog-header">
-                    <div>
-                        <DialogTitle class="dialog-title">{{ title }}</DialogTitle
-                        ><DialogDescription :class="description ? 'dialog-description' : 'sr-only'">{{
+                    <div class="min-w-0">
+                        <DialogTitle class="dialog-title">{{ title }}</DialogTitle>
+                        <DialogDescription :class="description ? 'dialog-description' : 'sr-only'">{{
                             description || '查看内容后选择确认或取消。'
                         }}</DialogDescription>
                     </div>
-                    <button type="button" class="icon-button" aria-label="关闭弹窗" :disabled="busy" @click="close">
-                        <X :size="18" aria-hidden="true" />
+                    <button
+                        type="button"
+                        class="icon-button"
+                        aria-label="关闭弹窗"
+                        :disabled="busy"
+                        @click="close"
+                    >
+                        <X :size="17" aria-hidden="true" />
                     </button>
                 </header>
                 <div class="dialog-body" :class="{ 'dialog-scroll': contentScrollable }">
@@ -114,14 +120,15 @@ function restoreFocus(event: Event) {
                     <p v-if="error" class="inline-error mt-4" role="alert">{{ error }}</p>
                 </div>
                 <footer v-if="!hideFooter" class="dialog-footer">
-                    <slot name="footer"
-                        ><UiButton variant="outline" :disabled="busy" @click="close">{{ cancelText }}</UiButton
-                        ><UiButton :disabled="busy || confirmDisabled" @click="emit('confirm')"
-                            ><LoaderCircle v-if="busy" class="animate-spin" :size="16" aria-hidden="true" />{{
-                                busy ? '处理中…' : confirmText
-                            }}</UiButton
-                        ></slot
-                    >
+                    <slot name="footer">
+                        <UiButton variant="outline" :disabled="busy" @click="close">{{ cancelText }}</UiButton>
+                        <UiButton
+                            :disabled="busy || confirmDisabled"
+                            :loading="busy"
+                            @click="emit('confirm')"
+                            >{{ confirmText }}</UiButton
+                        >
+                    </slot>
                 </footer>
             </DialogContent>
         </DialogPortal>

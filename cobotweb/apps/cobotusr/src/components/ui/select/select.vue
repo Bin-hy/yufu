@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 const props = defineProps<{
     modelValue?: string | number | null
     disabled?: boolean
+    invalid?: boolean
     class?: string
     modelModifiers?: { number?: boolean }
 }>()
@@ -27,7 +28,8 @@ function update(event: Event) {
     <select
         :value="modelValue ?? 'null'"
         :disabled="disabled"
-        :class="cn('ui-select', $props.class)"
+        :aria-invalid="invalid || undefined"
+        :class="cn('ui-select', invalid && 'has-error', $props.class)"
         @change="update"
     >
         <slot />

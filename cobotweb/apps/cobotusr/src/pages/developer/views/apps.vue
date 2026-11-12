@@ -1,6 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'DeveloperApps' })
 import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { ArrowRight, Copy, Plus, Search, ShieldCheck, Sparkles, X } from '@lucide/vue'
 import { usePageContext } from '@/workspace/page-context'
 import { useUserStore } from '@/pinia/stores/user'
 import { useCursorPage } from '@/composables/use-cursor-page'
@@ -9,19 +10,29 @@ import { useEphemeralResult, useOperationKey } from '@/composables/use-ephemeral
 import { useFormDraft } from '@/composables/use-form-draft'
 import { listApps, registerApp, registerAdminApp } from '../api'
 import { emptyConfig, type Registration, type RegistrationReceipt } from '../api/type'
-import { environmentConfigIssue, registrationBasicIssue, registrationIssue, type EnvironmentConfigField, type ValidationIssue } from '../api/validation'
+import {
+    environmentConfigIssue,
+    registrationBasicIssue,
+    registrationIssue,
+    type EnvironmentConfigField,
+    type ValidationIssue,
+} from '../api/validation'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
+import UiFormField from '@/components/ui/form-field/form-field.vue'
 import ConfigEditor from '../components/config-editor.vue'
+import { emitToast } from '@/utils/toast'
 
 type StepId = 'basic' | 'development' | 'production' | 'confirm'
 
 const context = usePageContext()
 const user = useUserStore()
 const administrator = computed(() => context.route.value.path.startsWith('/admin/'))
-const list = useCursorPage('managed-apps', (after: number | undefined, signal) => listApps(administrator.value, after, signal))
+const list = useCursorPage('managed-apps', (after: number | undefined, signal) =>
+    listApps(administrator.value, after, signal),
+)
 const { data, status, error, refreshing } = list
 
 const registrationSteps: readonly { id: StepId; title: string; description: string }[] = [
@@ -36,7 +47,8 @@ const owner = ref(user.centerSession?.user_id ?? 0)
 const limitation = ref(false)
 const step = ref<StepId>('basic')
 const unlockedStep = ref(0)
-const stepIndex = computed(() => registrationSteps.findIndex(item => item.id === step.value))
+const query = ref('')
+const stepIndex = computed(() => registrationSteps.findIndex((item) => item.id === step.value))
 const currentStep = computed(() => registrationSteps[stepIndex.value]!)
 const fieldErrors = reactive<Record<string, string>>({})
 const form = reactive<Registration>({
@@ -59,9 +71,33 @@ const draft = useFormDraft('应用注册', () => ({ form, owner: owner.value, li
     discard: resetRegistration,
 })
 
-watch([form, owner, limitation], () => {
-    clearFieldErrors()
-}, { deep: true })
+watch(
+    [form, owner, limitation],
+    () => {
+        clearFieldErrors()
+    },
+    { deep: true },
+)
+
+const filteredApps = computed(() => {
+    const keyword = query.value.trim().toLowerCase()
+    const items = data.value?.items ?? []
+    if (!keyword) return items
+    return items.filter(
+        (app) =>
+            app.name.toLowerCase().includes(keyword) ||
+            app.app_key.toLowerCase().includes(keyword) ||
+            (app.description ?? '').toLowerCase().includes(keyword),
+    )
+})
+const pendingApprovals = computed(
+    () =>
+        data.value?.items.reduce(
+            (total, app) =>
+                total + app.environments.filter((environment) => environment.pending_approval).length,
+            0,
+        ) ?? 0,
+)
 
 function clearFieldErrors() {
     for (const key of Object.keys(fieldErrors)) delete fieldErrors[key]
@@ -107,13 +143,19 @@ function ownerIssue(): ValidationIssue | null {
 
 function limitationIssue(): ValidationIssue | null {
     if (!administrator.value || limitation.value) return null
-    return { field: 'accept_logout_limitation', message: '需要接受已记录的退出能力限制后才能建立应用' }
+    return {
+        field: 'accept_logout_limitation',
+        message: '需要接受已记录的退出能力限制后才能建立应用',
+    }
 }
 
 function currentIssue(): ValidationIssue | null {
-    if (step.value === 'basic') return ownerIssue() ?? registrationBasicIssue(form, administrator.value)
-    if (step.value === 'development') return environmentConfigIssue(form.development, 'development', true)
-    if (step.value === 'production') return environmentConfigIssue(form.production, 'production', administrator.value)
+    if (step.value === 'basic')
+        return ownerIssue() ?? registrationBasicIssue(form, administrator.value)
+    if (step.value === 'development')
+        return environmentConfigIssue(form.development, 'development', true)
+    if (step.value === 'production')
+        return environmentConfigIssue(form.production, 'production', administrator.value)
     return limitationIssue() ?? registrationIssue(form, administrator.value)
 }
 
@@ -146,7 +188,11 @@ function focusIssue(issue: ValidationIssue) {
         field = field.slice(field.indexOf('.') + 1)
     }
     const control = issueControls[field]
-    const id = control ? (environment ? `registration-${environment === 'development' ? 'dev' : 'prod'}-${control}` : control) : ''
+    const id = control
+        ? environment
+            ? `registration-${environment === 'development' ? 'dev' : 'prod'}-${control}`
+            : control
+        : ''
     const element = id ? formRef.value?.querySelector<HTMLElement>(`#${id}`) ?? null : null
     if (element) {
         element.focus()
@@ -161,15 +207,17 @@ async function focusStepTitle() {
 }
 
 async function goToStep(index: number) {
-    if (pending.value || index === stepIndex.value || index < 0 || index >= registrationSteps.length) return
+    if (pending.value || index === stepIndex.value || index < 0 || index >= registrationSteps.length)
+        return
     if (index > stepIndex.value + 1) return
     if (index > unlockedStep.value && index !== stepIndex.value + 1) return
     if (index === stepIndex.value + 1) {
         const issue = currentIssue()
         if (issue) {
-            const scopedIssue = step.value === 'development' || step.value === 'production'
-                ? { ...issue, field: `${step.value}.${issue.field}` }
-                : issue
+            const scopedIssue =
+                step.value === 'development' || step.value === 'production'
+                    ? { ...issue, field: `${step.value}.${issue.field}` }
+                    : issue
             setIssue(scopedIssue)
             await nextTick()
             focusIssue(scopedIssue)
@@ -197,16 +245,18 @@ function environmentErrors(environment: 'development' | 'production') {
     const errors: Partial<Record<EnvironmentConfigField, string>> = {}
     const prefix = `${environment}.`
     for (const [field, message] of Object.entries(fieldErrors)) {
-        if (field.startsWith(prefix)) errors[field.slice(prefix.length) as EnvironmentConfigField] = message
+        if (field.startsWith(prefix))
+            errors[field.slice(prefix.length) as EnvironmentConfigField] = message
     }
     return errors
 }
 
 const developmentErrors = computed(() => environmentErrors('development'))
 const productionErrors = computed(() => environmentErrors('production'))
-
-const clientKindLabel = (kind: Registration['development']['client_kind']) => kind === 'browser_spa' ? '浏览器 SPA' : '服务端 Web'
-const uriList = (values: string[], emptyText: string) => values.length ? values.join('；') : emptyText
+const clientKindLabel = (kind: Registration['development']['client_kind']) =>
+    kind === 'browser_spa' ? '浏览器 SPA' : '服务端 Web'
+const uriList = (values: string[], emptyText: string) =>
+    values.length ? values.join('；') : emptyText
 
 async function register() {
     const metaIssue = ownerIssue() ?? limitationIssue()
@@ -224,25 +274,38 @@ async function register() {
         focusIssue(issue)
         return
     }
-    const data: Registration = {
-        ...form,
-        description: form.description?.trim() || null,
+    const data: Registration = { ...form, description: form.description?.trim() || null }
+    await mutation.run(
+        () => {
+            return administrator.value
+                ? registerAdminApp(
+                      {
+                          application: data,
+                          owner_user_id: owner.value,
+                          assignments: [],
+                          accept_logout_limitation: limitation.value,
+                      },
+                      operationKey({ data, owner: owner.value, limitation: limitation.value }),
+                  )
+                : registerApp(data, operationKey(data))
+        },
+        async (value) => {
+            receipt.value = value
+            resetRegistration()
+            draft.markSaved()
+            await list.refresh()
+            emitToast({ type: 'success', message: '应用已建立，密钥仅在回执中展示一次' })
+        },
+    )
+}
+
+async function copy(value: string, label: string) {
+    try {
+        await navigator.clipboard.writeText(value)
+        emitToast({ type: 'success', message: label + '已复制' })
+    } catch {
+        emitToast({ type: 'error', message: '无法访问剪贴板，请手动选择复制' })
     }
-    await mutation.run(() => {
-        return administrator.value
-            ? registerAdminApp({
-                application: data,
-                owner_user_id: owner.value,
-                assignments: [],
-                accept_logout_limitation: limitation.value,
-            }, operationKey({ data, owner: owner.value, limitation: limitation.value }))
-            : registerApp(data, operationKey(data))
-    }, async value => {
-        receipt.value = value
-        resetRegistration()
-        draft.markSaved()
-        await list.refresh()
-    })
 }
 </script>
 
@@ -250,30 +313,75 @@ async function register() {
     <div class="workspace-page">
         <PageHeader
             :title="administrator ? '企业应用' : '开发者控制台'"
+            eyebrow="APPLICATIONS"
             :description="administrator ? '审核生产接入、管理分配和直接配置获批第三方。' : '一次注册建立开发与生产环境，生产接入需独立审批。'"
         >
             <UiButton :aria-expanded="opened" @click="toggleRegistration">
-                {{ opened ? '收起注册表单' : (administrator ? '配置获批第三方' : '注册应用') }}
+                <Plus v-if="!opened" :size="14" aria-hidden="true" />
+                <X v-else :size="14" aria-hidden="true" />
+                {{ opened ? '收起注册表单' : administrator ? '配置获批第三方' : '注册应用' }}
             </UiButton>
         </PageHeader>
 
-        <p v-if="writeError" role="alert" class="inline-error mb-4">{{ writeError }}</p>
+        <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
 
-        <section v-if="receipt" class="mb-6 rounded-xl border border-primary bg-card p-5" aria-live="polite">
-            <h2 class="font-semibold">应用已建立</h2>
-            <p class="mt-2 text-sm">操作回执 <code class="break-all">{{ receipt.operation_id }}</code></p>
-            <div v-for="secret in receipt.secrets || receipt.newly_issued_secrets || []" :key="secret.environment_id" class="mt-3">
-                <p class="text-xs">{{ receipt.environments.find(e => e.environment_id === secret.environment_id)?.kind === 'development' ? '开发环境' : '生产环境' }}密钥（仅此次展示）</p>
-                <code class="block select-all break-all rounded bg-muted p-3 text-xs">{{ secret.client_secret }}</code>
-            </div>
-            <p class="mt-3 text-xs text-muted-foreground">请保存到应用服务端的秘密配置中。离开页面后清除；响应丢失时可在环境详情重置密钥。</p>
-            <div class="mt-3 flex flex-wrap gap-3">
-                <RouterLink class="ui-button ui-button-default" :to="{ name: administrator ? 'admin-app' : 'developer-app', params: { id: receipt.application_id } }">查看接入配置</RouterLink>
-                <UiButton variant="outline" @click="result.clear">我已保存，隐藏回执</UiButton>
+        <div class="metric-grid mb-5">
+            <article class="metric-card">
+                <span class="metric-label"><Sparkles :size="13" aria-hidden="true" />应用总数</span>
+                <strong class="metric-value">{{ data?.items.length ?? 0 }}</strong>
+                <span class="metric-meta">当前页面加载的应用</span>
+            </article>
+            <article class="metric-card">
+                <span class="metric-label"><ShieldCheck :size="13" aria-hidden="true" />启用中</span>
+                <strong class="metric-value">{{ data?.items.filter((app) => app.active).length ?? 0 }}</strong>
+                <span class="metric-meta">可以继续维护接入配置</span>
+            </article>
+            <article class="metric-card">
+                <span class="metric-label"><ArrowRight :size="13" aria-hidden="true" />待审批环境</span>
+                <strong class="metric-value">{{ pendingApprovals }}</strong>
+                <span class="metric-meta">生产配置等待管理员审核</span>
+            </article>
+        </div>
+
+        <section v-if="receipt" class="panel mb-5 border-success/30" aria-live="polite">
+            <header class="panel-heading bg-success/[0.04]">
+                <div>
+                    <h2>应用已建立</h2>
+                    <p>操作回执 <code class="mono break-all">{{ receipt.operation_id }}</code></p>
+                </div>
+                <span class="status-badge status-success">成功</span>
+            </header>
+            <div class="surface-body space-y-4">
+                <div v-for="secret in receipt.secrets || receipt.newly_issued_secrets || []" :key="secret.environment_id">
+                    <p class="mb-1.5 text-[11px] font-semibold">
+                        {{ receipt.environments.find((e) => e.environment_id === secret.environment_id)?.kind === 'development' ? '开发环境' : '生产环境' }}密钥（仅此次展示）
+                    </p>
+                    <div class="copy-field">
+                        <code>{{ secret.client_secret }}</code>
+                        <button type="button" class="icon-button" aria-label="复制密钥" title="复制密钥" @click="copy(secret.client_secret, '密钥')">
+                            <Copy :size="14" aria-hidden="true" />
+                        </button>
+                    </div>
+                </div>
+                <p class="form-help">请保存到应用服务端的秘密配置中。离开页面后清除；响应丢失时可在环境详情重置密钥。</p>
+                <div class="flex flex-wrap gap-2">
+                    <RouterLink
+                        class="ui-button ui-button-default"
+                        :to="{ name: administrator ? 'admin-app' : 'developer-app', params: { id: receipt.application_id } }"
+                    >查看接入配置</RouterLink>
+                    <UiButton variant="outline" @click="result.clear()">我已保存，隐藏回执</UiButton>
+                </div>
             </div>
         </section>
 
-        <form v-if="opened" ref="formRef" class="registration-panel mb-6 rounded-xl border bg-card" :aria-busy="pending" @submit.prevent="register">
+        <form
+            v-if="opened"
+            ref="formRef"
+            class="registration-panel mb-5"
+            :aria-busy="pending"
+            novalidate
+            @submit.prevent="register"
+        >
             <nav class="registration-steps" aria-label="应用注册步骤">
                 <ol class="wizard-steps">
                     <li v-for="(item, index) in registrationSteps" :key="item.id">
@@ -304,56 +412,43 @@ async function register() {
 
                 <section v-if="step === 'basic'" class="space-y-5">
                     <div class="grid gap-4 md:grid-cols-2">
-                        <div class="form-field">
-                            <label for="app-key">应用 Key</label>
+                        <UiFormField id="app-key" label="应用 Key" required :error="fieldError('app_key')" error-id="app-key-error">
                             <UiInput
                                 id="app-key"
                                 v-model="form.app_key"
-                                :class="fieldError('app_key') ? 'has-error' : ''"
+                                :invalid="!!fieldError('app_key')"
                                 name="app-key"
                                 required
                                 autocomplete="off"
                                 spellcheck="false"
                                 placeholder="cobotrix-spa-example…"
                                 :disabled="pending"
-                                :aria-invalid="!!fieldError('app_key')"
-                                :aria-describedby="fieldError('app_key') ? 'app-key-error' : undefined"
                             />
-                            <p v-if="fieldError('app_key')" id="app-key-error" class="field-error" role="alert">{{ fieldError('app_key') }}</p>
-                        </div>
-                        <div class="form-field">
-                            <label for="app-name">应用名称</label>
+                        </UiFormField>
+                        <UiFormField id="app-name" label="应用名称" required :error="fieldError('name')" error-id="app-name-error">
                             <UiInput
                                 id="app-name"
                                 v-model="form.name"
-                                :class="fieldError('name') ? 'has-error' : ''"
+                                :invalid="!!fieldError('name')"
                                 name="app-name"
                                 required
                                 autocomplete="off"
                                 placeholder="Cobotrix SPA 示例…"
                                 :disabled="pending"
-                                :aria-invalid="!!fieldError('name')"
-                                :aria-describedby="fieldError('name') ? 'app-name-error' : undefined"
                             />
-                            <p v-if="fieldError('name')" id="app-name-error" class="field-error" role="alert">{{ fieldError('name') }}</p>
-                        </div>
-                        <div class="form-field">
-                            <label for="app-description">说明</label>
+                        </UiFormField>
+                        <UiFormField id="app-description" label="说明" optional class="md:col-span-2" :error="fieldError('description')" error-id="app-description-error">
                             <UiInput
                                 id="app-description"
                                 v-model="form.description"
-                                :class="fieldError('description') ? 'has-error' : ''"
+                                :invalid="!!fieldError('description')"
                                 name="app-description"
                                 autocomplete="off"
                                 placeholder="向管理员说明用途…"
                                 :disabled="pending"
-                                :aria-invalid="!!fieldError('description')"
-                                :aria-describedby="fieldError('description') ? 'app-description-error' : undefined"
                             />
-                            <p v-if="fieldError('description')" id="app-description-error" class="field-error" role="alert">{{ fieldError('description') }}</p>
-                        </div>
-                        <div v-if="administrator" class="form-field">
-                            <label for="app-owner">明确负责人账户 ID</label>
+                        </UiFormField>
+                        <UiFormField v-if="administrator" id="app-owner" label="负责人账户 ID" required :error="fieldError('owner_user_id')" error-id="app-owner-error">
                             <UiInput
                                 id="app-owner"
                                 v-model.number="owner"
@@ -361,19 +456,16 @@ async function register() {
                                 min="1"
                                 step="1"
                                 inputmode="numeric"
-                                :class="fieldError('owner_user_id') ? 'has-error' : ''"
+                                :invalid="!!fieldError('owner_user_id')"
                                 name="app-owner"
                                 required
                                 autocomplete="off"
                                 :disabled="pending"
-                                :aria-invalid="!!fieldError('owner_user_id')"
-                                :aria-describedby="fieldError('owner_user_id') ? 'app-owner-error' : undefined"
                             />
-                            <p v-if="fieldError('owner_user_id')" id="app-owner-error" class="field-error" role="alert">{{ fieldError('owner_user_id') }}</p>
-                        </div>
+                        </UiFormField>
                     </div>
                     <label class="checkbox-field">
-                        <input v-model="form.third_party" type="checkbox" :disabled="pending">
+                        <input v-model="form.third_party" type="checkbox" :disabled="pending" />
                         <span>第三方应用</span>
                     </label>
                     <p class="form-help">第三方应用会进入管理员配置流程；内部应用默认由开发者维护。</p>
@@ -435,7 +527,7 @@ async function register() {
                         </section>
                     </div>
                     <label v-if="administrator" class="checkbox-field">
-                        <input id="accept-limitation" v-model="limitation" type="checkbox" :disabled="pending" :aria-invalid="!!fieldError('accept_logout_limitation')">
+                        <input id="accept-limitation" v-model="limitation" type="checkbox" :disabled="pending" :aria-invalid="!!fieldError('accept_logout_limitation')" />
                         <span>接受已记录的退出能力限制</span>
                     </label>
                     <p v-if="fieldError('accept_logout_limitation')" class="field-error" role="alert">{{ fieldError('accept_logout_limitation') }}</p>
@@ -450,46 +542,62 @@ async function register() {
                 <div class="wizard-actions">
                     <UiButton v-if="stepIndex > 0" variant="outline" type="button" :disabled="pending" @click="previousStep">上一步</UiButton>
                     <UiButton v-if="stepIndex < registrationSteps.length - 1" type="button" :disabled="pending" @click="nextStep">下一步</UiButton>
-                    <UiButton v-else type="submit" :disabled="pending">{{ pending ? '正在建立应用…' : '确认并建立应用' }}</UiButton>
+                    <UiButton v-else type="submit" :disabled="pending" :loading="pending">{{ pending ? '正在建立应用…' : '确认并建立应用' }}</UiButton>
                 </div>
             </footer>
         </form>
 
-        <DataState
-            :status="status"
-            :error="error"
-            :refreshing="refreshing"
-            :empty="!data?.items.length"
-            empty-title="还没有应用"
-            :empty-description="administrator ? '配置第一个获批第三方应用后，会在这里显示。' : '注册第一个应用后，可以在这里查看开发与生产接入状态。'"
-            @retry="list.refresh"
-        >
-            <div class="grid gap-4 md:grid-cols-2">
-                <RouterLink
-                    v-for="app in data?.items"
-                    :key="app.application_id"
-                    class="app-card"
-                    :to="{ name: administrator ? 'admin-app' : 'developer-app', params: { id: app.application_id } }"
-                >
-                    <div class="min-w-0 flex-1">
-                        <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-                            <h2 class="min-w-0 truncate font-semibold">{{ app.name }}</h2>
-                            <span class="status-badge" :class="app.active ? 'status-success' : 'status-muted'">{{ app.active ? '启用' : '停用' }}</span>
-                        </div>
-                        <p v-if="app.description" class="mt-2 line-clamp-2 text-xs text-muted-foreground">{{ app.description }}</p>
-                        <p class="mt-2 text-xs text-muted-foreground">
-                            <code class="break-all" translate="no">{{ app.app_key }}</code> · {{ app.management_mode === 'admin_configured' ? '管理员直接配置' : '开发者维护' }}
-                        </p>
-                        <ul class="app-environment-list">
-                            <li v-for="env in app.environments" :key="env.environment_id">
-                                <span>{{ env.kind === 'development' ? '开发' : '生产' }}</span>
-                                <span class="status-badge status-muted">{{ env.pending_approval ? '待审批' : env.active_version_id ? '已有生效配置' : '尚未激活' }}</span>
-                            </li>
-                        </ul>
-                    </div>
-                </RouterLink>
+        <section class="panel">
+            <div class="table-toolbar">
+                <div class="search-box">
+                    <Search :size="15" aria-hidden="true" />
+                    <UiInput v-model="query" clearable placeholder="搜索应用名称或 Key…" aria-label="搜索应用" />
+                </div>
+                <span class="toolbar-spacer text-[11px] text-muted-foreground">{{ filteredApps.length }} 个应用</span>
             </div>
-        </DataState>
-        <UiButton v-if="data?.next" class="mt-4" variant="outline" :disabled="refreshing" @click="list.next">{{ refreshing ? '正在加载…' : '下一页' }}</UiButton>
+            <DataState
+                :status="status"
+                :error="error"
+                :refreshing="refreshing"
+                :empty="!data?.items.length"
+                empty-title="还没有应用"
+                :empty-description="administrator ? '配置第一个获批第三方应用后，会在这里显示。' : '注册第一个应用后，可以在这里查看开发与生产接入状态。'"
+                :skeleton-rows="3"
+                @retry="list.refresh()"
+            >
+                <div v-if="filteredApps.length" class="grid gap-4 p-4 md:grid-cols-2">
+                    <RouterLink
+                        v-for="app in filteredApps"
+                        :key="app.application_id"
+                        class="app-card"
+                        :to="{ name: administrator ? 'admin-app' : 'developer-app', params: { id: app.application_id } }"
+                    >
+                        <div class="min-w-0 flex-1">
+                            <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+                                <h2 class="min-w-0 truncate font-semibold">{{ app.name }}</h2>
+                                <span class="status-badge" :class="app.active ? 'status-success' : 'status-muted'">{{ app.active ? '启用' : '停用' }}</span>
+                            </div>
+                            <p v-if="app.description" class="mt-2 line-clamp-2 text-xs text-muted-foreground">{{ app.description }}</p>
+                            <p class="mt-2 text-xs text-muted-foreground">
+                                <code class="break-all" translate="no">{{ app.app_key }}</code> · {{ app.management_mode === 'admin_configured' ? '管理员直接配置' : '开发者维护' }}
+                            </p>
+                            <ul class="app-environment-list">
+                                <li v-for="env in app.environments" :key="env.environment_id">
+                                    <span>{{ env.kind === 'development' ? '开发' : '生产' }}</span>
+                                    <span class="status-badge" :class="env.pending_approval ? 'status-warning' : env.active_version_id ? 'status-success' : 'status-muted'">
+                                        {{ env.pending_approval ? '待审批' : env.active_version_id ? '已有生效配置' : '尚未激活' }}
+                                    </span>
+                                </li>
+                            </ul>
+                        </div>
+                        <ArrowRight :size="16" class="mt-1 shrink-0 text-muted-foreground/45" aria-hidden="true" />
+                    </RouterLink>
+                </div>
+                <p v-else class="empty-filter">没有匹配“{{ query }}”的应用。</p>
+                <div v-if="data?.next" class="flex justify-center border-t border-border p-4">
+                    <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.next()">加载更多应用</UiButton>
+                </div>
+            </DataState>
+        </section>
     </div>
 </template>

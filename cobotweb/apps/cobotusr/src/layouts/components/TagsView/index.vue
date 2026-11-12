@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { watch, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { X, MoreHorizontal, House } from '@lucide/vue'
+import { MoreHorizontal, X } from '@lucide/vue'
 import { DropdownMenuItem } from 'reka-ui'
 import DropdownMenu from '@/components/ui/dropdown-menu/dropdown-menu.vue'
 import { useTabsStore } from '@/pinia/stores/tabs'
@@ -32,37 +32,46 @@ watch(
                 <router-link
                     :to="tab.fullPath"
                     :aria-current="tabs.activeKey === tab.key ? 'page' : undefined"
-                    ><House v-if="tab.affix" :size="12" class="mr-1 inline" aria-hidden="true" />{{
-                        tab.title
-                    }}</router-link
-                ><button
+                >
+                    <span
+                        v-if="tabs.activeKey === tab.key"
+                        class="h-1.5 w-1.5 rounded-full bg-primary"
+                        aria-hidden="true"
+                    />
+                    {{ tab.title }}
+                </router-link>
+                <button
                     v-if="!tab.affix"
                     type="button"
                     :aria-label="'关闭' + tab.title"
                     @click="closeWorkspaceTab(router, tab.key)"
                 >
-                    <X :size="12" aria-hidden="true" />
+                    <X :size="11" aria-hidden="true" />
                 </button>
             </div>
         </div>
-        <DropdownMenu
-            ><template #trigger
-                ><button type="button" class="icon-button !h-7 !w-7" aria-label="页面标签操作">
-                    <MoreHorizontal :size="16" aria-hidden="true" /></button></template
-            ><DropdownMenuItem
+        <DropdownMenu>
+            <template #trigger>
+                <button type="button" class="icon-button !h-7 !w-7" aria-label="页面标签操作">
+                    <MoreHorizontal :size="15" aria-hidden="true" />
+                </button>
+            </template>
+            <DropdownMenuItem
                 class="dropdown-item"
                 :disabled="tabs.activeKey === 'dashboard-home'"
                 @select="closeWorkspaceTab(router, tabs.activeKey)"
                 >关闭当前</DropdownMenuItem
-            ><DropdownMenuItem
+            >
+            <DropdownMenuItem
                 class="dropdown-item"
                 @select="closeWorkspaceTab(router, tabs.activeKey, 'others')"
                 >关闭其他</DropdownMenuItem
-            ><DropdownMenuItem
+            >
+            <DropdownMenuItem
                 class="dropdown-item"
                 @select="closeWorkspaceTab(router, tabs.activeKey, 'right')"
                 >关闭右侧</DropdownMenuItem
-            ></DropdownMenu
-        >
+            >
+        </DropdownMenu>
     </nav>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { ChevronLeft, ChevronRight } from '@lucide/vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiInput from '@/components/ui/input/input.vue'
@@ -17,6 +17,7 @@ const pages = computed(() =>
         (_, i) => Math.max(1, Math.min(current.value - 2, total.value - 4)) + i,
     ),
 )
+const sizeId = useId()
 const jumpInput = ref('')
 function setPage(value: number) {
     if (props.disabled || !Number.isSafeInteger(value)) return
@@ -39,20 +40,21 @@ function jump() {
 <template>
     <nav
         aria-label="列表分页"
-        class="flex flex-wrap items-center justify-between gap-3 p-4 border-t border-border"
+        class="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3"
     >
-        <div class="flex items-center gap-2 text-xs text-muted-foreground">
-            <label for="page-size">每页</label
-            ><UiSelect
-                id="page-size"
+        <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <label :for="sizeId">每页</label>
+            <UiSelect
+                :id="sizeId"
                 :model-value="size"
                 :disabled="disabled"
-                class="!w-20"
+                class="!min-h-8 !w-[72px] !px-2 !text-xs"
                 @update:model-value="setSize"
                 ><option v-for="option in options" :key="option" :value="option">
                     {{ option }}
                 </option></UiSelect
-            ><span>第 {{ current }} / {{ total }} 页</span>
+            >
+            <span aria-live="polite" class="tabular-nums">第 {{ current }} / {{ total }} 页</span>
         </div>
         <div class="flex items-center gap-1">
             <UiButton
@@ -67,7 +69,7 @@ function jump() {
                 :key="value"
                 :variant="value === current ? 'secondary' : 'ghost'"
                 size="sm"
-                class="hidden sm:inline-flex"
+                class="hidden min-w-8 sm:inline-flex"
                 :aria-current="value === current ? 'page' : undefined"
                 :aria-label="'第 ' + value + ' 页'"
                 :disabled="disabled"
@@ -81,12 +83,12 @@ function jump() {
                 @click="setPage(current + 1)"
                 ><ChevronRight :size="16" aria-hidden="true"
             /></UiButton>
-            <form class="hidden lg:flex items-center gap-1 ml-3" @submit.prevent="jump">
+            <form class="ml-2 hidden items-center gap-1 lg:flex" @submit.prevent="jump">
                 <UiInput
                     v-model="jumpInput"
                     inputmode="numeric"
                     aria-label="跳转页码"
-                    class="!w-16"
+                    class="!min-h-8 !w-14 !px-2 !text-xs"
                     :disabled="disabled"
                 /><UiButton type="submit" variant="outline" size="sm" :disabled="disabled"
                     >跳转</UiButton

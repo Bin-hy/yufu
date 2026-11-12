@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { reactive, ref, onScopeDispose } from 'vue'
+import { reactive, ref, onScopeDispose, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ArrowRight, Info } from '@lucide/vue'
 import { centerLogin } from '@/pages/account/api'
 import { useUserStore } from '@/pinia/stores/user'
 import { useTabsStore } from '@/pinia/stores/tabs'
@@ -12,6 +13,7 @@ import { canEnter } from '@/router/guard'
 import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiCheckbox from '@/components/ui/checkbox/checkbox.vue'
+import UiFormField from '@/components/ui/form-field/form-field.vue'
 import AuthLayout from '@/layouts/auth-layout.vue'
 const props = defineProps<{ oidc?: boolean; flowId?: string; actionId?: string }>(),
     router = useRouter(),
@@ -25,21 +27,38 @@ const remembered = getRememberUser(),
         remember: !props.oidc && !!remembered,
     }),
     validation = ref(''),
+    capsLock = ref(false),
     mutation = useAsyncMutation(),
     { pending, error } = mutation
+watch(
+    form,
+    () => {
+        validation.value = ''
+    },
+    { deep: true },
+)
 onScopeDispose(() => { form.password = '' })
+function detectCaps(event: KeyboardEvent) {
+    capsLock.value = event.getModifierState?.('CapsLock') ?? false
+}
 async function submit() {
     if (pending.value) return
     validation.value = ''
     if (!form.username.trim() || !form.password) {
         validation.value = '请输入用户名和密码'
+        document.getElementById(!form.username.trim() ? 'login-username' : 'login-password')?.focus()
         return
     }
     resetSession()
     const saved = await mutation.run(
         () =>
-            centerLogin({ username: form.username.trim(), password: form.password,
-                flow_id: props.flowId || (typeof route.query.flow_id === 'string' ? route.query.flow_id : undefined) }),
+            centerLogin({
+                username: form.username.trim(),
+                password: form.password,
+                flow_id:
+                    props.flowId ||
+                    (typeof route.query.flow_id === 'string' ? route.query.flow_id : undefined),
+            }),
         async (result) => {
             user.setCenterSession(result)
             form.password = ''
@@ -61,12 +80,14 @@ async function submit() {
         if (props.actionId) {
             await router.replace({ name: 'account-action', query: { action_id: props.actionId } })
         } else if (props.oidc) {
-            const flow = props.flowId || (typeof route.query.flow_id === 'string' ? route.query.flow_id : '')
-            window.location.assign(router.resolve({ name: 'oidc-consent', query: { flow_id: flow } }).href)
-        }
-        else {
-            const path =
-                typeof route.query.redirect === 'string' ? route.query.redirect : '/account'
+            const flow =
+                props.flowId ||
+                (typeof route.query.flow_id === 'string' ? route.query.flow_id : '')
+            window.location.assign(
+                router.resolve({ name: 'oidc-consent', query: { flow_id: flow } }).href,
+            )
+        } else {
+            const path = typeof route.query.redirect === 'string' ? route.query.redirect : '/account'
             const target =
                 path.startsWith('/') &&
                 !path.startsWith('//') &&
@@ -82,46 +103,63 @@ async function submit() {
     <AuthLayout
         :title="oidc ? '登录以继续授权' : '欢迎回来'"
         :description="
-            oidc ? '登录平台账户，确认应用请求的访问权限。' : '登录账户，进入身份与权限工作台。'
+            oidc
+                ? '使用企业统一账户登录，确认应用请求的访问范围。'
+                : '登录账户，进入身份与权限工作台。'
         "
-        ><form class="space-y-5" @submit.prevent="submit">
-            <p v-if="validation || error" class="inline-error" role="alert">
+    >
+        <form class="space-y-4" novalidate @submit.prevent="submit">
+            <p v-if="validation || error" class="form-alert" role="alert">
                 {{ validation || error }}
             </p>
-            <div class="form-field">
-                <label for="login-username">用户名</label
-                ><UiInput
+            <UiFormField id="login-username" label="用户名" required>
+                <UiInput
                     id="login-username"
                     v-model="form.username"
                     autocomplete="username"
                     :disabled="pending"
                     required
                     autofocus
+                    :invalid="!!validation && !form.username.trim()"
+                    placeholder="请输入企业账户用户名"
                 />
-            </div>
-            <div class="form-field">
-                <label for="login-password">密码</label
-                ><UiInput
+            </UiFormField>
+            <UiFormField id="login-password" label="密码" required>
+                <UiInput
                     id="login-password"
                     v-model="form.password"
                     type="password"
                     autocomplete="current-password"
                     :disabled="pending"
                     required
+                    :invalid="!!validation && !form.password"
+                    placeholder="请输入账户密码"
+                    @keydown="detectCaps"
+                    @keyup="detectCaps"
                 />
+                <p v-if="capsLock" class="form-help flex items-center gap-1.5 text-warning">
+                    <Info :size="12" aria-hidden="true" />大写锁定已开启
+                </p>
+            </UiFormField>
+            <div class="flex items-center justify-between gap-3">
+                <label v-if="!oidc" class="checkbox-field">
+                    <UiCheckbox v-model="form.remember" :disabled="pending" />
+                    <span>记住用户名</span>
+                </label>
+                <span v-else class="text-[11px] text-muted-foreground">受企业安全策略保护</span>
+                <span class="text-[11px] text-muted-foreground">忘记密码请联系管理员</span>
             </div>
-            <label v-if="!oidc" class="flex gap-2 items-center text-xs text-muted-foreground"
-                ><UiCheckbox v-model="form.remember" :disabled="pending" />记住用户名</label
-            ><UiButton type="submit" size="lg" class="w-full" :disabled="pending">{{
-                pending ? '正在登录…' : '登录'
-            }}</UiButton>
-            <p v-if="!oidc" class="text-center text-xs text-muted-foreground">
-                还没有账户？<RouterLink
-                    :to="{ name: 'register' }"
-                    class="text-primary underline underline-offset-4"
-                    >凭企业邀请创建账户</RouterLink
-                >
+            <UiButton type="submit" size="lg" block :loading="pending" :disabled="pending">
+                登录
+                <ArrowRight v-if="!pending" :size="15" aria-hidden="true" />
+            </UiButton>
+            <div v-if="!oidc" class="auth-links">
+                <span>还没有账户？</span>
+                <RouterLink :to="{ name: 'register' }">凭企业邀请创建账户</RouterLink>
+            </div>
+            <p class="text-center text-[10.5px] leading-5 text-muted-foreground/80">
+                继续即表示你同意企业的身份认证与访问控制策略。
             </p>
-        </form></AuthLayout
-    >
+        </form>
+    </AuthLayout>
 </template>

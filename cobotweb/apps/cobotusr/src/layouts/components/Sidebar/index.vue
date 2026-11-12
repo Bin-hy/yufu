@@ -2,138 +2,105 @@
 import { computed } from 'vue'
 import { useUserStore } from '@/pinia/stores/user'
 import { useRoute, useRouter } from 'vue-router'
-import { DropdownMenuItem } from 'reka-ui'
-import { ChevronsLeft, ChevronsRight, ArrowUpRight } from '@lucide/vue'
+import { ArrowUpRight, Command } from '@lucide/vue'
 import Logo from '@/layouts/components/Logo/index.vue'
 import Tooltip from '@/components/ui/tooltip/tooltip.vue'
-import DropdownMenu from '@/components/ui/dropdown-menu/dropdown-menu.vue'
-import { navigationFor, assignmentLinks, activeNavigation } from '@/router/navigation'
+import { activeNavigation, navigationFor } from '@/router/navigation'
 import { navigateWorkspace } from '@/workspace/coordinator'
-import { useLayoutStore } from '@/pinia/stores/layout'
+import { useCommandStore } from '@/pinia/stores/command'
+import { useShortcutLabel } from '@/composables/use-platform'
+
 defineProps<{ collapsed?: boolean; mobile?: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
 const route = useRoute(),
     router = useRouter(),
-    layout = useLayoutStore()
-const user = useUserStore()
+    user = useUserStore(),
+    command = useCommandStore(),
+    { commandKey } = useShortcutLabel()
 const navigationGroups = computed(() => navigationFor(user.centerSession))
+const isActive = (name: string) =>
+    route.name === name || activeNavigation(route.name)?.name === name
+const roleLabel = computed(() =>
+    user.centerSession?.administrator
+        ? '企业管理员'
+        : user.centerSession?.developer_enabled
+            ? '开发者'
+            : '企业成员',
+)
+const displayName = computed(
+    () => user.userInfo?.nickname || user.userInfo?.username || '当前用户',
+)
+const avatarText = computed(() => displayName.value.slice(0, 1).toUpperCase())
 async function navigate(event: MouseEvent, name: string) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
     event.preventDefault()
     const outcome = await navigateWorkspace(router, { name })
     if (outcome === 'success' || outcome === 'unchanged') emit('navigate')
 }
+function openSearch() {
+    command.show()
+    emit('navigate')
+}
 </script>
 <template>
     <div class="flex h-full min-h-0 flex-col">
         <Logo :collapsed="collapsed" />
-        <nav class="flex-1 overflow-y-auto pb-4">
+        <nav class="sidebar-nav" aria-label="主导航">
             <div
                 v-for="group in navigationGroups"
                 :key="group.title"
                 class="nav-group"
-                :class="{ '!px-2': collapsed }"
             >
                 <p v-if="!collapsed" class="nav-group-title">{{ group.title }}</p>
-                <template v-for="item in group.items" :key="item.name"
-                    ><template v-if="collapsed && 'children' in item"
-                        ><DropdownMenu
-                            ><template #trigger
-                                ><button
-                                    class="nav-link w-full justify-center"
-                                    :class="{
-                                        'is-active':
-                                            activeNavigation(route.name)?.name === item.name,
-                                    }"
-                                    :aria-label="item.title"
-                                    type="button"
-                                >
-                                    <component
-                                        :is="item.icon"
-                                        :size="18"
-                                        aria-hidden="true"
-                                    /></button></template
-                            ><DropdownMenuItem as-child
-                                ><router-link
-                                    class="dropdown-item"
-                                    :to="{ name: item.name }"
-                                    @click="navigate($event, item.name)"
-                                    >{{ item.title }}</router-link
-                                ></DropdownMenuItem
-                            ><DropdownMenuItem v-for="child in item.children" :key="child" as-child
-                                ><router-link
-                                    class="dropdown-item"
-                                    :to="{ name: child }"
-                                    @click="navigate($event, child)"
-                                    >{{ router.resolve({ name: child }).meta.title }}</router-link
-                                ></DropdownMenuItem
-                            ></DropdownMenu
-                        ></template
-                    ><Tooltip v-else-if="collapsed" :text="item.title"
-                        ><router-link
-                            :to="{ name: item.name }"
-                            class="nav-link justify-center"
-                            :class="{
-                                'is-active': activeNavigation(route.name)?.name === item.name,
-                            }"
-                            :aria-label="item.title"
-                            @click="navigate($event, item.name)"
-                            ><component
-                                :is="item.icon"
-                                :size="18"
-                                aria-hidden="true" /></router-link></Tooltip
-                    ><template v-else
-                        ><router-link
-                            :to="{ name: item.name }"
-                            class="nav-link"
-                            :class="{
-                                'is-active': activeNavigation(route.name)?.name === item.name,
-                            }"
-                            :aria-current="route.name === item.name ? 'page' : undefined"
-                            @click="navigate($event, item.name)"
-                            ><component :is="item.icon" :size="18" aria-hidden="true" /><span>{{
-                                item.title
-                            }}</span></router-link
-                        ><router-link
-                            v-for="child in 'children' in item ? item.children : []"
-                            :key="child"
-                            :to="{ name: child }"
-                            class="nav-sublink"
-                            :class="{ 'is-active': route.name === child }"
-                            @click="navigate($event, child)"
-                            >{{ router.resolve({ name: child }).meta.title }}</router-link
-                        ></template
-                    ></template
-                >
+                <Tooltip v-for="item in group.items" :key="item.name" :text="collapsed ? item.title : ''">
+                    <router-link
+                        :to="{ name: item.name }"
+                        class="nav-link"
+                        :class="{
+                            'is-active': isActive(item.name),
+                            'justify-center': collapsed,
+                        }"
+                        :aria-current="route.name === item.name ? 'page' : undefined"
+                        :aria-label="collapsed ? item.title : undefined"
+                        @click="navigate($event, item.name)"
+                    >
+                        <component :is="item.icon" :size="17" aria-hidden="true" />
+                        <span v-if="!collapsed" class="truncate">{{ item.title }}</span>
+                        <ArrowUpRight
+                            v-if="!collapsed && isActive(item.name)"
+                            :size="12"
+                            class="ml-auto shrink-0 opacity-50"
+                            aria-hidden="true"
+                        />
+                    </router-link>
+                </Tooltip>
             </div>
+
             <div v-if="!collapsed" class="nav-group">
                 <p class="nav-group-title">快捷工作流</p>
-                <router-link
-                    v-for="link in assignmentLinks"
-                    :key="link.name"
-                    :to="{ name: link.name }"
-                    class="nav-link"
-                    @click="navigate($event, link.name)"
-                    ><component :is="link.icon" :size="17" aria-hidden="true" />{{ link.title
-                    }}<ArrowUpRight :size="13" class="ml-auto" aria-hidden="true"
-                /></router-link>
+                <button type="button" class="nav-link w-full text-left" @click="openSearch">
+                    <Command :size="17" aria-hidden="true" />
+                    <span>搜索页面与操作</span>
+                    <kbd class="kbd ml-auto">{{ commandKey }}</kbd>
+                </button>
             </div>
         </nav>
+
         <div class="nav-footer">
-            <button
-                v-if="!mobile"
-                type="button"
-                class="flex min-h-9 w-full items-center gap-2 rounded px-1"
-                aria-label="切换侧栏"
-                @click="layout.toggleSidebar"
-            >
-                <component
-                    :is="collapsed ? ChevronsRight : ChevronsLeft"
-                    :size="16"
-                    aria-hidden="true"
-                /><span v-if="!collapsed">收起导航</span>
-            </button>
-            <p v-if="!collapsed" class="mt-3">身份 · 权限 · 应用</p>
+            <div v-if="!collapsed" class="nav-user">
+                <span class="nav-user-avatar">{{ avatarText }}</span>
+                <span class="min-w-0 flex-1">
+                    <span class="nav-user-name block">{{ displayName }}</span>
+                    <span class="nav-user-meta block">{{ roleLabel }}</span>
+                </span>
+            </div>
+            <div v-else class="flex justify-center">
+                <span class="nav-user-avatar" :title="displayName">{{ avatarText }}</span>
+            </div>
+            <div v-if="!collapsed" class="sidebar-status">
+                <span class="status-dot" aria-hidden="true" />
+                身份服务已连接
+            </div>
         </div>
     </div>
 </template>

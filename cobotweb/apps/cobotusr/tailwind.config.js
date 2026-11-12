@@ -3,6 +3,36 @@ import tailwindcssAnimate from 'tailwindcss-animate'
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ['class'],
+  safelist: [
+    'ui-button-default',
+    'ui-button-outline',
+    'ui-button-ghost',
+    'ui-button-secondary',
+    'ui-button-destructive',
+    'ui-button-sm',
+    'ui-button-lg',
+    'ui-button-icon',
+    'ui-button-block',
+    'dialog-md',
+    'dialog-lg',
+    'dialog-xl',
+    'dialog-drawer',
+    'status-neutral',
+    'status-success',
+    'status-warning',
+    'status-danger',
+    'status-info',
+    'status-brand',
+    'is-success',
+    'is-error',
+    'is-warning',
+    'is-info',
+    'bg-success',
+    'bg-warning',
+    'bg-info',
+    'bg-danger',
+  ],
+
   content: [
     './index.html',
     './src/**/*.{vue,js,ts,jsx,tsx}',
@@ -28,6 +58,22 @@ export default {
         destructive: {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
+        },
+        success: {
+          DEFAULT: 'hsl(var(--success))',
+          foreground: 'hsl(var(--success-foreground))',
+        },
+        danger: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))',
+        },
+        info: {
+          DEFAULT: 'hsl(var(--info))',
+          foreground: 'hsl(var(--info-foreground))',
         },
         muted: {
           DEFAULT: 'hsl(var(--muted))',

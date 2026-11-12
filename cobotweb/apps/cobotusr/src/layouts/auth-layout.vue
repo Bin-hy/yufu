@@ -1,40 +1,51 @@
 <script setup lang="ts">
-import { Command, ShieldCheck, ArrowUpRight } from '@lucide/vue'
+import { Boxes, Fingerprint, KeyRound, ShieldCheck } from '@lucide/vue'
 import ThemeSwitcher from '@/components/ui/theme-switcher/theme-switcher.vue'
 defineProps<{ title: string; description: string }>()
+const features = [
+    { icon: Fingerprint, text: '一个账户，统一进入所有已授权应用' },
+    { icon: KeyRound, text: '权限边界清晰，访问范围始终可见' },
+    { icon: ShieldCheck, text: '每一次授权与撤销都留有审计记录' },
+]
 </script>
 <template>
-    <main class="auth-layout min-h-screen grid lg:grid-cols-2">
-        <aside
-            class="hidden lg:flex bg-primary text-primary-foreground p-14 xl:p-20 flex-col justify-between"
-        >
-            <div class="flex items-center gap-3 font-semibold text-2xl">
-                <Command :size="28" aria-hidden="true" />cobotusr
+    <main class="auth-layout">
+        <aside class="auth-visual" aria-label="cobotusr 身份与访问管理">
+            <div class="auth-brand">
+                <span class="auth-brand-mark"><Boxes :size="18" aria-hidden="true" /></span>
+                <span>cobot<span class="text-white/60">usr</span></span>
             </div>
-            <div>
-                <ShieldCheck :size="40" stroke-width="1.4" class="mb-7" aria-hidden="true" />
-                <h2 class="text-4xl font-medium leading-tight tracking-tight">
-                    让身份与权限<br />清晰有序。
-                </h2>
-                <p class="mt-6 text-sm leading-7 max-w-sm">
-                    统一管理平台账户、角色、应用接入与授权，掌握每一次访问。
+            <div class="auth-visual-copy">
+                <span class="auth-kicker">IDENTITY & ACCESS</span>
+                <h2>一个账户，<br />进入每一个工作场景。</h2>
+                <p>
+                    统一管理企业账户、应用接入与授权边界。清晰的身份，是每一次安全协作的起点。
                 </p>
+                <ul class="auth-features">
+                    <li v-for="feature in features" :key="feature.text">
+                        <component :is="feature.icon" :size="13" aria-hidden="true" />
+                        {{ feature.text }}
+                    </li>
+                </ul>
             </div>
-            <p class="text-xs flex items-center gap-2">
-                账户 · 访问控制 · 应用<ArrowUpRight :size="14" aria-hidden="true" />
+            <p class="auth-visual-footer">
+                <span class="h-px w-6 bg-white/20" aria-hidden="true" />
+                企业统一身份认证 · cobotusr
             </p>
         </aside>
-        <div class="flex flex-col items-center justify-center px-5 py-10 sm:px-12 relative">
-            <div class="absolute top-5 right-5"><ThemeSwitcher /></div>
-            <div class="w-full max-w-sm">
-                <div class="flex items-center gap-2 font-semibold text-primary mb-10 lg:hidden">
-                    <Command :size="22" aria-hidden="true" />cobotusr
+        <section class="auth-panel">
+            <div class="auth-panel-top"><ThemeSwitcher /></div>
+            <div class="auth-form">
+                <div class="auth-mobile-brand">
+                    <span class="brand-mark"><Boxes :size="17" aria-hidden="true" /></span>
+                    <span>cobot<span class="text-primary">usr</span></span>
                 </div>
-                <h1 class="text-3xl font-semibold tracking-tight">{{ title }}</h1>
-                <p class="mt-3 mb-8 text-sm text-muted-foreground leading-6">{{ description }}</p>
+                <div class="auth-eyebrow"><span class="status-dot" aria-hidden="true" />安全登录</div>
+                <h1>{{ title }}</h1>
+                <p>{{ description }}</p>
                 <slot />
             </div>
-            <p class="mt-10 text-xs text-muted-foreground">cobotusr · 身份与访问管理</p>
-        </div>
+            <p class="auth-legal">cobotusr · 身份与访问管理 · 受企业安全策略保护</p>
+        </section>
     </main>
 </template>

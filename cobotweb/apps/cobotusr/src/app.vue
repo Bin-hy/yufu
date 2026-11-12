@@ -4,6 +4,7 @@ import { onMounted, onUnmounted } from 'vue'
 import { trackFocusOrigins } from '@/utils/focus'
 import ToastHost from '@/components/Feedback/toast-host.vue'
 import ConfirmHost from '@/components/Feedback/confirm-host.vue'
+import CommandPalette from '@/components/workspace/command-palette.vue'
 let stopTracking: (() => void) | undefined
 onMounted(() => {
     stopTracking = trackFocusOrigins()
@@ -11,5 +12,10 @@ onMounted(() => {
 onUnmounted(() => stopTracking?.())
 </script>
 <template>
-    <TooltipProvider :delay-duration="150"><router-view /><ToastHost /><ConfirmHost /></TooltipProvider>
+    <TooltipProvider :delay-duration="150">
+        <router-view />
+        <CommandPalette />
+        <ToastHost />
+        <ConfirmHost />
+    </TooltipProvider>
 </template>

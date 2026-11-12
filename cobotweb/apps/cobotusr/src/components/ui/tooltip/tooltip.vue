@@ -5,10 +5,9 @@ defineProps<{ text: string }>()
 <template>
     <TooltipRoot
         ><TooltipTrigger as-child><slot /></TooltipTrigger
-        ><TooltipPortal
+        ><TooltipPortal v-if="text"
             ><TooltipContent class="tooltip-content" side="right" :side-offset="8">{{
                 text
             }}</TooltipContent></TooltipPortal
-        ></TooltipRoot
-    >
+    ></TooltipRoot>
 </template>
