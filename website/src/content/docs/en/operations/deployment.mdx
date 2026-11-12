@@ -3,16 +3,18 @@ title: Production deployment
 description: Build, configure, run under systemd, reverse proxy, upgrade, and roll back.
 ---
 
-## Build
+## Choose a delivery method
 
-```bash
-pnpm install --frozen-lockfile
-pnpm build:web
-cargo build --bin yufu --features webui --release
-```
+| | Container image | Binary + systemd |
+| --- | --- | --- |
+| Start | one `docker compose up` | needs a Rust and Node build |
+| TLS | Caddy issues and renews certificates | you bring the reverse proxy |
+| Upgrade | pull a new image and recreate | replace the binary and restart |
+| Fits | single-host self-hosting, internal identity centre | existing host operations with fine control |
 
-The artifact is a single binary at `target/release/yufu` with the frontend embedded. Deployment
-needs only the binary, configuration, RSA private key, and database.
+Images are published at `ghcr.io/bin-hy/yufu` (`linux/amd64` and `linux/arm64`); the full stack adds
+PostgreSQL and a Caddy TLS entry point, covered in [container deployment](/en/operations/docker/).
+The rest of this page describes the binary delivery.
 
 ## Production configuration
 
@@ -23,7 +25,20 @@ needs only the binary, configuration, RSA private key, and database.
 - `security_clock.servers` must use trusted NTP sources.
 - Use a dedicated database account with a strong password and restricted network access.
 
-## systemd
+## Binary delivery
+
+### Build
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build:web
+cargo build --bin yufu --features webui --release
+```
+
+The artifact is a single binary at `target/release/yufu` with the frontend embedded. Deployment
+needs only the binary, configuration, RSA private key, and database.
+
+### systemd
 
 File locations follow the `conf/yufu.service` template shipped in the packages:
 
@@ -106,9 +121,9 @@ Migrations are versioned. Before rolling back a binary, confirm the new version 
 irreversible migration. Historical data, registered clients, and grants are never deleted
 automatically, and a rollback does not restore revoked sessions.
 
-## Container deployment
+## Pitfalls
 
-If you prefer container orchestration, the repository ships a `deploy/docker` reference stack with
-PostgreSQL, the identity service, and a Caddy TLS entry point. See
-[Container deployment](/en/operations/docker/). A containerised service must listen on `0.0.0.0`,
-so `--allow-insecure-loopback-cookies` is unavailable and the public entry point must be HTTPS.
+A containerised service can only listen on `0.0.0.0`, so container deployments **cannot** use
+`--allow-insecure-loopback-cookies`; the public entry point must be HTTPS. A reverse proxy must
+preserve the original `Host` and set `X-Forwarded-Proto: https`, otherwise both the cookie and the
+origin check fail.

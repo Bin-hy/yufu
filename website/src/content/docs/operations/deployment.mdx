@@ -3,16 +3,18 @@ title: 生产部署
 description: 构建、配置、systemd、反向代理、升级与回滚。
 ---
 
-## 构建
+## 选择交付方式
 
-```bash
-pnpm install --frozen-lockfile
-pnpm build:web
-cargo build --bin yufu --features webui --release
-```
+| | 容器镜像 | 二进制 + systemd |
+| --- | --- | --- |
+| 起步 | `docker compose up` 一条命令 | 需要 Rust 与 Node 构建 |
+| TLS | Caddy 自动签发与续期 | 自备反向代理 |
+| 升级 | 拉新镜像重建容器 | 替换二进制后重启 |
+| 适合 | 单机自托管、内网身份中心 | 已有主机运维体系、需要精细控制 |
 
-产物为单个二进制 `target/release/yufu`，前端已嵌入。部署时只需要二进制、配置文件、
-RSA 私钥与数据库。
+镜像发布在 `ghcr.io/bin-hy/yufu`（`linux/amd64` / `linux/arm64`），完整栈由 PostgreSQL、
+身份服务与 Caddy TLS 入口组成，步骤见[容器部署](/operations/docker/)。
+下面余下内容针对二进制交付。
 
 ## 生产配置要点
 
@@ -23,7 +25,20 @@ RSA 私钥与数据库。
 - `security_clock.servers` 使用受信网络内的 NTP 来源。
 - 数据库使用独立账号与强密码，限制来源网段。
 
-## systemd
+## 二进制交付
+
+### 构建
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build:web
+cargo build --bin yufu --features webui --release
+```
+
+产物为单个二进制 `target/release/yufu`，前端已嵌入。部署时只需要二进制、配置文件、
+RSA 私钥与数据库。
+
+### systemd
 
 安装目录约定以安装包附带的 `conf/yufu.service` 为准：
 
@@ -105,9 +120,8 @@ curl -fsS https://id.example.com/api/v1/health/ready
 数据库迁移是版本化的。回滚二进制前必须确认新版本没有执行不可逆迁移；
 已有库的历史数据、已注册客户端与授权不会自动删除，回滚不会恢复被撤销的会话。
 
-## 容器部署
+## 容易踩的坑
 
-偏好容器编排时不必自行拼装：仓库提供 `deploy/docker` 参考栈，
-由 PostgreSQL、身份服务与 Caddy TLS 入口组成，步骤见[容器部署](/operations/docker/)。
-容器内的服务只能监听 `0.0.0.0`，因此不能用 `--allow-insecure-loopback-cookies`，
-对外入口必须是 HTTPS。
+容器内的服务只能监听 `0.0.0.0`，因此容器部署**不能**使用 `--allow-insecure-loopback-cookies`，
+对外入口必须是 HTTPS。反向代理必须保留原始 `Host` 并设置 `X-Forwarded-Proto: https`，
+否则 Cookie 与 Origin 校验都会失败。

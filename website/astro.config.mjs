@@ -125,9 +125,46 @@ export default defineConfig({
           tag: 'meta',
           attrs: { property: 'og:type', content: 'website' },
         },
+        // Brand jade from the logo; the old value was the pre-rename teal.
         {
           tag: 'meta',
-          attrs: { name: 'theme-color', content: '#0f766e' },
+          attrs: { name: 'theme-color', content: '#0E7C66' },
+        },
+        {
+          tag: 'link',
+          attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+        },
+        // Starlight emits og:title/description/locale but no image, so shared
+        // links used to render an empty summary_large_image card.
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image', content: `${site}/og-image.png` },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:width', content: '1200' },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:height', content: '630' },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:alt',
+            content: 'yufu 鱼符 · 企业统一身份与 SSO 平台',
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:image', content: `${site}/og-image.png` },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            name: 'twitter:image:alt',
+            content: 'yufu 鱼符 · 企业统一身份与 SSO 平台',
+          },
         },
       ],
     }),
