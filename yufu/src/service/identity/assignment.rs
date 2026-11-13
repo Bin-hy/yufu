@@ -375,6 +375,10 @@ impl IdentityUnitOfWork for AssignmentUnit<'_> {
             rp_session_ids: revoked,
         })
         .await?;
+        for application_id in plan.application_ids() {
+            tx.associate_audit_application(event_id, application_id, None)
+                .await?;
+        }
         checked_receipt(
             tx.operation_receipt(actor.account().user_id, self.mutation.kind(), self.key)
                 .await?

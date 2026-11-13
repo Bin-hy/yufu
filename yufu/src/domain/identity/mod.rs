@@ -1,7 +1,9 @@
 //! Enterprise identity and controlled application admission.
+pub mod access;
 pub mod account;
 pub mod admission;
 pub mod application;
+pub mod audit;
 pub mod authorization;
 pub mod console;
 pub mod error;

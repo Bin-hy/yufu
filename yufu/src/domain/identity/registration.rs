@@ -166,6 +166,8 @@ mod tests {
             consent_policy: ConsentPolicy::UserConsent,
             logout_capability: LogoutCapability::Online,
             backchannel_logout_uri: None,
+            launch_url: None,
+            launch_description: None,
         };
         CreateApplication {
             app_key: "registration-test".into(),

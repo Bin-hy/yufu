@@ -65,7 +65,11 @@ watch(data, (app) => {
     metadata.name = app?.name ?? ''
     metadata.description = app?.description ?? ''
     if (app && !app.environments.some((value) => value.environment_id === selected.value))
-        selected.value = app.environments[0]?.environment_id ?? ''
+        selected.value = app.environments.find(value => value.kind === context.route.value.query.environment)?.environment_id ?? app.environments[0]?.environment_id ?? ''
+})
+watch(() => context.route.value.query.environment, kind => {
+    const target = data.value?.environments.find(value => value.kind === kind)
+    if (target) selected.value = target.environment_id
 })
 watch(
     env,
@@ -195,6 +199,8 @@ function clearTestUser() {
 }
 watch(() => assignment.kind, clearAssignmentTarget)
 const fieldLabels: Record<keyof EnvironmentConfig, string> = {
+    launch_url: '应用启动地址',
+    launch_description: '启动说明',
     client_kind: '客户端类型',
     redirect_uris: '登录回调',
     post_logout_redirect_uris: '退出回调',
@@ -218,34 +224,39 @@ function diffAgainst(
 ): ConfigChange[] {
     if (!after) return []
     return (Object.keys(fieldLabels) as ConfigField[])
-        .filter((key) => JSON.stringify(before?.[key]) !== JSON.stringify(after[key]))
+        .filter((key) => JSON.stringify(before?.[key] ?? null) !== JSON.stringify(after[key] ?? null))
         .map((key) => ({
             key,
             label: fieldLabels[key],
             before: JSON.stringify(before?.[key] ?? null),
-            after: JSON.stringify(after[key]),
+            after: JSON.stringify(after[key] ?? null),
         }))
 }
 const changes = computed(() =>
     env.value && config.value ? diffAgainst(env.value.active_config, config.value) : [],
 )
+const unsavedConfig = computed(() => !!env.value && !!config.value && diffAgainst(env.value.latest.config, config.value).length > 0)
+const submissionIssue = computed(() => {
+    if (unsavedConfig.value) return '有未保存的修改，请先保存配置提案，再提交已保存的版本。'
+    return env.value ? validateEnvironmentConfig(env.value.latest.config, env.value.kind, true) : '请选择环境'
+})
 const approvalChanges = computed(() => {
     const fixed = approval.data.value?.config
     if (!fixed) return []
     const active = env.value?.active_config
     return (Object.keys(fieldLabels) as (keyof EnvironmentConfig)[])
         .filter(
-            (key) => JSON.stringify(active?.[key] ?? null) !== JSON.stringify(fixed[key]),
+            (key) => JSON.stringify(active?.[key] ?? null) !== JSON.stringify(fixed[key] ?? null),
         )
         .map((key) => ({
             key,
             label: fieldLabels[key],
             before: JSON.stringify(active?.[key] ?? null),
-            after: JSON.stringify(fixed[key]),
+            after: JSON.stringify(fixed[key] ?? null),
         }))
 })
 async function update(path: string, method: 'POST' | 'PUT' | 'PATCH', body: unknown) {
-    await mutation.run(
+    return mutation.run(
         () => changeApp(administrator.value, id.value, path, method, body, operationKey({ id: id.value, path, body })),
         async (receipt) => {
             if (receipt.client_secret)
@@ -273,13 +284,14 @@ async function saveConfig() {
         writeError.value = problem
         return
     }
-    await update(`${envPath(env.value)}/config`, 'PUT', {
+    const saved = await update(`${envPath(env.value)}/config`, 'PUT', {
         expected_revision: env.value.revision,
         config: config.value,
     })
-    emitToast({ type: 'success', message: '配置提案已保存' })
+    if (saved) emitToast({ type: 'success', message: '配置提案已保存' })
 }
 async function submit() {
+    if (submissionIssue.value) { writeError.value = submissionIssue.value; return }
     if (env.value)
         await update(`${envPath(env.value)}/submit`, 'POST', {
             expected_revision: env.value.revision,
@@ -287,6 +299,7 @@ async function submit() {
         })
 }
 async function activate() {
+    if (submissionIssue.value) { writeError.value = submissionIssue.value; return }
     if (env.value)
         await update(`${envPath(env.value)}/activate`, 'POST', {
             expected_revision: env.value.revision,
@@ -499,7 +512,7 @@ const envStatus = computed(() => {
                             <section class="surface p-5">
                                 <h2 class="flex items-center gap-2 text-xs font-semibold"><ShieldCheck :size="14" class="text-primary" aria-hidden="true" />接入概览</h2>
                                 <dl class="mt-4 space-y-3 text-[11.5px]">
-                                    <div class="flex justify-between gap-3"><dt class="text-muted-foreground">应用 Key</dt><dd class="mono break-all text-right">{{ data.app_key }}</dd></div>
+                                    <div class="flex justify-between gap-3"><dt class="text-muted-foreground" title="中心内部稳定标识；登录接入使用对应环境的 Client ID。">应用标识</dt><dd class="mono break-all text-right">{{ data.app_key }}</dd></div>
                                     <div class="flex justify-between gap-3"><dt class="text-muted-foreground">管理方式</dt><dd class="text-right">{{ data.management_mode === 'admin_configured' ? '管理员直接配置' : '开发者维护' }}</dd></div>
                                     <div class="flex justify-between gap-3"><dt class="text-muted-foreground">应用归属</dt><dd class="text-right">{{ data.third_party ? '第三方应用' : '内部应用' }}</dd></div>
                                 </dl>
@@ -568,10 +581,11 @@ const envStatus = computed(() => {
                                             <dd class="mt-1 break-all">提案：{{ change.after }}</dd>
                                         </dl>
                                         <template v-if="env.kind === 'production'">
-                                            <UiButton v-if="!administrator" :disabled="pending || !!env.pending_approval" :loading="pending" @click="submit">提交已保存的最新版本供审核</UiButton>
+                                            <p v-if="submissionIssue" class="mb-3 text-[11px] text-muted-foreground">{{ submissionIssue }}</p>
+                                            <UiButton v-if="!administrator" :disabled="pending || !!env.pending_approval || !!submissionIssue" :loading="pending" @click="submit">提交已保存的最新版本供审核</UiButton>
                                             <template v-else>
                                                 <label class="checkbox-field mt-3"><input v-model="limitation" type="checkbox" /><span>接受并记录退出能力限制</span></label>
-                                                <UiButton v-if="data.management_mode === 'admin_configured'" class="mt-3" :disabled="pending" :loading="pending" @click="activate">激活已保存的生产版本</UiButton>
+                                            <UiButton v-if="data.management_mode === 'admin_configured'" class="mt-3" :disabled="pending || !!submissionIssue" :loading="pending" @click="activate">激活已保存的生产版本</UiButton>
                                                 <template v-if="env.pending_approval">
                                                     <div class="mt-4 rounded-lg border border-warning/25 bg-warning/[0.04] p-3">
                                                         <p class="text-[11px] font-semibold">待审核申请</p>

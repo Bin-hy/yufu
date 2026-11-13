@@ -54,6 +54,29 @@ pub enum LogoutCapability {
 #[serde(transparent)]
 pub struct ExactRedirectUri(String);
 
+/// An application entry point, independently versioned from OIDC callbacks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct LaunchUrl(String);
+
+impl LaunchUrl {
+    pub fn parse(
+        value: impl Into<String>,
+        environment: AppEnvironmentKind,
+    ) -> Result<Self, IdentityError> {
+        let value = value.into();
+        if !value.contains("://") {
+            return Err(IdentityError::InvalidInput);
+        }
+        parse_http_uri(&value, environment)?;
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 fn parse_http_uri(value: &str, environment: AppEnvironmentKind) -> Result<Url, IdentityError> {
     if value.is_empty()
         || value.len() > 2048
@@ -215,6 +238,8 @@ impl IdentityScopeSet {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EnvironmentConfig {
+    pub launch_url: Option<LaunchUrl>,
+    pub launch_description: Option<String>,
     pub client_kind: ClientKind,
     pub redirect_uris: Vec<ExactRedirectUri>,
     pub post_logout_redirect_uris: Vec<ExactRedirectUri>,
@@ -230,6 +255,10 @@ pub struct EnvironmentConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentConfigInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_description: Option<String>,
     pub client_kind: ClientKind,
     pub redirect_uris: Vec<String>,
     pub post_logout_redirect_uris: Vec<String>,
@@ -299,7 +328,30 @@ impl EnvironmentConfigInput {
         {
             return Err(IdentityError::InvalidInput);
         }
+        let launch_url = self
+            .launch_url
+            .filter(|value| !value.is_empty())
+            .map(|value| LaunchUrl::parse(value, environment))
+            .transpose()?;
+        if self
+            .launch_description
+            .as_ref()
+            .is_some_and(|value| value.chars().any(char::is_control))
+        {
+            return Err(IdentityError::InvalidInput);
+        }
+        let launch_description = self
+            .launch_description
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        if launch_description.as_ref().is_some_and(|value| {
+            value.chars().count() > 1000 || value.chars().any(char::is_control)
+        }) {
+            return Err(IdentityError::InvalidInput);
+        }
         Ok(EnvironmentConfig {
+            launch_url,
+            launch_description,
             client_kind: self.client_kind,
             redirect_uris,
             post_logout_redirect_uris,
@@ -316,6 +368,8 @@ impl EnvironmentConfigInput {
 impl EnvironmentConfig {
     pub fn to_input(&self) -> EnvironmentConfigInput {
         EnvironmentConfigInput {
+            launch_url: self.launch_url.as_ref().map(|url| url.as_str().to_owned()),
+            launch_description: self.launch_description.clone(),
             client_kind: self.client_kind,
             redirect_uris: self
                 .redirect_uris
@@ -453,6 +507,100 @@ pub struct RegistrationReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn product_launch_payload() {
+        let legacy = input()
+            .validate(AppEnvironmentKind::Production, true)
+            .unwrap()
+            .to_payload()
+            .unwrap();
+        assert!(legacy.get("launch_url").is_none());
+        let loaded =
+            EnvironmentConfig::from_payload(legacy.clone(), AppEnvironmentKind::Production, true)
+                .unwrap();
+        assert!(loaded.launch_url.is_none());
+        assert!(loaded.launch_description.is_none());
+        assert_eq!(loaded.to_payload().unwrap(), legacy);
+        let mut changed = input();
+        changed.launch_url = Some("https://app.example/home?tab=one".into());
+        changed.launch_description = Some("  应用工作台  ".into());
+        let changed = changed
+            .validate(AppEnvironmentKind::Production, true)
+            .unwrap();
+        assert_eq!(changed.launch_description.as_deref(), Some("应用工作台"));
+        assert_ne!(changed.to_payload().unwrap(), legacy);
+        assert_eq!(
+            EnvironmentConfig::from_payload(
+                changed.to_payload().unwrap(),
+                AppEnvironmentKind::Production,
+                true
+            )
+            .unwrap(),
+            changed
+        );
+        for description in ["a".repeat(1001), "hello\n".into(), "\tworkbench".into()] {
+            let mut bad = input();
+            bad.launch_description = Some(description);
+            assert!(bad.validate(AppEnvironmentKind::Production, true).is_err());
+        }
+        let mut empty = input();
+        empty.launch_url = Some(String::new());
+        empty.launch_description = Some("  ".into());
+        assert_eq!(
+            empty
+                .validate(AppEnvironmentKind::Production, true)
+                .unwrap()
+                .to_payload()
+                .unwrap(),
+            legacy
+        );
+    }
+    #[test]
+    fn product_launch_url() {
+        for value in ["https://app.example/", "https://app.example/home?q=one"] {
+            assert_eq!(
+                LaunchUrl::parse(value, AppEnvironmentKind::Production)
+                    .unwrap()
+                    .as_str(),
+                value
+            );
+        }
+        for value in [
+            "http://localhost:3000/",
+            "http://127.0.0.2/",
+            "http://[::1]/",
+        ] {
+            assert!(LaunchUrl::parse(value, AppEnvironmentKind::Development).is_ok());
+            assert!(LaunchUrl::parse(value, AppEnvironmentKind::Production).is_err());
+        }
+        for value in [
+            "",
+            "/home",
+            "//app.example/home",
+            "javascript:alert(1)",
+            "https:app.example/home",
+            "http://app.example/",
+            "https://user:pass@app.example/",
+            "https://app.example/#",
+            "https://app.example/\n",
+            "https://app.example/%0d",
+            "https://app.example/\\home",
+            " https://app.example/",
+        ] {
+            assert!(
+                LaunchUrl::parse(value, AppEnvironmentKind::Development).is_err(),
+                "{value:?}"
+            );
+        }
+        assert!(
+            LaunchUrl::parse(
+                format!("https://app.example/{}", "a".repeat(2048)),
+                AppEnvironmentKind::Production
+            )
+            .is_err()
+        );
+    }
+
     pub(crate) fn input() -> EnvironmentConfigInput {
         EnvironmentConfigInput {
             client_kind: ClientKind::ServerWeb,
@@ -464,6 +612,8 @@ mod tests {
             consent_policy: ConsentPolicy::UserConsent,
             logout_capability: LogoutCapability::Online,
             backchannel_logout_uri: None,
+            launch_url: None,
+            launch_description: None,
         }
     }
 

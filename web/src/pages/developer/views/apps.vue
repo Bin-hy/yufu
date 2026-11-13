@@ -10,7 +10,8 @@ import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { useEphemeralResult, useOperationKey } from '@/composables/use-ephemeral-result'
 import { useFormDraft } from '@/composables/use-form-draft'
 import { listApps, registerApp, registerAdminApp } from '../api'
-import { emptyConfig, type Registration, type RegistrationReceipt } from '../api/type'
+import { type Registration, type RegistrationReceipt } from '../api/type'
+import { newRegistrationDraft } from '../api/registration'
 import {
     environmentConfigIssue,
     registrationBasicIssue,
@@ -42,7 +43,7 @@ const { data, status, error, refreshing } = list
 const registrationSteps: readonly { id: StepId; title: string; description: string }[] = [
     { id: 'basic', title: '基础信息', description: '填写应用身份与负责人，后续配置会沿用这些信息。' },
     { id: 'development', title: '开发环境', description: '配置本机或测试环境回调。开发环境建立后立即生效。' },
-    { id: 'production', title: '生产环境', description: '生产配置需独立审批；还未准备好时可先留空。' },
+    { id: 'production', title: '生产环境', description: '可直接点击下一步，稍后补充生产配置。创建应用不会自动提交生产审批。' },
     { id: 'confirm', title: '确认建立', description: '核对两环境配置。提交后会创建应用与环境。' },
 ]
 const opened = ref(false)
@@ -73,14 +74,11 @@ const query = ref('')
 const stepIndex = computed(() => registrationSteps.findIndex((item) => item.id === step.value))
 const currentStep = computed(() => registrationSteps[stepIndex.value]!)
 const fieldErrors = reactive<Record<string, string>>({})
-const form = reactive<Registration>({
-    app_key: '',
-    name: '',
-    description: '',
-    third_party: false,
-    development: emptyConfig(),
-    production: emptyConfig(),
-})
+const form = reactive<Registration>(newRegistrationDraft(administrator.value))
+const automaticAppKey = ref(form.app_key)
+const customAppKey = ref('')
+watch(customAppKey, value => { form.app_key = value.trim() || automaticAppKey.value })
+const requiresLimitation = computed(() => [form.development.logout_capability, form.production.logout_capability].includes('local_only'))
 const result = useEphemeralResult<RegistrationReceipt>()
 const receipt = result.value
 const mutation = useAsyncMutation()
@@ -126,14 +124,9 @@ function clearFieldErrors() {
 }
 
 function resetRegistration() {
-    Object.assign(form, {
-        app_key: '',
-        name: '',
-        description: '',
-        third_party: false,
-        development: emptyConfig(),
-        production: emptyConfig(),
-    })
+    Object.assign(form, newRegistrationDraft(administrator.value))
+    automaticAppKey.value = form.app_key
+    customAppKey.value = ''
     owner.value = user.centerSession?.user_id ?? 0
     ownerLabel.value = user.centerSession?.nickname || user.centerSession?.username || ''
     ownerSecondary.value = user.centerSession
@@ -157,7 +150,7 @@ async function toggleRegistration() {
     draft.markSaved()
     opened.value = true
     await nextTick()
-    formRef.value?.querySelector<HTMLElement>('#app-key')?.focus()
+    formRef.value?.querySelector<HTMLElement>('#app-name')?.focus()
 }
 
 function ownerIssue(): ValidationIssue | null {
@@ -168,7 +161,7 @@ function ownerIssue(): ValidationIssue | null {
 }
 
 function limitationIssue(): ValidationIssue | null {
-    if (!administrator.value || limitation.value) return null
+    if (!administrator.value || !requiresLimitation.value || limitation.value) return null
     return {
         field: 'accept_logout_limitation',
         message: '需要接受已记录的退出能力限制后才能建立应用',
@@ -195,6 +188,8 @@ const issueControls: Record<string, string> = {
     description: 'app-description',
     owner_user_id: 'app-owner',
     accept_logout_limitation: 'accept-limitation',
+    launch_url: 'launch-url',
+    launch_description: 'launch-description',
     client_kind: 'kind',
     redirect_uris: 'redirects',
     post_logout_redirect_uris: 'logout-redirects',
@@ -207,6 +202,10 @@ const issueControls: Record<string, string> = {
 }
 
 function focusIssue(issue: ValidationIssue) {
+    if (issue.field === 'app_key') {
+        const details = formRef.value?.querySelector<HTMLDetailsElement>('details[data-application-identity]')
+        if (details) details.open = true
+    }
     let field = issue.field
     let environment = ''
     if (field.startsWith('development.') || field.startsWith('production.')) {
@@ -320,7 +319,7 @@ async function register() {
             resetRegistration()
             draft.markSaved()
             await list.refresh()
-            emitToast({ type: 'success', message: '应用已建立，密钥仅在回执中展示一次' })
+            emitToast({ type: 'success', message: '应用已建立，请查看回执中的接入配置与后续步骤' })
         },
     )
 }
@@ -340,12 +339,12 @@ async function copy(value: string, label: string) {
         <PageHeader
             :title="administrator ? '企业应用' : '开发者控制台'"
             eyebrow="APPLICATIONS"
-            :description="administrator ? '审核生产接入、管理分配和直接配置获批第三方。' : '一次注册建立开发与生产环境，生产接入需独立审批。'"
+            :description="administrator ? '审核生产接入、管理访问分配，或由管理员直接配置应用。' : '一次注册建立开发与生产环境，生产接入需独立审批。'"
         >
             <UiButton :aria-expanded="opened" @click="toggleRegistration">
                 <Plus v-if="!opened" :size="14" aria-hidden="true" />
                 <X v-else :size="14" aria-hidden="true" />
-                {{ opened ? '收起注册表单' : administrator ? '配置获批第三方' : '注册应用' }}
+                {{ opened ? '收起注册表单' : administrator ? '直接配置应用' : '注册应用' }}
             </UiButton>
         </PageHeader>
 
@@ -383,18 +382,27 @@ async function copy(value: string, label: string) {
                         {{ receipt.environments.find((e) => e.environment_id === secret.environment_id)?.kind === 'development' ? '开发环境' : '生产环境' }}密钥（仅此次展示）
                     </p>
                     <div class="copy-field">
-                        <code>{{ secret.client_secret }}</code>
+                        <code data-client-secret>{{ secret.client_secret }}</code>
                         <button type="button" class="icon-button" aria-label="复制密钥" title="复制密钥" @click="copy(secret.client_secret, '密钥')">
                             <Copy :size="14" aria-hidden="true" />
                         </button>
                     </div>
                 </div>
-                <p class="form-help">请保存到应用服务端的秘密配置中。离开页面后清除；响应丢失时可在环境详情重置密钥。</p>
+                <p v-if="(receipt.secrets || receipt.newly_issued_secrets || []).length" class="form-help">请保存到应用服务端的秘密配置中。离开页面后清除；响应丢失时可在环境详情重置密钥。</p>
+                <p v-else class="form-help">浏览器 SPA 不使用客户端密钥。服务端 Web 如因请求重试未收到新密钥，请在环境详情重置后保存。</p>
+                <dl class="summary-list">
+                    <div v-for="environment in receipt.environments" :key="environment.environment_id">
+                        <dt>{{ environment.kind === 'development' ? '开发环境' : '生产环境' }} Client ID</dt>
+                        <dd class="break-all"><code>{{ environment.client_id }}</code> · {{ environment.active_version_id ? '已生效' : '待配置 / 待审批' }}</dd>
+                    </div>
+                </dl>
+                <p class="text-sm">{{ administrator ? '开发和生产环境已生效。尚未分配生产访问，请在应用详情配置明确分配。' : '开发环境已生效；生产环境尚未提交审批。请先完成开发联调，再保存生产配置并提交审核。' }}</p>
                 <div class="flex flex-wrap gap-2">
                     <RouterLink
                         class="ui-button ui-button-default"
                         :to="{ name: administrator ? 'admin-app' : 'developer-app', params: { id: receipt.application_id } }"
-                    >查看接入配置</RouterLink>
+                    >查看开发接入配置</RouterLink>
+                    <RouterLink class="ui-button ui-button-outline" :to="{ name: administrator ? 'admin-app' : 'developer-app', params: { id: receipt.application_id }, query: { environment: 'production' } }">{{ administrator ? '分配生产访问' : '配置生产并申请上线' }}</RouterLink>
                     <UiButton variant="outline" @click="result.clear()">我已保存，隐藏回执</UiButton>
                 </div>
             </div>
@@ -430,7 +438,7 @@ async function copy(value: string, label: string) {
                     <div class="min-w-0">
                         <h2 id="registration-step-title" class="text-base font-semibold" tabindex="-1">{{ currentStep.title }}</h2>
                         <p class="mt-1 text-sm text-muted-foreground">
-                            {{ step === 'production' ? (administrator ? '生产配置会立即生效，必须完整填写。' : '生产配置需独立审批；还未准备好时可先留空。') : currentStep.description }}
+                            {{ step === 'production' ? (administrator ? '生产配置会立即生效，必须完整填写。' : '可直接点击下一步，稍后补充生产配置。创建应用不会自动提交生产审批。') : currentStep.description }}
                         </p>
                     </div>
                     <span class="step-counter" aria-hidden="true">{{ stepIndex + 1 }} / {{ registrationSteps.length }}</span>
@@ -438,19 +446,6 @@ async function copy(value: string, label: string) {
 
                 <section v-if="step === 'basic'" class="space-y-5">
                     <div class="grid gap-4 md:grid-cols-2">
-                        <UiFormField id="app-key" label="应用 Key" required :error="fieldError('app_key')" error-id="app-key-error">
-                            <UiInput
-                                id="app-key"
-                                v-model="form.app_key"
-                                :invalid="!!fieldError('app_key')"
-                                name="app-key"
-                                required
-                                autocomplete="off"
-                                spellcheck="false"
-                                placeholder="yufu-spa-example…"
-                                :disabled="pending"
-                            />
-                        </UiFormField>
                         <UiFormField id="app-name" label="应用名称" required :error="fieldError('name')" error-id="app-name-error">
                             <UiInput
                                 id="app-name"
@@ -489,11 +484,17 @@ async function copy(value: string, label: string) {
                             />
                         </UiFormField>
                     </div>
+                    <details data-application-identity class="rounded-xl border border-border p-4">
+                        <summary class="cursor-pointer text-sm font-medium">高级设置：自定义应用标识</summary>
+                        <UiFormField id="app-key" label="应用标识" optional class="mt-4" :error="fieldError('app_key')" error-id="app-key-error" hint="留空由系统生成，用于中心内部识别应用，创建后不可修改。登录接入请使用创建后提供的 Client ID；此标识不是密钥。">
+                            <UiInput id="app-key" v-model="customAppKey" name="app-key" autocomplete="off" spellcheck="false" placeholder="自动生成，一般无需填写" :invalid="!!fieldError('app_key')" :disabled="pending" />
+                        </UiFormField>
+                    </details>
                     <label class="checkbox-field">
                         <input v-model="form.third_party" type="checkbox" :disabled="pending" />
                         <span>第三方应用</span>
                     </label>
-                    <p class="form-help">第三方应用会进入管理员配置流程；内部应用默认由开发者维护。</p>
+                    <p class="form-help">{{ administrator ? '由管理员直接配置，生产环境建立后立即生效；仍需明确分配访问。' : '第三方表示由外部供应商提供，不改变当前负责人与生产审批要求。' }}</p>
                 </section>
 
                 <section v-else-if="step === 'development'" class="space-y-4">
@@ -525,7 +526,7 @@ async function copy(value: string, label: string) {
                         <section class="summary-card">
                             <h3>基础信息</h3>
                             <dl class="summary-list">
-                                <div><dt>应用 Key</dt><dd><code class="break-all" translate="no">{{ form.app_key }}</code></dd></div>
+                                <div><dt>应用标识</dt><dd><code class="break-all" translate="no">{{ form.app_key }}</code></dd></div>
                                 <div><dt>应用名称</dt><dd class="break-words">{{ form.name }}</dd></div>
                                 <div><dt>说明</dt><dd class="break-words">{{ form.description || '未填写' }}</dd></div>
                                 <div><dt>应用归属</dt><dd>{{ form.third_party ? '第三方应用' : '内部应用' }}</dd></div>
@@ -551,12 +552,12 @@ async function copy(value: string, label: string) {
                             <UiButton size="sm" variant="outline" :disabled="pending" @click="goToStep(2)">修改生产环境</UiButton>
                         </section>
                     </div>
-                    <label v-if="administrator" class="checkbox-field">
+                    <label v-if="administrator && requiresLimitation" class="checkbox-field">
                         <input id="accept-limitation" v-model="limitation" type="checkbox" :disabled="pending" :aria-invalid="!!fieldError('accept_logout_limitation')" />
                         <span>接受已记录的退出能力限制</span>
                     </label>
                     <p v-if="fieldError('accept_logout_limitation')" class="field-error" role="alert">{{ fieldError('accept_logout_limitation') }}</p>
-                    <p class="form-help">提交后会立即创建应用、开发环境和生产环境草稿；服务端 Web 应用会在回执中展示一次性密钥。</p>
+                    <p class="form-help">{{ administrator ? '确认后开发和生产环境立即生效；还需在应用详情中明确分配生产访问。' : '确认后开发环境立即生效，生产环境保存为草稿，不会自动提交生产审批。准备上线时，请在应用详情保存生产配置并提交审核。' }}服务端 Web 应用的密钥仅在回执中展示一次。</p>
                 </section>
 
                 <p v-if="pending" class="form-help" role="status">正在建立应用…</p>
@@ -576,7 +577,7 @@ async function copy(value: string, label: string) {
             <div class="table-toolbar">
                 <div class="search-box">
                     <Search :size="15" aria-hidden="true" />
-                    <UiInput v-model="query" clearable placeholder="筛选当前页应用名称或 Key…" aria-label="筛选当前页应用" />
+                    <UiInput v-model="query" clearable placeholder="筛选当前页应用名称或标识…" aria-label="筛选当前页应用" />
                 </div>
                 <span class="toolbar-spacer text-[11px] text-muted-foreground">当前页 {{ filteredApps.length }} 个应用</span>
             </div>

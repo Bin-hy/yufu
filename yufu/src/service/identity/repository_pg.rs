@@ -39,6 +39,29 @@ impl IdentityRepository for PgIdentityRepository {
 
 #[async_trait::async_trait]
 impl IdentityTransaction for PgSecurityTransaction {
+    async fn audit_search(
+        &mut self,
+        filter: &crate::domain::identity::audit::AuditFilter,
+        cursor: Option<&crate::domain::identity::audit::AuditCursor>,
+        limit: u32,
+    ) -> Result<crate::domain::identity::audit::AuditPage, IdentityError> {
+        self.identity_audit_search(filter, cursor, limit).await
+    }
+    async fn associate_audit_application(
+        &mut self,
+        event_id: Uuid,
+        application_id: i32,
+        environment_id: Option<Uuid>,
+    ) -> Result<(), IdentityError> {
+        self.identity_associate_audit(event_id, application_id, environment_id)
+            .await
+    }
+    async fn application_launch(
+        &mut self,
+        admission: &ManagedAdmission,
+    ) -> Result<crate::domain::identity::application::LaunchUrl, IdentityError> {
+        self.identity_application_launch(admission).await
+    }
     async fn console_read(
         &mut self,
         query: crate::domain::identity::console::ConsoleQuery,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineOptions({ name: 'AccountApps' })
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { AppWindow, FlaskConical, RefreshCw, Search, ShieldCheck } from '@lucide/vue'
 import { getApplications } from '../api'
 import { useCursorPage } from '@/composables/use-cursor-page'
@@ -8,19 +8,20 @@ import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiInput from '@/components/ui/input/input.vue'
-const state = useCursorPage('personal-apps', getApplications),
-    { data, status, error, refreshing } = state
+import UiSelect from '@/components/ui/select/select.vue'
 const query = ref('')
-const filtered = computed(() => {
-    const keyword = query.value.trim().toLowerCase()
-    const items = data.value?.items ?? []
-    if (!keyword) return items
-    return items.filter(
-        (app) =>
-            app.name.toLowerCase().includes(keyword) ||
-            app.environment.toLowerCase().includes(keyword),
-    )
+const debouncedQuery = ref('')
+const environment = ref<'production' | 'development'>('production')
+let timer: number | undefined
+watch(query, value => {
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => { debouncedQuery.value = value.trim() }, 240)
 })
+onBeforeUnmount(() => window.clearTimeout(timer))
+const state = useCursorPage(() => `personal-apps:${environment.value}:${debouncedQuery.value}`, (after, signal) => getApplications(after, signal, environment.value, debouncedQuery.value || undefined)),
+    { data, status, error, refreshing } = state
+watch([environment, debouncedQuery], () => state.first())
+const filtered = computed(() => data.value?.items ?? [])
 const productionCount = computed(
     () => data.value?.items.filter((app) => app.environment === 'production').length ?? 0,
 )
@@ -57,6 +58,10 @@ const productionCount = computed(
 
         <section class="panel">
             <div class="table-toolbar">
+                <UiSelect v-model="environment" aria-label="应用环境">
+                    <option value="production">生产环境</option>
+                    <option value="development">开发环境</option>
+                </UiSelect>
                 <div class="search-box">
                     <Search :size="15" aria-hidden="true" />
                     <UiInput v-model="query" clearable placeholder="搜索应用或环境…" aria-label="搜索应用" />
@@ -95,9 +100,16 @@ const productionCount = computed(
                         <div>
                             <h2 class="text-sm font-semibold">{{ app.name }}</h2>
                             <p class="mt-1 text-[11.5px] leading-5 text-muted-foreground">
-                                由企业管理员明确分配。请从应用自己的登录入口发起访问，中心会在授权后返回。
+                                {{ app.launch_description || '请从应用自己的登录入口发起访问。' }}
                             </p>
                         </div>
+                        <ul v-if="app.sources?.length" class="text-xs text-muted-foreground" aria-label="访问来源">
+                            <li v-for="source in app.sources" :key="source.kind + ':' + source.source_id">
+                                {{ source.kind === 'group' ? '用户组：' : '' }}{{ source.label }}
+                            </li>
+                        </ul>
+                        <a v-if="app.launchable" :href="`/api/v1/account/apps/${encodeURIComponent(app.environment_id)}/launch`" class="text-sm font-medium text-primary underline" referrerpolicy="no-referrer">打开应用</a>
+                        <p v-else class="text-xs text-muted-foreground">尚未配置启动入口，请联系应用维护者。</p>
                         <div class="mt-auto flex items-center gap-2 border-t border-border pt-3 text-[10.5px] text-muted-foreground">
                             <ShieldCheck :size="12" aria-hidden="true" />
                             环境 ID <span class="mono">{{ app.environment_id }}</span>

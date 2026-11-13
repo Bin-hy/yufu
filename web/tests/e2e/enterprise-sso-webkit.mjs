@@ -515,11 +515,14 @@ async function assertEnterpriseOnboarding(browser) {
 
 async function openRegistration(page) {
   await page.getByRole('button', { name: '注册应用', exact: true }).click()
-  await page.locator('#app-key').waitFor({ state: 'visible' })
+  await page.locator('#app-name').waitFor({ state: 'visible' })
 }
 
 async function fillBasic(page, key, name, description) {
-  await page.locator('#app-key').fill(key)
+  if (key) {
+    await page.locator('details[data-application-identity] summary').click()
+    await page.locator('#app-key').fill(key)
+  }
   await page.locator('#app-name').fill(name)
   await page.locator('#app-description').fill(description)
 }
@@ -562,12 +565,12 @@ async function confirmRegistration(page) {
 async function readReceipt(page) {
   const receipt = page.locator('section').filter({ hasText: '应用已建立' }).first()
   const href = await receipt
-    .getByRole('link', { name: '查看接入配置' })
+    .getByRole('link', { name: '查看开发接入配置' })
     .getAttribute('href')
   assert.match(href ?? '', /^\/developer\/apps\/\d+$/)
   const appId = Number(href.split('/').pop())
-  const codes = await receipt.locator('code').allTextContents()
-  const secret = codes.length > 1 ? codes[1].trim() : null
+  const secrets = await receipt.locator('[data-client-secret]').allTextContents()
+  const secret = secrets[0]?.trim() ?? null
   return { appId, secret }
 }
 
@@ -676,7 +679,7 @@ async function assertDeveloperOnboarding(browser) {
     await a.page.goto(cfg.opOrigin + '/developer/apps')
     await a.page.getByRole('heading', { name: '开发者控制台' }).waitFor({ state: 'visible' })
     await openRegistration(a.page)
-    await fillBasic(a.page, `c69-web-${suffix}`, 'C69 Web A', 'Server-side web example')
+    await fillBasic(a.page, '', 'C69 Web A', 'Server-side web example')
     await nextStep(a.page, '开发环境')
     await fillWebDevelopment(a.page, origins.webOrigin, webAudience)
     await nextStep(a.page, '生产环境')
@@ -860,7 +863,7 @@ async function assertDeveloperOnboarding(browser) {
           engine: 'webkit-1.61',
           applications: {
             web: {
-              appKey: `c69-web-${suffix}`,
+              appKey: webApp.app_key,
               clientId: webDev.client_id,
               kind: webDev.primary_client_kind,
               origin: origins.webOrigin,
@@ -869,7 +872,7 @@ async function assertDeveloperOnboarding(browser) {
               reader: webReader.readerId,
             },
             spa: {
-              appKey: `c69-spa-${suffix}`,
+              appKey: spaApp.app_key,
               clientId: spaDev.client_id,
               kind: spaDev.primary_client_kind,
               origin: origins.spaOrigin,

@@ -195,7 +195,7 @@ const canAdopt = (client: LegacyClient) =>
             </header>
             <form class="surface-body space-y-6" @submit.prevent="adopt">
                 <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    <UiFormField id="adopt-key" label="应用 Key" required hint="已有应用必须保持原 Key">
+                    <UiFormField id="adopt-key" label="应用标识（历史 Key）" required hint="已有应用必须保留原标识，以维持原资源归属">
                         <UiInput id="adopt-key" v-model="form.app_key" required :disabled="pending" placeholder="existing-app-key" />
                     </UiFormField>
                     <UiFormField id="adopt-name" label="应用名称" required>

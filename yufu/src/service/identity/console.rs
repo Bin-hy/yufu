@@ -31,6 +31,21 @@ impl ConsoleService {
         search: Option<&str>,
         budget: &SecurityBudget,
     ) -> Result<ConsoleResult, IdentityError> {
+        self.list_filtered(secret, kind, after, limit, search, None, budget)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn list_filtered(
+        &self,
+        secret: &str,
+        kind: ConsoleKind,
+        after: Option<&str>,
+        limit: u32,
+        search: Option<&str>,
+        environment: Option<crate::domain::identity::application::AppEnvironmentKind>,
+        budget: &SecurityBudget,
+    ) -> Result<ConsoleResult, IdentityError> {
         validate_limit(limit)?;
         let search = super::search::normalize_query(search)?;
         super::sso::validate_opaque(secret)?;
@@ -79,6 +94,8 @@ impl ConsoleService {
                     root_id,
                     after: uuid_cursor()?,
                     limit,
+                    environment,
+                    search,
                 },
                 ConsoleKind::Consents => ConsoleQuery::Consents {
                     user_id,

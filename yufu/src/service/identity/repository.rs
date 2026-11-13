@@ -26,6 +26,23 @@ pub trait IdentityRepository: Send + Sync {
 #[async_trait::async_trait]
 #[allow(clippy::double_must_use)]
 pub trait IdentityTransaction: SecurityTransaction {
+    async fn audit_search(
+        &mut self,
+        filter: &crate::domain::identity::audit::AuditFilter,
+        cursor: Option<&crate::domain::identity::audit::AuditCursor>,
+        limit: u32,
+    ) -> Result<crate::domain::identity::audit::AuditPage, IdentityError>;
+    async fn associate_audit_application(
+        &mut self,
+        event_id: Uuid,
+        application_id: i32,
+        environment_id: Option<Uuid>,
+    ) -> Result<(), IdentityError>;
+    /// Read only the exact config version whose current admission was evaluated.
+    async fn application_launch(
+        &mut self,
+        admission: &ManagedAdmission,
+    ) -> Result<crate::domain::identity::application::LaunchUrl, IdentityError>;
     async fn console_read(
         &mut self,
         query: crate::domain::identity::console::ConsoleQuery,

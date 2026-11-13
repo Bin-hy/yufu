@@ -23,7 +23,9 @@ use uuid::Uuid;
 
 pub fn get_routes() -> Router<AppState> {
     Router::new()
+        .merge(super::audit_search::get_routes())
         .route("/account/apps", get(apps))
+        .route("/account/apps/{id}/launch", get(launch))
         .route("/account/consents", get(consents))
         .route("/account/consents/{id}/revoke", post(withdraw))
         .route("/account/sessions", get(centers))
@@ -106,7 +108,76 @@ macro_rules! list_route {
         }
     };
 }
-list_route!(apps, Applications);
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApplicationsQuery {
+    after: Option<String>,
+    #[serde(default = "default_limit")]
+    limit: u32,
+    environment: Option<crate::domain::identity::application::AppEnvironmentKind>,
+    q: Option<String>,
+}
+async fn apps(
+    State(state): State<AppState>,
+    Extension(context): Extension<IdentityRequest>,
+    headers: HeaderMap,
+    query: Result<Query<ApplicationsQuery>, QueryRejection>,
+) -> ManagementResponse {
+    let result = async {
+        let Query(page) = query.map_err(|_| IdentityError::InvalidInput)?;
+        let secret = browser::read_sso_cookie(&state.config, &headers)?;
+        console(&state)?
+            .list_filtered(
+                &secret,
+                ConsoleKind::Applications,
+                page.after.as_deref(),
+                page.limit,
+                page.q.as_deref(),
+                page.environment,
+                &context.budget,
+            )
+            .await
+    }
+    .await;
+    response(result, context.id)
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LaunchQuery {}
+async fn launch(
+    State(state): State<AppState>,
+    Extension(context): Extension<IdentityRequest>,
+    headers: HeaderMap,
+    path: Result<Path<Uuid>, PathRejection>,
+    query: Result<Query<LaunchQuery>, QueryRejection>,
+) -> Result<axum::response::Response, crate::error::AppError> {
+    use axum::response::IntoResponse;
+    let result = async {
+        let Path(id) = path.map_err(|_| IdentityError::InvalidInput)?;
+        query.map_err(|_| IdentityError::InvalidInput)?;
+        let secret = browser::read_sso_cookie(&state.config, &headers)?;
+        let clock = state.security_clock()?;
+        crate::service::identity::access::AccessService::new(
+            Arc::new(PgIdentityRepository::new(
+                state.database.connection.clone(),
+                clock.clone(),
+            )),
+            clock,
+        )
+        .launch(&secret, id, &context.budget)
+        .await
+    }
+    .await;
+    let target = result.map_err(|reason| crate::error::AppError::identity(reason, context.id))?;
+    let mut headers = browser::protected_headers();
+    headers.insert(
+        http::header::LOCATION,
+        http::HeaderValue::from_str(target.as_str()).map_err(|_| {
+            crate::error::AppError::identity(IdentityError::InvalidInput, context.id)
+        })?,
+    );
+    Ok((http::StatusCode::SEE_OTHER, headers).into_response())
+}
 list_route!(consents, Consents);
 list_route!(centers, Centers);
 list_route!(rps, RelyingParties);

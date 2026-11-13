@@ -34,6 +34,7 @@ mod m20261109_000008_identity_assignment_operations;
 mod m20261109_000009_identity_policy_barrier;
 
 use crate::seed;
+mod m20261113_000002_product_audit;
 pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -97,6 +98,7 @@ impl MigratorTrait for Migrator {
         migrations.push(Box::new(
             seed::m20261109_000012_identity_console_operations::Migration,
         ));
+        migrations.push(Box::new(m20261113_000002_product_audit::Migration));
         migrations
     }
 }

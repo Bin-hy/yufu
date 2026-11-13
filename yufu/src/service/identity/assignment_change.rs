@@ -10,6 +10,9 @@ pub(super) struct AssignmentPlan {
     revocations: Vec<(IdentityRevocationScope, IdentityRevocationPlan)>,
 }
 impl AssignmentPlan {
+    pub(super) fn application_ids(&self) -> impl Iterator<Item = i32> + '_ {
+        self.apps.iter().map(|app| app.application_id)
+    }
     pub(super) async fn load(
         tx: &mut dyn IdentityTransaction,
         mutation: &AssignmentMutation,

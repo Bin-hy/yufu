@@ -6,6 +6,7 @@ pub mod application;
 mod application_admin;
 mod application_governance;
 mod assignment;
+mod audit_search;
 pub mod auth;
 pub mod authority;
 pub mod developer;

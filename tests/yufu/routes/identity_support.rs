@@ -141,6 +141,8 @@ pub fn config_with(
             LogoutCapability::Online
         },
         backchannel_logout_uri: backchannel.then(|| "https://rp.example/backchannel".into()),
+        launch_url: None,
+        launch_description: None,
     };
     customize(&mut input);
     input.validate(kind, true).unwrap()

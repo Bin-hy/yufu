@@ -124,9 +124,11 @@ impl PgSecurityTransaction {
                 root_id,
                 after,
                 limit,
+                environment,
+                search,
             } => {
                 // Select only currently assigned candidates, then run the same admission evaluator used by issuance.
-                let rows=self.identity_rows("SELECT e.id,e.application_id,e.kind,a.name,c.client_id FROM identity_app_environment e JOIN application a ON a.id=e.application_id JOIN oauth_client c ON c.id=e.oauth_client_id WHERE a.management_state='managed' AND a.lifecycle='active' AND e.active_version_id IS NOT NULL AND ($2::uuid IS NULL OR e.id>$2) AND ((e.kind='production' AND EXISTS (SELECT 1 FROM identity_app_assignment x WHERE x.application_id=a.id AND (x.user_id=$1 OR EXISTS (SELECT 1 FROM identity_group_member gm WHERE gm.group_id=x.group_id AND gm.user_id=$1)))) OR (e.kind='development' AND (EXISTS (SELECT 1 FROM identity_app_member m WHERE m.application_id=a.id AND m.user_id=$1) OR EXISTS (SELECT 1 FROM identity_app_test_user t WHERE t.environment_id=e.id AND t.user_id=$1)))) ORDER BY e.id LIMIT $3",vec![user_id.into(),after.into(),i64::from(limit+1).into()]).await?;
+                let rows=self.identity_rows("SELECT e.id,e.application_id,e.kind,a.name,c.client_id FROM identity_app_environment e JOIN application a ON a.id=e.application_id JOIN oauth_client c ON c.id=e.oauth_client_id WHERE a.management_state='managed' AND a.lifecycle='active' AND e.active_version_id IS NOT NULL AND ($2::uuid IS NULL OR e.id>$2) AND ((e.kind='production' AND EXISTS (SELECT 1 FROM identity_app_assignment x WHERE x.application_id=a.id AND (x.user_id=$1 OR EXISTS (SELECT 1 FROM identity_group_member gm WHERE gm.group_id=x.group_id AND gm.user_id=$1)))) OR (e.kind='development' AND (EXISTS (SELECT 1 FROM identity_app_member m WHERE m.application_id=a.id AND m.user_id=$1) OR EXISTS (SELECT 1 FROM identity_app_test_user t WHERE t.environment_id=e.id AND t.user_id=$1)))) AND ($4::text IS NULL OR e.kind=$4) AND ($5::text IS NULL OR POSITION(lower($5) IN lower(a.name))>0) ORDER BY e.id LIMIT $3",vec![user_id.into(),after.into(),i64::from(limit+1).into(),environment.map(|kind| match kind { crate::domain::identity::application::AppEnvironmentKind::Production => "production", crate::domain::identity::application::AppEnvironmentKind::Development => "development" }).into(),search.into()]).await?;
                 let mut candidates = rows
                     .into_iter()
                     .map(|r| {
@@ -136,6 +138,9 @@ impl PgSecurityTransaction {
                             name: get(&r, "name")?,
                             environment: get(&r, "kind")?,
                             client_id: get(&r, "client_id")?,
+                            launchable: false,
+                            launch_description: None,
+                            sources: Vec::new(),
                         })
                     })
                     .collect::<Result<Vec<_>, IdentityError>>()?;
@@ -147,7 +152,7 @@ impl PgSecurityTransaction {
                     None
                 };
                 let mut items = Vec::new();
-                for candidate in candidates {
+                for mut candidate in candidates {
                     match self
                         .evaluate_initial_admission(&AdmissionQuery {
                             sso_session_id: root_id,
@@ -156,7 +161,20 @@ impl PgSecurityTransaction {
                         })
                         .await
                     {
-                        Ok(_) => items.push(candidate),
+                        Ok(admission) => {
+                            let config = self.identity_application_entry(&admission).await?;
+                            candidate.launchable = config.launch_url.is_some();
+                            candidate.launch_description = config.launch_description;
+                            candidate.sources = self
+                                .identity_access_sources(
+                                    user_id,
+                                    candidate.application_id,
+                                    candidate.environment_id,
+                                    &candidate.environment,
+                                )
+                                .await?;
+                            items.push(candidate);
+                        }
                         Err(IdentityError::AccessDenied | IdentityError::Forbidden) => {}
                         Err(error) => return Err(error),
                     }

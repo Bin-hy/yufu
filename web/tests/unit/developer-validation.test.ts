@@ -46,3 +46,13 @@ it('后端退出通知与退出能力必须成对出现且为 https', () => {
     expect(validateEnvironmentConfig(config('development', { logout_capability: 'backchannel_and_online' }), 'development', true)).toContain('必须填写')
     expect(validateEnvironmentConfig(config('development', { logout_capability: 'backchannel_and_online', backchannel_logout_uri: 'http://127.0.0.1/backchannel' }), 'development', true)).toContain('必须使用 https')
 })
+
+it('启动地址按环境校验，旧配置和空值保持可编辑', () => {
+    expect(validateEnvironmentConfig(config('production'), 'production')).toBeNull()
+    expect(validateEnvironmentConfig(config('development', { launch_url: 'http://localhost:3000/' }), 'development')).toBeNull()
+    for (const launch_url of ['http://localhost:3000/', 'https:app.example/home', '/home', 'https://user:pass@app.example/', 'https://app.example/#x', 'https://app.example/%0d', 'https://app.example/\\home']) {
+        expect(validateEnvironmentConfig(config('production', { launch_url }), 'production')).toContain('应用启动地址')
+    }
+    expect(validateEnvironmentConfig(config('production', { launch_description: 'a'.repeat(1001) }), 'production')).toContain('启动说明')
+    expect(validateEnvironmentConfig(config('production', { launch_description: 'hello\n' }), 'production')).toContain('启动说明')
+})

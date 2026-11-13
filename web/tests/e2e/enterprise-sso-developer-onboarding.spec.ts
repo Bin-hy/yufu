@@ -150,7 +150,7 @@ async function acceptInvitation(
 
 async function openRegistration(page: Page): Promise<void> {
   await page.getByRole('button', { name: '注册应用', exact: true }).click()
-  await expect(page.locator('#app-key')).toBeVisible()
+  await expect(page.locator('#app-name')).toBeVisible()
 }
 
 async function fillBasic(
@@ -159,7 +159,10 @@ async function fillBasic(
   name: string,
   description: string,
 ): Promise<void> {
-  await page.locator('#app-key').fill(key)
+  if (key) {
+    await page.locator('details[data-application-identity] summary').click()
+    await page.locator('#app-key').fill(key)
+  }
   await page.locator('#app-name').fill(name)
   await page.locator('#app-description').fill(description)
 }
@@ -225,11 +228,11 @@ async function confirmRegistration(page: Page): Promise<void> {
 
 async function readReceipt(page: Page): Promise<{ appId: number; secret: string | null }> {
   const receipt = page.locator('section').filter({ hasText: '应用已建立' }).first()
-  const href = await receipt.getByRole('link', { name: '查看接入配置' }).getAttribute('href')
+  const href = await receipt.getByRole('link', { name: '查看开发接入配置' }).getAttribute('href')
   expect(href).toMatch(/^\/developer\/apps\/\d+$/)
   const appId = Number(href!.split('/').pop())
-  const codes = await receipt.locator('code').allTextContents()
-  const secret = codes.length > 1 ? codes[1]!.trim() : null
+  const secrets = await receipt.locator('[data-client-secret]').allTextContents()
+  const secret = secrets[0]?.trim() ?? null
   return { appId, secret }
 }
 
@@ -355,7 +358,7 @@ test('a developer registers Web A and SPA B, collaborates, transfers ownership a
     await a.page.goto(cfg.opOrigin + '/developer/apps')
     await expect(a.page.getByRole('heading', { name: '开发者控制台' })).toBeVisible()
     await openRegistration(a.page)
-    await fillBasic(a.page, `c69-web-${suffix}`, 'C69 Web A', 'Server-side web example')
+    await fillBasic(a.page, '', 'C69 Web A', 'Server-side web example')
     await nextStep(a.page, '开发环境')
     await fillWebDevelopment(a.page, origins.webOrigin, webAudience)
     await nextStep(a.page, '生产环境')
@@ -372,6 +375,7 @@ test('a developer registers Web A and SPA B, collaborates, transfers ownership a
     await expect(a.page.getByText(/Client ID：/)).toBeVisible()
     const webApp = await getApp(a.context.request, cfg, false, webReceipt.appId)
     const webDev = webApp.environments.find((environment) => environment.kind === 'development')!
+    expect(webApp.app_key).toMatch(/^app-[0-9a-f-]{36}$/)
     expect(webDev.primary_client_kind).toBe('server_web')
     expect(webDev.active_version_id).toBeTruthy()
     expect(JSON.stringify(webApp)).not.toContain(webReceipt.secret!)
@@ -523,7 +527,7 @@ test('a developer registers Web A and SPA B, collaborates, transfers ownership a
       engine: testInfo.project.name,
       applications: {
         web: {
-          appKey: `c69-web-${suffix}`,
+          appKey: webApp.app_key,
           clientId: webDev.client_id,
           kind: webDev.primary_client_kind,
           origin: origins.webOrigin,
@@ -532,7 +536,7 @@ test('a developer registers Web A and SPA B, collaborates, transfers ownership a
           reader: webReader.readerId,
         },
         spa: {
-          appKey: `c69-spa-${suffix}`,
+          appKey: spaApp.app_key,
           clientId: spaDev.client_id,
           kind: spaDev.primary_client_kind,
           origin: origins.spaOrigin,

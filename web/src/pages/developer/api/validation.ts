@@ -2,6 +2,8 @@ import type { EnvironmentConfig, Registration } from './type'
 
 export type EnvironmentKind = 'development' | 'production'
 export type EnvironmentConfigField =
+    | 'launch_url'
+    | 'launch_description'
     | 'client_kind'
     | 'redirect_uris'
     | 'post_logout_redirect_uris'
@@ -96,6 +98,21 @@ export function environmentConfigIssue(config: EnvironmentConfig, environment: E
     } else if (config.browser_origins.length) {
         return { field: 'browser_origins', message: `${label} 服务端 Web 类型不能填写浏览器来源` }
     }
+    if (config.launch_url) {
+        if (!config.launch_url.includes('://'))
+            return { field: 'launch_url', message: `${label}「应用启动地址」必须包含协议和主机` }
+        const issue = uriIssue(config.launch_url, environment, 'launch_url', `${label}「应用启动地址」`)
+        if (issue) return { field: 'launch_url', message: `${label}「应用启动地址」无效：使用完整 HTTPS 地址；开发环境另支持本机回环 HTTP，禁止凭据、空白、控制字符、反斜杠和 fragment` }
+        try {
+            const decoded = decodeURIComponent(config.launch_url)
+            if (hasControl(decoded) || decoded.includes('*'))
+                return { field: 'launch_url', message: `${label}「应用启动地址」不能包含编码后的控制字符或通配符` }
+        } catch {
+            return { field: 'launch_url', message: `${label}「应用启动地址」编码无效` }
+        }
+    }
+    if (config.launch_description && ([...config.launch_description.trim()].length > 1000 || /\p{Cc}/u.test(config.launch_description)))
+        return { field: 'launch_description', message: `${label}「启动说明」最多 1000 字符，不能包含控制字符` }
     const backchannel = config.backchannel_logout_uri
     if ((config.logout_capability === 'backchannel_and_online') !== (backchannel != null))
         return { field: 'backchannel_logout_uri', message: `${label}「后端退出通知」仅在退出能力为“后端退出通知与在线校验”时填写，且此时必须填写` }
@@ -118,7 +135,7 @@ export function validateEnvironmentConfig(config: EnvironmentConfig, environment
 
 export function registrationBasicIssue(registration: Registration, administrator = false): ValidationIssue | null {
     if (!registration.app_key.trim() || registration.app_key.length > 512 || hasControl(registration.app_key))
-        return { field: 'app_key', message: '「应用 Key」不能为空，长度不超过 512，且不能包含控制字符' }
+        return { field: 'app_key', message: '「应用标识」不能为空，长度不超过 512，且不能包含控制字符' }
     const name = registration.name.trim()
     if (!name || name.length > 200 || hasControl(registration.name))
         return { field: 'name', message: '「应用名称」不能为空，长度不超过 200，且不能包含控制字符' }

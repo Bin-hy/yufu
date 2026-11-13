@@ -20,6 +20,8 @@ pub enum ConsoleQuery {
         root_id: Uuid,
         after: Option<Uuid>,
         limit: u32,
+        environment: Option<super::application::AppEnvironmentKind>,
+        search: Option<String>,
     },
     Consents {
         user_id: i32,
@@ -101,6 +103,9 @@ pub struct PersonalApplication {
     pub name: String,
     pub environment: String,
     pub client_id: String,
+    pub launchable: bool,
+    pub launch_description: Option<String>,
+    pub sources: Vec<super::access::AccessSource>,
 }
 #[derive(Serialize)]
 pub struct PersonalConsent {

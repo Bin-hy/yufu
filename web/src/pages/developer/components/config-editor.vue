@@ -36,6 +36,12 @@ const textList = (key: 'redirect_uris' | 'post_logout_redirect_uris' | 'browser_
 const redirects = textList('redirect_uris')
 const logouts = textList('post_logout_redirect_uris')
 const origins = textList('browser_origins')
+const optionalText = (key: 'launch_url' | 'launch_description') => computed({
+    get: () => config.value[key] ?? '',
+    set: (value: string) => { config.value[key] = value || null },
+})
+const launchUrl = optionalText('launch_url')
+const launchDescription = optionalText('launch_description')
 const backchannel = computed({
     get: () => config.value.backchannel_logout_uri ?? '',
     set: (value: string) => {
@@ -64,6 +70,41 @@ const count = (value: string) => value.split('\n').filter(Boolean).length
             {{ props.environment === 'development' ? '开发环境' : '生产环境' }}接入配置
         </legend>
 
+        <UiFormField
+            :id="props.prefix + '-launch-url'"
+            label="应用启动地址"
+            optional
+            :hint="'填写应用首页；' + uriHint + ' 留空时成员应用卡片不提供启动入口。生产变更经审批后生效。'"
+            :error="errorFor('launch_url')"
+            :error-id="errorId('launch_url')"
+        >
+            <UiInput
+                :id="props.prefix + '-launch-url'"
+                v-model="launchUrl"
+                :name="props.prefix + '-launch-url'"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="https://app.example/"
+                :invalid="isInvalid('launch_url')"
+                :disabled="disabled"
+            />
+        </UiFormField>
+        <UiFormField
+            :id="props.prefix + '-launch-description'"
+            label="启动说明"
+            optional
+            hint="最多 1000 字符，向成员说明应用用途。"
+            :error="errorFor('launch_description')"
+            :error-id="errorId('launch_description')"
+        >
+            <UiInput
+                :id="props.prefix + '-launch-description'"
+                v-model="launchDescription"
+                :name="props.prefix + '-launch-description'"
+                :invalid="isInvalid('launch_description')"
+                :disabled="disabled"
+            />
+        </UiFormField>
         <div class="grid gap-4 md:grid-cols-2">
             <UiFormField
                 :id="props.prefix + '-kind'"
@@ -85,7 +126,8 @@ const count = (value: string) => value.split('\n').filter(Boolean).length
             </UiFormField>
             <UiFormField
                 :id="props.prefix + '-audience'"
-                label="保护 API 的访问 Audience"
+                label="API 资源标识（Audience）"
+                hint="已为每个环境自动生成。保护业务 API 时需与后端校验值一致；仅接入登录可保留默认值。这不是 Client ID。"
                 required
                 :error="errorFor('access_audience')"
                 :error-id="errorId('access_audience')"

@@ -34,6 +34,8 @@ mod identity_token;
 mod identity_userinfo;
 mod mcp;
 mod oidc;
+mod product_access;
+mod product_audit;
 mod recording;
 mod role;
 mod security;

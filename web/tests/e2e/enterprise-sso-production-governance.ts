@@ -276,7 +276,7 @@ async function getApp(
 
 async function openRegistration(page: Page): Promise<void> {
   await page.getByRole('button', { name: '注册应用', exact: true }).click()
-  await page.locator('#app-key').waitFor({ state: 'visible' })
+  await page.locator('#app-name').waitFor({ state: 'visible' })
 }
 
 async function nextStep(page: Page, title: string): Promise<void> {
@@ -316,6 +316,7 @@ async function registerApplication(
   await page.goto(cfg.opOrigin + '/developer/apps')
   await page.getByRole('heading', { name: '开发者控制台' }).waitFor({ state: 'visible' })
   await openRegistration(page)
+  await page.locator('details[data-application-identity] summary').click()
   await page.locator('#app-key').fill(options.key)
   await page.locator('#app-name').fill(options.name)
   await page.locator('#app-description').fill(options.description)

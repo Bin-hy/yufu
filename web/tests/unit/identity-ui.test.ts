@@ -45,6 +45,8 @@ async function nextRegistrationStep(wrapper: VueWrapper) {
     await flushPromises()
 }
 async function fillBasicStep(wrapper: VueWrapper, key = 'my-app', name = 'My App') {
+    const advanced = wrapper.get('details[data-application-identity]').element as HTMLDetailsElement
+    advanced.open = true
     await wrapper.find('#app-key').setValue(key)
     await wrapper.find('#app-name').setValue(name)
 }
@@ -128,7 +130,7 @@ it('开发者注册按环境区分回调必填与 https 规则，生产草稿可
 })
 it('管理员注册的生产回调必填且不显示草稿留空提示', async () => {
     const { wrapper } = await render(Apps, '/admin/apps')
-    await openRegistration(wrapper, '配置获批第三方')
+    await openRegistration(wrapper, '直接配置应用')
     await fillBasicStep(wrapper)
     await nextRegistrationStep(wrapper)
     await fillEnvironmentStep(wrapper, 'registration-dev', 'https://app.example/callback')
@@ -158,8 +160,8 @@ it('注册向导在基础信息缺失时停留在当前步骤并聚焦第一个�
     await nextRegistrationStep(wrapper)
     expect(wrapper.text()).toContain('基础信息')
     expect(wrapper.find('#registration-dev-redirects').exists()).toBe(false)
-    expect(wrapper.find('#app-key-error').text()).toContain('「应用 Key」不能为空')
-    expect(document.activeElement?.id).toBe('app-key')
+    expect(wrapper.find('#app-name-error').text()).toContain('「应用名称」不能为空')
+    expect(document.activeElement?.id).toBe('app-name')
 })
 it('账户邀请秘密在网络请求前从普通与 hash 路由地址删除，不接受自选回调', () => {
     for (const hash of ['#kind=invitation&secret=' + 'A'.repeat(43), '#/account/action#kind=password_reset&secret=' + 'A'.repeat(43)]) {
@@ -192,4 +194,33 @@ it('三个入口按当前资格显示，合作方无企业目录入口', () => {
     expect(navigationFor({ developer_enabled: false, administrator: false }).map(group => group.title)).toEqual(['账户中心'])
     expect(navigationFor({ developer_enabled: true, administrator: false }).map(group => group.title)).toEqual(['账户中心', '开发者控制台'])
     expect(navigationFor({ developer_enabled: false, administrator: true }).map(group => group.title)).toEqual(['账户中心', '企业管理'])
+})
+
+it('只填名称与开发回调即可创建，自动标识和两环境 Audience 保持独立', async () => {
+    mocked.register.mockRejectedValueOnce(new Error('提交结果待确认')).mockResolvedValue({ operation_id: 'auto-op', application_id: 7, environments: [] })
+    const { wrapper } = await render(Apps, '/developer/apps')
+    await openRegistration(wrapper, '注册应用')
+    expect((wrapper.get('details[data-application-identity]').element as HTMLDetailsElement).open).toBe(false)
+    expect(document.activeElement?.id).toBe('app-name')
+    await wrapper.get('#app-name').setValue('订单系统')
+    await nextRegistrationStep(wrapper)
+    expect(wrapper.get('#registration-step-title').text()).toBe('开发环境')
+    await wrapper.get('#registration-dev-redirects').setValue('http://localhost:3000/callback')
+    await nextRegistrationStep(wrapper)
+    await nextRegistrationStep(wrapper)
+    expect(wrapper.text()).toContain('不会自动提交生产审批')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('提交结果待确认')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocked.register).toHaveBeenCalledTimes(2)
+    expect(mocked.register.mock.calls[0]![0]).toEqual(mocked.register.mock.calls[1]![0])
+    expect(mocked.register.mock.calls[0]![1]).toBe(mocked.register.mock.calls[1]![1])
+    const request = mocked.register.mock.calls[0]![0]
+    expect(request.app_key).toMatch(/^app-[0-9a-f-]{36}$/)
+    expect(request.development.access_audience).not.toBe(request.production.access_audience)
+    expect(request.production.redirect_uris).toEqual([])
+    expect(wrapper.text()).toContain('开发环境已生效')
+    expect(wrapper.text()).toContain('生产环境尚未提交审批')
 })

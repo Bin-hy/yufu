@@ -2,7 +2,7 @@ import { identityRequest } from '@/http/identity'
 import type { RequestOptions } from '@/http/axios'
 import type { CenterSession, RevocationResult, PasswordChangeResult } from './type'
 import type { Page, PersonalApplication, PersonalConsent, PersonalCenter, PersonalRp } from './type'
-export const getApplications = (after?: string, signal?: AbortSignal) => identityRequest<Page<PersonalApplication>>({ url: 'account/apps', params: { after }, signal, errorPresentation: 'local' })
+export const getApplications = (after?: string, signal?: AbortSignal, environment: 'production' | 'development' = 'production', q?: string) => identityRequest<Page<PersonalApplication>>({ url: 'account/apps', params: { after, environment, q }, signal, errorPresentation: 'local' })
 export const getConsents = (after?: number, signal?: AbortSignal) => identityRequest<Page<PersonalConsent, number>>({ url: 'account/consents', params: { after }, signal, errorPresentation: 'local' })
 export const getCenters = (after?: string, signal?: AbortSignal) => identityRequest<Page<PersonalCenter>>({ url: 'account/sessions', params: { after }, signal, errorPresentation: 'local' })
 export const getRps = (after?: string, signal?: AbortSignal) => identityRequest<Page<PersonalRp>>({ url: 'account/rp-sessions', params: { after }, signal, errorPresentation: 'local' })

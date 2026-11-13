@@ -61,6 +61,7 @@ pub mod identity_app_config_version;
 pub mod identity_app_environment;
 pub mod identity_app_member;
 pub mod identity_app_test_user;
+pub mod identity_audit_application;
 pub mod identity_audit_event;
 pub mod identity_authorization_flow;
 pub mod identity_collaboration_candidate;

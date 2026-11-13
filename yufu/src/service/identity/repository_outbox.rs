@@ -131,6 +131,7 @@ impl PgSecurityTransaction {
         }
         let at = signed(now(self.clock.as_ref())?)?;
         self.identity_execute("INSERT INTO identity_audit_event (id,request_id,actor_id,action,object_kind,object_id,happened_at,result,reason_code,change_summary,operation_id,commit_marker) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",vec![event.id.into(),event.request_id.into(),event.actor_id.into(),event.action.into(),event.object_kind.into(),event.object_id.clone().into(),at.into(),match event.result { AuditResult::Success=>"success",AuditResult::Denied=>"denied",AuditResult::Failure=>"failure" }.into(),event.reason.map(|e|e.code()).into(),event.change_summary.clone().into(),event.operation_id.into(),event.commit_marker.into()]).await?;
+        self.identity_audit_relations(event).await?;
         Ok(())
     }
     pub(crate) async fn write_identity_logout(

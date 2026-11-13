@@ -1,7 +1,9 @@
 //! Identity orchestration shares the original security transaction boundary.
+pub mod access;
 pub mod account;
 pub mod application;
 pub mod assignment;
+pub mod audit;
 pub mod authorization;
 pub mod browser;
 pub mod console;
@@ -14,10 +16,12 @@ pub(crate) mod password;
 pub mod protocol;
 pub mod reader;
 pub mod repository;
+mod repository_access;
 mod repository_account;
 mod repository_admission;
 mod repository_application;
 mod repository_assignment;
+mod repository_audit;
 mod repository_authorization;
 mod repository_cleanup;
 mod repository_console;
