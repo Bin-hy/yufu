@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 SPEC = importlib.util.spec_from_file_location('readiness', Path(__file__).parents[1] / 'readiness.py')
 readiness = importlib.util.module_from_spec(SPEC)
@@ -85,6 +86,37 @@ class ReadinessTests(unittest.TestCase):
     def test_execution_only_allows_named_checks(self):
         with self.assertRaises(ValueError):
             readiness.run_check(self.root, 'arbitrary-shell', self.root / 'out')
+
+    def test_colourised_summaries_are_still_counted(self):
+        # CI enables colour and Vitest wraps its summary in escape sequences. A
+        # passing run must never be recorded as zero tests because of formatting.
+        vitest = ('\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m180 passed\x1b[39m'
+                  '\x1b[22m\x1b[90m (180)\x1b[39m')
+        self.assertEqual(readiness.test_count(vitest), 180)
+        self.assertEqual(readiness.classify(vitest, 0, 'test'), ('pass', 180))
+        self.assertEqual(
+            readiness.classify('test result: \x1b[32mok\x1b[0m. 7 passed; 0 failed;', 0, 'test'),
+            ('pass', 7))
+
+    def test_launch_keeps_the_canonical_command(self):
+        # Everywhere but Windows the recorded command is launched unchanged.
+        with mock.patch.object(readiness.os, 'name', 'posix'):
+            self.assertEqual(readiness.launch(['pnpm', 'build:web']), ['pnpm', 'build:web'])
+
+    def test_launch_wraps_windows_batch_shims(self):
+        # npm exposes pnpm as a .cmd batch file, which CreateProcess cannot start.
+        with mock.patch.object(readiness.os, 'name', 'nt'), \
+                mock.patch.object(readiness.shutil, 'which', return_value=r'C:\npm\pnpm.cmd'):
+            command = readiness.launch(['pnpm', 'build:web'])
+        self.assertTrue(command[0].lower().endswith('cmd.exe'))
+        self.assertEqual(command[1:], ['/c', r'C:\npm\pnpm.cmd', 'build:web'])
+
+    def test_launch_leaves_an_unresolved_program_for_subprocess(self):
+        # Returning argv unchanged keeps a missing tool a blocked record rather
+        # than a failed check, because subprocess.run raises FileNotFoundError.
+        with mock.patch.object(readiness.os, 'name', 'nt'), \
+                mock.patch.object(readiness.shutil, 'which', return_value=None):
+            self.assertEqual(readiness.launch(['pnpm', 'build:web']), ['pnpm', 'build:web'])
 
     def test_execution_redacts_known_secret_formats(self):
         secret = 'FICTIONAL_SECRET_SENTINEL_123456'

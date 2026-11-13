@@ -8,6 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -142,7 +143,19 @@ def redact(output):
     return output
 
 
+# Test runners colourise their summaries whenever colour is enabled, and CI sets
+# CARGO_TERM_COLOR plus colour-capable reporters, so every pattern below would
+# otherwise see escape sequences instead of the line it is counting. A passing
+# run must never be recorded as zero tests because of terminal formatting.
+ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+
+
+def strip_ansi(text):
+    return ANSI_ESCAPE.sub('', text)
+
+
 def test_count(output):
+    output = strip_ansi(output)
     rust = re.findall(r'test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed;', output)
     python = re.findall(r'Ran (\d+) tests? in ', output)
     # Both Vitest and Playwright print summaries; ignore individual test title lines.
@@ -151,6 +164,7 @@ def test_count(output):
 
 
 def classify(output, exit_code, kind, engines=()):
+    output = strip_ansi(output)
     count = test_count(output) if kind in {'test', 'browser'} else None
     if exit_code is None:
         return 'blocked', count
@@ -256,6 +270,24 @@ def validate_capabilities(root, data):
     return data
 
 
+def launch(argv):
+    """Return the command to execute for an entry of CHECKS.
+
+    npm installs pnpm as a .cmd shim on Windows. A batch file is not a Win32
+    image, so CreateProcess cannot start it and the shim has to go through the
+    command interpreter. Only the launched command changes: the recorded argv
+    stays the canonical CHECKS entry that evidence verification compares against,
+    and an unresolvable program is returned untouched so subprocess.run raises
+    FileNotFoundError and the check records as blocked rather than failed.
+    """
+    if os.name != 'nt':
+        return argv
+    resolved = shutil.which(argv[0])
+    if resolved and resolved.lower().endswith(('.cmd', '.bat')):
+        return [os.environ.get('COMSPEC') or 'cmd.exe', '/c', resolved, *argv[1:]]
+    return argv
+
+
 def run_check(root, name, output_folder):
     if name not in CHECKS:
         raise ValueError('Unknown check; arbitrary commands are not allowed')
@@ -264,8 +296,8 @@ def run_check(root, name, output_folder):
     started = utc_now()
     with tempfile.TemporaryFile() as capture:
         try:
-            result = subprocess.run(argv, cwd=root / cwd, stdout=capture, stderr=subprocess.STDOUT,
-                                    timeout=7200, check=False)
+            result = subprocess.run(launch(argv), cwd=root / cwd, stdout=capture,
+                                    stderr=subprocess.STDOUT, timeout=7200, check=False)
             code = result.returncode
         except FileNotFoundError:
             capture.write(b'Check executable is unavailable.\n')
@@ -280,7 +312,7 @@ def run_check(root, name, output_folder):
         code = 125
     output = raw.decode('utf-8', errors='replace')
     # Engine names must come from actual successful case lines, not the command or a configured project list.
-    engines = re.findall(r'(?:✓|✔|ok)\s+\d*\s*\[(chromium|firefox|webkit)\]', output)
+    engines = re.findall(r'(?:✓|✔|ok)\s+\d*\s*\[(chromium|firefox|webkit)\]', strip_ansi(output))
     if baseline(root)['digest'] != source['digest']:
         code = 126
         output += '\nCandidate source changed during execution; evidence rejected.\n'
