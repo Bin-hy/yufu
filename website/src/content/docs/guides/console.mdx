@@ -9,6 +9,9 @@ import account from '../../../assets/console-account.png';
 import developer from '../../../assets/console-developer.png';
 import admin from '../../../assets/console-admin.png';
 import consent from '../../../assets/console-consent.png';
+import registration from '../../../assets/console-registration.png';
+import registrationDevelopment from '../../../assets/console-registration-development.png';
+import accessibleApps from '../../../assets/console-apps.png';
 
 本文对应当前 Vue 管理前端。截图于 2026-11-13 使用实际页面和隔离的演示数据生成，
 其中账户、应用、数量、会话及审批状态均为虚构。界面语言为中文；实际可见入口取决于账户资格。
@@ -40,6 +43,8 @@ import consent from '../../../assets/console-consent.png';
 
 应用访问分配与资料同意是不同的条件：同意披露资料并不会替代企业的应用访问分配。
 
+<Image src={accessibleApps} alt="可访问应用：生产环境筛选、直接与用户组访问来源，以及打开应用入口，虚构演示数据" />
+
 ## 开发者控制台
 
 侧栏「我的应用」进入 `/developer/apps`。列表显示当前页应用及开发、生产环境状态；
@@ -50,6 +55,28 @@ import consent from '../../../assets/console-consent.png';
 开发环境用于联调，生产配置需要独立审批。进入应用详情后维护配置、成员及接入凭据；
 应用密钥仅在签发回执中展示一次，应保存到应用服务端。
 完整参数和审批前置条件见 [OIDC 接入](/guides/oidc-integration/)。
+
+### 从创建到生产上线
+
+<Image src={registration} alt="最新应用注册基础信息：填写应用名称与用途，自定义应用标识默认收起，无需手填 Key" />
+
+<Image src={registrationDevelopment} alt="开发环境配置：可选启动地址、自动生成的 Audience、回调及退出能力设置，虚构演示数据" />
+
+1. 填写应用名称、用途及开发环境登录回调。系统自动生成应用标识，以及两个环境独立的 API 资源标识（Audience）。一般无需修改；确需固定标识时，可展开「高级设置：自定义应用标识」。
+2. 生产配置尚未准备好时，可保留草稿并继续创建。开发环境立即生效；创建应用不会自动提交生产审批，也不会授予生产访问。
+3. 创建回执列出各环境的 Client ID。服务端 Web 的客户端密钥只展示一次；浏览器 SPA 不使用客户端密钥。保存必要凭据后，点击「查看开发接入配置」完成开发联调。
+4. 准备上线时点击「配置生产并申请上线」，填写生产 HTTPS 回调并保存配置提案。存在未保存修改时，必须先保存才能提交审核；管理员审核的是提交时固定的版本。
+5. 审批通过并激活生产版本后，管理员还需明确分配用户或用户组。应用维护关系不自动授予生产访问。生产配置修改后需重新按治理流程生效。
+
+| 名称 | 用途 |
+| --- | --- |
+| 应用标识（旧称 Key） | 中心内部的稳定应用标识，创建后不可修改。由系统默认生成，不是登录凭据。 |
+| Client ID | 每个环境独立的 OIDC 客户端标识，应用发起登录时使用。 |
+| 客户端密钥 | 仅供服务端保管的凭据，不能放入浏览器；与应用标识不同。 |
+| API 资源标识（Audience） | 保护业务 API 时与后端校验值一致；仅接入登录可保留自动生成值。 |
+
+企业管理员的「直接配置应用」与开发者申请不同：生产配置必须完整，创建后立即生效；同样需要明确分配访问。「第三方应用」只表示供应商归属，不会自动切换管理方式。仅选择「仅应用本地退出」时，创建表单要求确认相应退出限制。
+
 
 ## 企业管理
 

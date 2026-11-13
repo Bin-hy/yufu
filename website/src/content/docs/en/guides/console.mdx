@@ -9,6 +9,9 @@ import account from '../../../../assets/console-account.png';
 import developer from '../../../../assets/console-developer.png';
 import admin from '../../../../assets/console-admin.png';
 import consent from '../../../../assets/console-consent.png';
+import registration from '../../../../assets/console-registration.png';
+import registrationDevelopment from '../../../../assets/console-registration-development.png';
+import accessibleApps from '../../../../assets/console-apps.png';
 
 This guide follows the current Vue frontend. Screenshots were captured on 2026-11-13 from the actual
 pages with isolated demo responses. Accounts, applications, counts, sessions, and approval states are
@@ -43,6 +46,8 @@ Changing your password revokes existing login sessions and requires a new sign-i
 - **登录会话** (login sessions), `/account/sessions`: inspect center and application sessions and revoke unused sessions.
 
 Application assignment and data consent are separate conditions. Consenting to profile disclosure does not replace enterprise access assignment.
+
+<Image src={accessibleApps} alt="Accessible production applications with direct and group access sources and launch links; fictional demo data" />
 
 ## Developer console
 
@@ -87,3 +92,20 @@ This example requests `openid profile email`; actual fields depend on the reques
 Choose “同意授权” (approve) to continue application login, or reject to end this authorization.
 You can later withdraw consent under “账户中心 → 资料授权” (account center → data consent).
 This page requires a valid OIDC flow; directly opening the screenshot's demo flow URL does not create a real authorization.
+
+
+## Application registration and production approval
+
+<Image src={registration} alt="Updated registration form with application name and purpose; custom identifier settings are collapsed by default" />
+
+<Image src={registrationDevelopment} alt="Development configuration with an optional launch URL, generated audience, callbacks and logout settings; fictional demo data" />
+
+Enter the application name, purpose and development callback URL. The console generates a stable application identifier and a separate API audience for each environment. Custom identifiers are available under the collapsed advanced settings. The identifier formerly labeled “Key” identifies an application inside the center; it is neither a client secret nor the OIDC Client ID, and cannot be changed after creation.
+
+Production configuration can remain a draft. Registration activates development and does not automatically submit production for approval or grant production access. The receipt lists the environment Client IDs and displays newly issued server-side secrets once; browser SPAs do not use client secrets.
+
+After development testing, use the production link in the receipt, configure HTTPS callbacks and save the proposal. Save outstanding edits before submitting the saved version for review. Administrators review a fixed version; after activation they must explicitly assign users or groups. Application maintenance membership does not grant production access.
+
+Keep Client IDs, secrets and audiences distinct: the Client ID identifies the OIDC client, a client secret stays on the server, and an API audience must match the protected API's validation setting. For login-only integration, retain the generated audience.
+
+An administrator's direct configuration activates complete production configuration immediately and still requires explicit access assignments. The third-party checkbox describes vendor ownership; it does not change management mode. Local-only logout requires acknowledgement of its limitation.
