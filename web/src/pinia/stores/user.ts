@@ -80,7 +80,10 @@ export const useUserStore = defineStore('user', () => {
             })
             .catch((error) => {
                 if (epoch === sessionEpoch.value) {
-                    if (error.response?.status === 401) resetSession()
+                    if (error.response?.status === 401) {
+                        resetSession()
+                        return
+                    }
                     identityError.value = error.message ?? '身份加载失败，请重试'
                 }
             })

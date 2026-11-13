@@ -50,3 +50,9 @@ min_agreeing_sources = 2
 poll_interval_seconds = 10
 sample_ttl_seconds = 30
 timeout_millis = 1500
+
+
+[identity]
+# Console SSO cookie/session lifetime, independent of legacy auth.exp_seconds.
+# A fixed 12-hour lifetime for newly authenticated sessions, without sliding renewal.
+sso_session_ttl_seconds = 43200

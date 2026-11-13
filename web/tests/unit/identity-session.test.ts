@@ -5,7 +5,8 @@ import { setToken, getToken } from '@/common/cache/cookies'
 import { resetSession, sessionEpoch, onSessionReset } from '@/workspace/session'
 import { useUserStore } from '@/pinia/stores/user'
 import { pinia } from '@/pinia'
-import { canEnter } from '@/router/guard'
+import { canEnter, RegistryRouterGuard } from '@/router/guard'
+import { createRouter, createMemoryHistory, isNavigationFailure } from 'vue-router'
 const mocked = vi.hoisted(() => ({ getCenterSession: vi.fn() }))
 vi.mock('@/pages/account/api', () => ({ getCenterSession: mocked.getCenterSession }))
 const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: false, sso_session_id: 'root-one', auth_time: 10, expires_at: 5000, csrf_token: 'center-proof' }
@@ -76,4 +77,40 @@ it('身份查询网络故障保留可重试错误，401 清除身份', async () 
     await store.ensureSession(); expect(store.identityError).toBe('temporarily unavailable')
     mocked.getCenterSession.mockRejectedValue({ response: { status: 401 }, message: 'expired' })
     await store.ensureSession(); expect(store.centerSession).toBeNull()
+})
+
+async function sessionRouter() {
+    const router = createRouter({ history: createMemoryHistory(), routes: [
+        { path: '/one', name: 'one', component: {}, meta: { requiresAuth: true } },
+        { path: '/two', name: 'two', component: {}, meta: { requiresAuth: true } },
+        { path: '/login', name: 'login', component: {}, meta: { requiresAuth: false } },
+        { path: '/403', name: '403', component: {}, meta: { requiresAuth: false } },
+    ] })
+    RegistryRouterGuard(router)
+    return router
+}
+it('已登录时身份服务临时故障中止切页，保留原页面与会话，不跳登录', async () => {
+    mocked.getCenterSession.mockResolvedValue(identity)
+    const router = await sessionRouter()
+    await router.push('/one')
+    mocked.getCenterSession.mockRejectedValue({ response: { status: 503 }, message: '身份服务暂不可用' })
+    const failure = await router.push('/two')
+    expect(isNavigationFailure(failure)).toBe(true)
+    expect(router.currentRoute.value.path).toBe('/one')
+    expect(useUserStore(pinia).centerSession?.sso_session_id).toBe('root-one')
+    mocked.getCenterSession.mockResolvedValue(identity)
+    await router.push('/two')
+    expect(router.currentRoute.value.path).toBe('/two')
+})
+it('初次恢复故障可重试，真正 401 才要求重新登录', async () => {
+    const router = await sessionRouter()
+    mocked.getCenterSession.mockRejectedValue(new Error('连接超时'))
+    await router.push('/one')
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(useUserStore(pinia).identityError).toBe('连接超时')
+    mocked.getCenterSession.mockRejectedValue({ response: { status: 401 }, message: 'expired' })
+    await router.push('/one')
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(useUserStore(pinia).identityError).toBeNull()
+    expect(useUserStore(pinia).centerSession).toBeNull()
 })

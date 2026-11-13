@@ -7,16 +7,17 @@ import { useUserStore } from '@/pinia/stores/user'
 import { resetSession } from '@/workspace/session'
 import { consumeSecretFragment } from '@/pages/account/api/actions'
 import { navigationFor } from '@/router/navigation'
+import LoginForm from '@/components/workspace/login-form.vue'
 import Profile from '@/pages/account/views/profile.vue'
 import Sessions from '@/pages/account/views/sessions.vue'
 import Apps from '@/pages/developer/views/apps.vue'
 import Consent from '@/pages/oidc-consent/index.vue'
 import AccountAction from '@/pages/account/views/action.vue'
 const mocked = vi.hoisted(() => ({
-    session: vi.fn(), profile: vi.fn(), password: vi.fn(), centers: vi.fn(), rps: vi.fn(), revokeCenter: vi.fn(), revokeRp: vi.fn(), logout: vi.fn(),
+    session: vi.fn(), login: vi.fn(), profile: vi.fn(), password: vi.fn(), centers: vi.fn(), rps: vi.fn(), revokeCenter: vi.fn(), revokeRp: vi.fn(), logout: vi.fn(),
     apps: vi.fn(), register: vi.fn(), registerAdmin: vi.fn(), inspect: vi.fn(), complete: vi.fn(), exchange: vi.fn(), action: vi.fn(), accept: vi.fn(), reset: vi.fn(),
 }))
-vi.mock('@/pages/account/api', () => ({ getCenterSession: mocked.session, updateProfile: mocked.profile, changePassword: mocked.password, getCenters: mocked.centers, getRps: mocked.rps, revokeCenter: mocked.revokeCenter, revokeRp: mocked.revokeRp, centerLogout: mocked.logout }))
+vi.mock('@/pages/account/api', () => ({ getCenterSession: mocked.session, centerLogin: mocked.login, updateProfile: mocked.profile, changePassword: mocked.password, getCenters: mocked.centers, getRps: mocked.rps, revokeCenter: mocked.revokeCenter, revokeRp: mocked.revokeRp, centerLogout: mocked.logout }))
 vi.mock('@/pages/developer/api', () => ({ listApps: mocked.apps, registerApp: mocked.register, registerAdminApp: mocked.registerAdmin }))
 vi.mock('@/pages/oidc-consent/api', () => ({ inspectFlow: mocked.inspect, completeFlow: mocked.complete }))
 vi.mock('@/pages/account/api/actions', async () => ({ ...await vi.importActual<object>('@/pages/account/api/actions'), exchangeAction: mocked.exchange, inspectAction: mocked.action, acceptInvitation: mocked.accept, completePasswordReset: mocked.reset }))
@@ -223,4 +224,33 @@ it('只填名称与开发回调即可创建，自动标识和两环境 Audience 
     expect(request.production.redirect_uris).toEqual([])
     expect(wrapper.text()).toContain('开发环境已生效')
     expect(wrapper.text()).toContain('生产环境尚未提交审批')
+})
+
+it('会话恢复暂时失败时先重试原会话，不要求再次提交密码', async () => {
+    const store = useUserStore(pinia)
+    store.logout()
+    mocked.session.mockRejectedValueOnce(new Error('身份服务暂不可用'))
+    await store.ensureSession()
+    const { wrapper, router } = await render(LoginForm, '/login?redirect=//outside.example')
+    expect(wrapper.text()).toContain('暂时无法验证登录状态')
+    expect(wrapper.find('#login-password').exists()).toBe(false)
+    mocked.session.mockResolvedValue(identity)
+    await wrapper.findAll('button').find(button => button.text() === '重新验证登录状态')!.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/account')
+    expect(store.centerSession?.sso_session_id).toBe('root-one')
+    expect(mocked.login).not.toHaveBeenCalled()
+})
+it('重试原会话确认为 401 后才展示密码登录', async () => {
+    const store = useUserStore(pinia)
+    store.logout()
+    mocked.session.mockRejectedValueOnce(new Error('连接超时'))
+    await store.ensureSession()
+    const { wrapper } = await render(LoginForm, '/login')
+    mocked.session.mockRejectedValueOnce({ response: { status: 401 }, message: 'expired' })
+    await wrapper.findAll('button').find(button => button.text() === '重新验证登录状态')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#login-password').exists()).toBe(true)
+    expect(store.centerSession).toBeNull()
+    expect(mocked.login).not.toHaveBeenCalled()
 })

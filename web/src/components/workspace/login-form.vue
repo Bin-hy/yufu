@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, onScopeDispose, watch } from 'vue'
+import { computed, reactive, ref, onScopeDispose, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowRight, Info } from '@lucide/vue'
 import { centerLogin } from '@/pages/account/api'
@@ -30,6 +30,20 @@ const remembered = getRememberUser(),
     capsLock = ref(false),
     mutation = useAsyncMutation(),
     { pending, error } = mutation
+const retrying = ref(false)
+const restoreUnavailable = computed(() => !props.oidc && !props.actionId && (!!user.identityError || retrying.value))
+function workspaceTarget() {
+    const path = typeof route.query.redirect === 'string' ? route.query.redirect : '/account'
+    return path.startsWith('/') && !path.startsWith('//') && router.resolve(path).meta.workspace ? path : '/account'
+}
+async function retrySession() {
+    if (retrying.value) return
+    retrying.value = true
+    try {
+        await user.ensureSession()
+        if (user.centerSession && !user.identityError) await router.replace(workspaceTarget())
+    } finally { retrying.value = false }
+}
 watch(
     form,
     () => {
@@ -42,7 +56,7 @@ function detectCaps(event: KeyboardEvent) {
     capsLock.value = event.getModifierState?.('CapsLock') ?? false
 }
 async function submit() {
-    if (pending.value) return
+    if (pending.value || restoreUnavailable.value) return
     validation.value = ''
     if (!form.username.trim() || !form.password) {
         validation.value = '请输入用户名和密码'
@@ -87,28 +101,27 @@ async function submit() {
                 router.resolve({ name: 'oidc-consent', query: { flow_id: flow } }).href,
             )
         } else {
-            const path = typeof route.query.redirect === 'string' ? route.query.redirect : '/account'
-            const target =
-                path.startsWith('/') &&
-                !path.startsWith('//') &&
-                router.resolve(path).meta.workspace
-                    ? path
-                    : '/account'
-            await router.replace(target)
+            await router.replace(workspaceTarget())
         }
     }
 }
 </script>
 <template>
     <AuthLayout
-        :title="oidc ? '登录以继续授权' : '欢迎回来'"
+        :title="restoreUnavailable ? '暂时无法验证登录状态' : oidc ? '登录以继续授权' : '欢迎回来'"
         :description="
-            oidc
+            restoreUnavailable
+                ? '身份服务暂不可用，还不能判断原会话是否过期。恢复连接后可重试。'
+                : oidc
                 ? '使用企业统一账户登录，确认应用请求的访问范围。'
                 : '登录账户，进入身份与权限工作台。'
         "
     >
-        <form class="space-y-4" novalidate @submit.prevent="submit">
+        <div v-if="restoreUnavailable" class="space-y-4" role="status">
+            <p class="form-alert">{{ user.identityError || '正在重新验证登录状态…' }}</p>
+            <UiButton block :loading="retrying" :disabled="retrying" @click="retrySession">重新验证登录状态</UiButton>
+        </div>
+        <form v-else class="space-y-4" novalidate @submit.prevent="submit">
             <p v-if="validation || error" class="form-alert" role="alert">
                 {{ validation || error }}
             </p>

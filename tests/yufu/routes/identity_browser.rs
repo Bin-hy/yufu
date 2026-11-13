@@ -339,3 +339,47 @@ async fn identity_browser_http_login_flow_rejects_wrong_proof_and_repeated_reaut
     transaction.rollback().await.unwrap();
     f.close().await;
 }
+
+#[tokio::test]
+async fn identity_browser_center_lifetime_is_independent_of_two_hour_legacy_jwt() {
+    let f = IdentityFixture::start_configured(|config| config.auth.exp_seconds = 7200).await;
+    let mut cookies = BrowserCookies::default();
+    http_login(&f, &mut cookies).await;
+    let url = format!("{}/api/v1/account/session", f.base_url);
+    let initial: serde_json::Value = f
+        .client
+        .get(&url)
+        .header("cookie", cookies.header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let expires = initial["expires_at"].as_u64().unwrap();
+    let authenticated = initial["auth_time"].as_u64().unwrap();
+    assert_eq!(expires - authenticated, 43_200);
+    f.clock.advance(7_201_000);
+    let response = f
+        .client
+        .get(&url)
+        .header("cookie", cookies.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let restored: serde_json::Value = response.json().await.unwrap();
+    for field in ["sso_session_id", "auth_time", "expires_at"] {
+        assert_eq!(restored[field], initial[field]);
+    }
+    f.clock.advance(35_999_000);
+    let response = f
+        .client
+        .get(&url)
+        .header("cookie", cookies.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401);
+    f.close().await;
+}

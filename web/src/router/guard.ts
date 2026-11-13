@@ -10,7 +10,8 @@ import { hasUnsavedWork } from '@/workspace/draft-registry'
 import { saveWorkspace } from '@/storage/workspace'
 import { sessionEpoch, sessionOwner } from '@/workspace/session'
 import { confirmationBusy } from '@/utils/modal'
-let registered = false
+import { emitToast } from '@/utils/toast'
+const registered = new WeakSet<Router>()
 export function canEnter(meta: { qualification?: 'developer' | 'administrator' }, identity: { developer_enabled: boolean; administrator: boolean } | null) {
     if (!identity) return false
     if (meta.qualification === 'administrator') return identity.administrator
@@ -18,13 +19,17 @@ export function canEnter(meta: { qualification?: 'developer' | 'administrator' }
     return true
 }
 export function RegistryRouterGuard(router: Router) {
-    if (registered) return
-    registered = true
+    if (registered.has(router)) return
+    registered.add(router)
     router.beforeEach(async (to, from) => {
         if (to.meta.requiresAuth !== false) {
             const user = useUserStore(pinia)
             await user.ensureSession()
-            if (!user.centerSession || user.identityError)
+            if (user.identityError && user.centerSession) {
+                emitToast({ type: 'error', message: '暂时无法验证登录状态，请稍后重试。' + user.identityError })
+                return false
+            }
+            if (!user.centerSession)
                 return { name: 'login', query: { redirect: to.fullPath }, replace: true }
             if (!canEnter(to.meta, user.centerSession))
                 return { name: '403', replace: true }

@@ -29,7 +29,7 @@ from the working directory. Omitted fields use their defaults.
 | --- | --- | --- |
 | `secret` | built-in default | JWT / CSRF signing secret; replace in production |
 | `tokens` | `[]` | Static debug tokens for local troubleshooting only |
-| `exp_seconds` | `7200` | Access-token lifetime in seconds |
+| `exp_seconds` | `7200` | Legacy JWT access-token lifetime; does not control console SSO |
 | `refresh_exp_seconds` | `604800` | Refresh-token lifetime in seconds |
 | `origins` | local development origins | Allowed CORS origins |
 | `allow_insecure_loopback_cookies` | `false` | Equivalent to the CLI flag |
@@ -46,13 +46,24 @@ from the working directory. Omitted fields use their defaults.
 
 Repeatable static account entries with the same `username` and `password` fields.
 
+## `[identity]`
+
+The console uses a server-side SSO session and an HttpOnly cookie, separately from legacy JWTs and application access tokens.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `sso_session_ttl_seconds` | `43200` | Console session lifetime: 12 hours; allowed range 1–43200 seconds |
+| `access_token_ttl_seconds` | `300` | Managed OIDC access-token lifetime; does not set the console login lifetime |
+
+The SSO deadline is fixed at password authentication and does not slide when browsing. Changes apply to newly created sessions. `auth.exp_seconds` and legacy refresh-token settings do not extend this session. A failed identity check due to a temporary service/network problem is retried separately; a confirmed 401 requires signing in again.
+
 ## `[oidc]`
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `issuer` | derived from `http.public` or `http.listen` | Public issuer; HTTPS in production |
 | `rsa_private_key_path` | `conf/oidc_rsa_private.local.pem` | RS256 signing key path |
-| `access_token_expire_seconds` | follows `auth.exp_seconds` | Access-token lifetime |
+| `access_token_expire_seconds` | follows `auth.exp_seconds` | Legacy OIDC access-token lifetime |
 | `refresh_token_expire_seconds` | follows `auth.refresh_exp_seconds` | Refresh-token lifetime |
 | `email_domain` | `yufu.local` | Domain used by UserInfo when a user has no email |
 | `signing_algorithm` | `RS256` | `RS256`, or `HS256` for tests |

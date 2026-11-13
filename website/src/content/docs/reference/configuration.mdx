@@ -29,7 +29,7 @@ description: yufu 配置文件字段、默认值与命令行参数。
 | --- | --- | --- |
 | `secret` | 内置默认值 | JWT / CSRF 签名密钥，生产必须替换 |
 | `tokens` | `[]` | 静态调试令牌，仅用于本地排查 |
-| `exp_seconds` | `7200` | access token 有效期（秒） |
+| `exp_seconds` | `7200` | 旧版 JWT access token 有效期，不控制当前控制台 SSO |
 | `refresh_exp_seconds` | `604800` | refresh token 有效期（秒） |
 | `origins` | 本地开发地址 | 允许的 CORS origin 列表 |
 | `allow_insecure_loopback_cookies` | `false` | 等价于命令行开关 |
@@ -46,13 +46,24 @@ description: yufu 配置文件字段、默认值与命令行参数。
 
 可重复的静态账户条目，字段同为 `username` 与 `password`。
 
+## `[identity]`
+
+控制台使用服务端 SSO 会话与 HttpOnly Cookie，与旧版 JWT 和业务应用的 access token 分开配置。
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `sso_session_ttl_seconds` | `43200` | 控制台登录会话有效期：12 小时；范围 1—43200 秒 |
+| `access_token_ttl_seconds` | `300` | 受管 OIDC access token 有效期，不是控制台登录时长 |
+
+SSO 从密码认证时计算固定期限，浏览页面不会自动续期。配置变更仅对新会话生效；`auth.exp_seconds` 和旧刷新令牌参数不延长此会话。网络或身份服务暂时故障时应重试会话验证，确认 401 后才要求重新登录。
+
 ## `[oidc]`
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `issuer` | 由 `http.public` 或 `http.listen` 推导 | 公开 issuer，生产必须为 HTTPS |
 | `rsa_private_key_path` | `conf/oidc_rsa_private.local.pem` | RS256 签名私钥路径 |
-| `access_token_expire_seconds` | 跟随 `auth.exp_seconds` | access token 有效期 |
+| `access_token_expire_seconds` | 跟随 `auth.exp_seconds` | 旧版 OIDC access token 有效期 |
 | `refresh_token_expire_seconds` | 跟随 `auth.refresh_exp_seconds` | refresh token 有效期 |
 | `email_domain` | `yufu.local` | 用户无邮箱时 UserInfo 使用的域名 |
 | `signing_algorithm` | `RS256` | `RS256` 或测试用 `HS256` |

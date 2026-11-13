@@ -13,7 +13,7 @@ listen = "127.0.0.1:4000"
 # secret = "<jwt_secret>"
 # static JWT token, superadmin, debuggger can use this token
 # tokens = ["live777"]
-# expiration_seconds, default 2h.
+# Legacy JWT lifetime (default 2h); this does not control console SSO cookies.
 exp_seconds = 7200
 # refresh_expiration_seconds, default 7d.
 refresh_exp_seconds = 604800 # 7*24*3600
@@ -98,3 +98,9 @@ min_agreeing_sources = 2
 poll_interval_seconds = 10
 sample_ttl_seconds = 30
 timeout_millis = 1500
+
+
+[identity]
+# Console login lifetime: 12 hours from password authentication, without sliding renewal.
+# Independent of auth.exp_seconds and OIDC access tokens. Applies to new sessions.
+sso_session_ttl_seconds = 43200
