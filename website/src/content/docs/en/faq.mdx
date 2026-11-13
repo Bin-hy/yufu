@@ -3,6 +3,14 @@ title: FAQ
 description: Common questions about integration and operations.
 ---
 
+## Does a feature description mean the current release has passed acceptance
+
+No. Capabilities distinguish verified availability, implementation pending validation, legacy compatibility,
+and unsupported features. Screenshots and historical test runs do not establish acceptance for a new candidate.
+The rejection/logout matrices, documented setup and recovery, and actual three-platform CI results must be
+complete before claiming full candidate acceptance. The legacy `/api/v1/enforce` endpoint rejects requests;
+internal authorization does not provide a usable public PDP decision API.
+
 ## After logout, signing in again skips the identity provider
 
 The application cleared only its local session and never ended the central browser session.

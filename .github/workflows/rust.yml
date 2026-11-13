@@ -25,9 +25,11 @@ on:
 
 env:
     CARGO_TERM_COLOR: always
+    YUFU_READINESS_OUTPUT: docs/specs/product-readiness/evidence/ci
 
 jobs:
     check:
+        name: Build (${{ matrix.os }})
         strategy:
             fail-fast: false
             matrix:
@@ -57,30 +59,69 @@ jobs:
               run: |
                   npm install --global pnpm@12.10.1
                   pnpm install --frozen-lockfile
+            - uses: actions/setup-python@v6
+              with:
+                  python-version: '3.11'
             - name: Build authentication frontend
-              run: pnpm build:web
-            - name: Verify frontend (Ubuntu)
-              if: matrix.os == 'ubuntu-latest'
+              run: python scripts/readiness.py run web-build
+            - name: Cargo format
+              run: python scripts/readiness.py run fmt
+            - name: Cargo clippy
+              run: python scripts/readiness.py run clippy
+            - name: Cargo build
+              run: python scripts/readiness.py run rust-build
+
+            - name: Upload candidate build evidence
+              if: always()
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: readiness-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-build-${{ matrix.os }}
+                  path: docs/specs/product-readiness/evidence/ci/
+                  if-no-files-found: warn
+                  retention-days: 14
+
+    verify:
+        name: Tests (Ubuntu, disposable PostgreSQL)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt, clippy
+            - uses: Swatinem/rust-cache@v2
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '24'
+            - uses: actions/setup-python@v6
+              with:
+                  python-version: '3.11'
+            - name: Install frontend dependencies
               run: |
-                  pnpm --filter @yufu/web test
-                  pnpm --filter @yufu/web check
-                  pnpm --filter @yufu/web lint
-            - name: Install browser engines (Ubuntu)
-              if: matrix.os == 'ubuntu-latest'
+                  npm install --global pnpm@12.10.1
+                  pnpm install --frozen-lockfile
+            - name: Verify evidence tooling and capability claims
+              run: |
+                  python scripts/readiness.py run tool-tests
+                  python scripts/readiness.py capabilities
+            - name: Build embedded console assets
+              run: python scripts/readiness.py run web-build
+            - name: Verify frontend
+              run: |
+                  python scripts/readiness.py run web-tests
+                  python scripts/readiness.py run web-check
+                  python scripts/readiness.py run web-lint
+            - name: Install browser engines
               working-directory: web
               run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
-
-            - name: Cargo format
-              run: cargo fmt --all -- --check
-            - name: Cargo clippy
-              run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-            - name: Cargo build
-              run: cargo build --workspace --all-targets --all-features --release --verbose
-
-            - name: Cargo Test (only on Ubuntu)
-              if: matrix.os == 'ubuntu-latest'
-              # Each integration case owns its disposable PostgreSQL database.
+            - name: Verify Rust with disposable PostgreSQL
               run: |
-                  cargo test --workspace --all-targets --all-features -- --test-threads=1
-                  cargo test --workspace --doc --all-features
-
+                  python scripts/readiness.py run rust-tests
+                  python scripts/readiness.py run rust-doc
+            - name: Upload candidate test evidence
+              if: always()
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: readiness-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-tests-ubuntu
+                  path: docs/specs/product-readiness/evidence/ci/
+                  if-no-files-found: warn
+                  retention-days: 14

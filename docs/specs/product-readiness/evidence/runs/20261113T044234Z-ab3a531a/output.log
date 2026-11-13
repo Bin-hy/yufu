@@ -1,0 +1,38 @@
+test_baseline_excludes_secrets_artifacts_and_symlinks (test_readiness.ReadinessTests.test_baseline_excludes_secrets_artifacts_and_symlinks) ... ok
+test_baseline_tracks_changes_deletions_and_untracked_code (test_readiness.ReadinessTests.test_baseline_tracks_changes_deletions_and_untracked_code) ... ok
+test_capabilities_reject_invalid_or_unverified_claims (test_readiness.ReadinessTests.test_capabilities_reject_invalid_or_unverified_claims) ... ok
+test_execution_fail_zero_or_missing_engine_never_passes (test_readiness.ReadinessTests.test_execution_fail_zero_or_missing_engine_never_passes) ... ok
+test_execution_only_allows_named_checks (test_readiness.ReadinessTests.test_execution_only_allows_named_checks) ... ok
+test_execution_redacts_known_secret_formats (test_readiness.ReadinessTests.test_execution_redacts_known_secret_formats) ... ok
+test_integrity_cannot_turn_failed_record_into_pass (test_readiness.ReadinessTests.test_integrity_cannot_turn_failed_record_into_pass) ... ok
+test_integrity_detects_tampering_old_source_and_traversal (test_readiness.ReadinessTests.test_integrity_detects_tampering_old_source_and_traversal) ... ok
+test_metadata_requires_identity_time_and_test_counts (test_readiness.ReadinessTests.test_metadata_requires_identity_time_and_test_counts) ... ok
+test_all_archives_have_exact_whitelist (test_release.ReleaseTests.test_all_archives_have_exact_whitelist) ... ok
+test_api_only_explicit_lookup_404_is_absent (test_release.ReleaseTests.test_api_only_explicit_lookup_404_is_absent) ... ok
+test_checksums_and_tampering (test_release.ReleaseTests.test_checksums_and_tampering) ... ok
+test_draft_with_null_body_is_rejected (test_release.ReleaseTests.test_draft_with_null_body_is_rejected) ... ok
+test_early_rejections_never_write (test_release.ReleaseTests.test_early_rejections_never_write) ... ok
+test_failures_do_not_publish_and_retry_works (test_release.ReleaseTests.test_failures_do_not_publish_and_retry_works) ... ok
+test_invalid_versions (test_release.ReleaseTests.test_invalid_versions) ... ok
+test_late_tag_movement_leaves_draft (test_release.ReleaseTests.test_late_tag_movement_leaves_draft) ... ok
+test_metadata_and_executable_mode (test_release.ReleaseTests.test_metadata_and_executable_mode) ... ok
+test_missing_and_extra_assets (test_release.ReleaseTests.test_missing_and_extra_assets) ... ok
+test_packaging_preconditions (test_release.ReleaseTests.test_packaging_preconditions) ... ok
+test_prerelease (test_release.ReleaseTests.test_prerelease) ... ok
+test_publish_success_and_public_rerun (test_release.ReleaseTests.test_publish_success_and_public_rerun) ... ok
+test_unsafe_or_incomplete_archive (test_release.ReleaseTests.test_unsafe_or_incomplete_archive) ... ok
+test_version_sources_must_match (test_release.ReleaseTests.test_version_sources_must_match) ... ok
+test_versions (test_release.ReleaseTests.test_versions) ... ok
+test_webui_required (test_release.ReleaseTests.test_webui_required) ... ok
+test_zip_rejects_links_and_extras (test_release.ReleaseTests.test_zip_rejects_links_and_extras) ... ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 1.631s
+
+OK
+Published owner/repo v1.2.3 from aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Published owner/repo v1.2.3 from aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Published owner/repo v1.2.3 from aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Published owner/repo v1.2.3 from aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Published owner/repo v1.2.3-rc.1 from aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Published owner/repo v1.2.3 from aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

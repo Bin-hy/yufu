@@ -1,6 +1,6 @@
 ---
 title: yufu
-description: A single-tenant identity and SSO platform with standard OIDC, fine-grained authorization, and self-hosting.
+description: A single-tenant identity and SSO platform with standard OIDC, explicit application assignments, and self-hosting.
 template: splash
 head:
   - tag: title
@@ -59,7 +59,7 @@ import consent from '../../../assets/console-consent.png';
     One issuer serves every internal application. Sign in once, move across applications within your grants, and log out with session linkage.
   </Card>
   <Card title="Fine-grained authorization" icon="setting">
-    Roles, URI permissions, application permissions, and PDP decisions. Application access is never granted by default.
+    Application access requires explicit assignment and production onboarding requires approval. Authorization is evaluated internally; a public PDP decision API is not currently supported.
   </Card>
   <Card title="Sessions and revocation" icon="refresh">
     Refresh-token rotation, revocation generations, device and session management, with every administrative write audited.

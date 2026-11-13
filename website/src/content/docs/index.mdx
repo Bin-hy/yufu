@@ -1,6 +1,6 @@
 ---
 title: yufu
-description: 单企业统一身份与 SSO 平台：标准 OIDC、细粒度授权、自托管部署。
+description: 单企业统一身份与 SSO 平台：标准 OIDC、显式应用访问分配、自托管部署。
 template: splash
 head:
   - tag: title
@@ -57,8 +57,8 @@ import consent from '../../assets/console-consent.png';
   <Card title="单企业 SSO" icon="lock">
     一个 issuer 服务全部内部应用。登录一次，在授权范围内跨应用免登录，退出按会话联动。
   </Card>
-  <Card title="细粒度授权" icon="setting">
-    角色、URI 权限、应用权限与 PDP 策略判断。应用访问必须显式分配，不会默认放行。
+  <Card title="受控应用访问" icon="setting">
+    应用访问必须显式分配，生产接入需审批。中心内部执行授权判断；公开 PDP 决策 API 暂不支持。
   </Card>
   <Card title="会话与撤销" icon="refresh">
     刷新令牌轮换、撤销代次、设备与会话管理，所有管理写入进入审计。

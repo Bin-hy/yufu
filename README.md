@@ -61,7 +61,7 @@ yufu 是**鱼符**的拼音。唐代官员随身佩带鱼形的身份凭证，�
 | **账户与访问治理** | 企业邀请、账户资格、用户组及应用访问分配；访问须显式授予 |
 | **资料授权与会话管理** | 用户查看和撤回资料同意，管理中心及应用会话，支持刷新令牌轮换与撤销 |
 | **退出联动与审计** | RP 发起退出、按应用环境能力投递后通道退出通知，以及身份与授权变更审计 |
-| **应用集成** | 机密 Web 与公共 SPA 参考实现、Go Runtime SDK，以及 PDP 策略判断和 MCP 访问令牌 |
+| **应用集成** | 机密 Web 与公共 SPA 参考实现、Go Runtime SDK 与 MCP 访问令牌；公开 PDP 接口暂不可接入 |
 
 ### 三个工作入口
 
@@ -159,7 +159,8 @@ cargo run --bin yufu --features webui -- \
 | Go 服务 | [Go SDK 指南](https://yufu-sso.pages.dev/guides/go-sdk/) | [sdk/go](sdk/go/README.md) · [联调示例](examples/sdk/go/README.md) |
 
 API 默认前缀为 `/api/v1`。应用权限同步使用 `/application/sync-permissions`，
-PDP 使用 `/enforce`。MCP 令牌必须指定已注册应用的 `aud`，调用者还需具有相应 `mcp:access` 权限。
+旧 `/enforce` 保留拒绝响应，不提供可直接接入的公开 PDP 决策 API；中心内部的授权判断不等于外部接口可用。
+MCP 令牌必须指定已注册应用的 `aud`，调用者还需具有相应 `mcp:access` 权限。
 
 ## 部署与运维
 
@@ -277,6 +278,10 @@ Release 失败或被放弃时不会留下镜像。
 手工构建、打包、校验与发版的完整步骤见[打包与发版操作手册](docs/releases/packaging.md)。
 
 ## 能力边界与项目进展
+
+上面的能力说明不等于当前候选版本已经完成发布验收。当前状态按四类区分：已验证可用、已实现待验收、兼容保留、暂不支持。
+版本化能力清单见 [capabilities.json](docs/product/capabilities.json)，本轮实际结果见[产品可用性验收记录](docs/specs/product-readiness/verification.md)。
+关键拒绝/退出矩阵、公开文档复现与远端三平台结果未全部取得前，不宣称完整发布验收通过。
 
 当前聚焦单企业、固定 issuer 的身份与应用接入，不提供多租户、公开应用市场、外部 IdP 联邦、
 SAML、LDAP、SCIM 或 MFA。企业开发者通过邀约获得资格，不开放公开自助注册。

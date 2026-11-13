@@ -31,7 +31,7 @@ description: OIDC 协议端点、管理 API 与令牌语义。
 | POST | `/api/v1/logout` | 退出当前会话 |
 | GET | `/api/v1/csrf` | 获取 CSRF 挑战 |
 | GET | `/api/v1/health/ready` | 认证时钟就绪状态 |
-| POST | `/api/v1/enforce` | PDP 策略判断 |
+| POST | `/api/v1/enforce` | 兼容保留，仅返回拒绝；不可作为公开 PDP 决策 API 接入 |
 | POST | `/api/v1/application/sync-permissions` | 同步应用权限 |
 
 ## 令牌语义

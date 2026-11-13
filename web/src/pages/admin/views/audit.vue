@@ -67,7 +67,7 @@ async function copy(value: string, label: string) {
         <PageHeader
             title="身份审计"
             eyebrow="AUDIT"
-            description="查询已提交的账户、应用与授权操作摘要。记录只读，变更会写入不可篡改的审计链。"
+            description="查询已提交的账户、应用与授权操作摘要。此页面只读；审计记录保存在部署方数据库中。"
         >
             <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.first()">
                 <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />重新读取
