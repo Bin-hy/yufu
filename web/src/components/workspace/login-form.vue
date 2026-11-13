@@ -7,7 +7,7 @@ import { useUserStore } from '@/pinia/stores/user'
 import { useTabsStore } from '@/pinia/stores/tabs'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { setRememberUser, removeRememberUser, getRememberUser } from '@/common/cache/localstorage'
-import { resetSession, sessionOwner } from '@/workspace/session'
+import { resetSession, sessionOwner, sessionExpiredNotice } from '@/workspace/session'
 import { loadWorkspace } from '@/storage/workspace'
 import { canEnter } from '@/router/guard'
 import UiInput from '@/components/ui/input/input.vue'
@@ -122,6 +122,7 @@ async function submit() {
             <UiButton block :loading="retrying" :disabled="retrying" @click="retrySession">重新验证登录状态</UiButton>
         </div>
         <form v-else class="space-y-4" novalidate @submit.prevent="submit">
+            <p v-if="sessionExpiredNotice" class="form-alert" role="status">中心会话已失效，请重新登录后继续。</p>
             <p v-if="validation || error" class="form-alert" role="alert">
                 {{ validation || error }}
             </p>

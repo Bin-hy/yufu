@@ -20,6 +20,7 @@ import {
 import { getAssignments, searchAccounts, searchGroups, setAssignment, setTestUser } from '@/pages/admin/api'
 import type { Environment, EnvironmentConfig, Reader } from '../api/type'
 import { validateEnvironmentConfig } from '../api/validation'
+import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiInput from '@/components/ui/input/input.vue'
@@ -30,7 +31,6 @@ import type { PickerOption } from '@/components/ui/entity-picker/types'
 import { accountOption, groupOption } from '@/lib/picker-options'
 import ConfigEditor from '../components/config-editor.vue'
 import { emitToast } from '@/utils/toast'
-import { showModal } from '@/utils/modal'
 
 const context = usePageContext(),
     user = useUserStore()
@@ -47,6 +47,7 @@ const state = useAsyncQuery({
         loader: (signal) => getApp(administrator.value, id.value, signal),
     }),
     { data, status, error, refreshing } = state
+const preserveEditor = ref(false)
 const selected = ref(''),
     config = ref<EnvironmentConfig>(),
     metadata = reactive({ name: '', description: '' }),
@@ -62,6 +63,7 @@ const isOwner = computed(
     () => administrator.value || data.value?.owner_user_id === user.centerSession?.user_id,
 )
 watch(data, (app) => {
+    if (preserveEditor.value) return
     metadata.name = app?.name ?? ''
     metadata.description = app?.description ?? ''
     if (app && !app.environments.some((value) => value.environment_id === selected.value))
@@ -74,6 +76,7 @@ watch(() => context.route.value.query.environment, kind => {
 watch(
     env,
     (value) => {
+        if (preserveEditor.value) return
         config.value = value ? structuredClone(value.latest.config) : undefined
     },
     { immediate: true },
@@ -255,6 +258,13 @@ const approvalChanges = computed(() => {
             after: JSON.stringify(fixed[key] ?? null),
         }))
 })
+async function recoverFailure() {
+    preserveEditor.value = true
+    try {
+        await state.refresh()
+        if (!state.error.value && !mutation.failure.value?.outcomeUncertain) mutation.clearError()
+    } finally { preserveEditor.value = false }
+}
 async function update(path: string, method: 'POST' | 'PUT' | 'PATCH', body: unknown) {
     return mutation.run(
         () => changeApp(administrator.value, id.value, path, method, body, operationKey({ id: id.value, path, body })),
@@ -378,19 +388,20 @@ async function test(present: boolean) {
 async function toggleLifecycle() {
     if (!data.value) return
     if (data.value.active) {
-        const confirmed = await showModal({
+        const body = { active: false, expected_revision: data.value.revision }
+        const appId = id.value
+        const confirmed = await mutation.confirm({
             title: '停用应用',
             content: `停用“${data.value.name}”后会撤销其全部应用授权。你可以稍后恢复应用，但用户需要重新登录。`,
             confirmText: '停用并撤销授权',
             destructive: true,
-        })
-        if (!confirmed) return
+        }, () => changeApp(administrator.value, appId, '/lifecycle', 'PATCH', body, operationKey({ id: appId, path: '/lifecycle', body })))
+        if (confirmed) await state.refresh()
+        return
     }
-    await update('/lifecycle', 'PATCH', {
-        active: !data.value.active,
-        expected_revision: data.value.revision,
-    })
+    await update('/lifecycle', 'PATCH', { active: true, expected_revision: data.value.revision })
 }
+
 async function copy(value: string, label: string) {
     try {
         await navigator.clipboard.writeText(value)
@@ -418,7 +429,9 @@ const envStatus = computed(() => {
             </UiButton>
         </PageHeader>
 
-        <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
+        <FailureFeedback :failure="mutation.failure.value" :message="writeError"
+            :recovery-label="['reload', 'check-result'].includes(mutation.failure.value?.recovery ?? '') ? '加载最新数据（保留输入）' : undefined"
+            :recover="recoverFailure" />
 
         <section v-if="shownSecret" class="panel mb-5 border-warning/30">
             <header class="panel-heading bg-warning/[0.04]">

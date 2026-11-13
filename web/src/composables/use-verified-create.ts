@@ -1,8 +1,10 @@
 import { ref } from 'vue'
 import { sessionEpoch } from '@/workspace/session'
+import { normalizeFailure, UncertainSubmissionError } from '@/http/errors'
 
 export function createVerifiedCreate<T>(write: () => Promise<T>, find: () => Promise<T | null>) {
     const uncertain = ref(false)
+    let uncertainCause: unknown
     async function run(): Promise<T> {
         const epoch = sessionEpoch.value
         if (!uncertain.value) {
@@ -10,11 +12,11 @@ export function createVerifiedCreate<T>(write: () => Promise<T>, find: () => Pro
                 return await write()
             } catch (error) {
                 const failure = error as { response?: unknown; code?: string }
-                if (
-                    failure.response ||
-                    !['ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK'].includes(failure.code ?? '')
-                )
+                const config = (error as { config?: { method?: string } })?.config
+                if (!normalizeFailure(error, config?.method ? {} : { operation: 'write' }).outcomeUncertain
+                    || (!failure.response && !['ECONNABORTED', 'ETIMEDOUT', 'ERR_NETWORK'].includes(failure.code ?? '')))
                     throw error
+                uncertainCause = error
                 uncertain.value = true
             }
         }
@@ -30,9 +32,7 @@ export function createVerifiedCreate<T>(write: () => Promise<T>, find: () => Pro
             uncertain.value = false
             return result
         }
-        throw Error(
-            '创建结果未知，无法确认服务端是否已完成。为避免重复创建，请核对现有记录；重试仅重新核对，不会再次提交。',
-        )
+        throw new UncertainSubmissionError(uncertainCause)
     }
     return { uncertain, run }
 }

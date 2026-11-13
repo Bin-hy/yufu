@@ -1,23 +1,29 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
+import { shallowRef, watch, onUnmounted } from 'vue'
+import { normalizeFailure, type BusinessFailure } from '@/http/errors'
+import FailureFeedback from './failure-feedback.vue'
 import UiDialog from '@/components/ui/dialog/dialog.vue'
 import AlertDialog from '@/components/ui/alert-dialog/alert-dialog.vue'
 import { currentConfirmation, settleConfirmation, cleanupConfirmations, confirmationBusy } from '@/utils/modal'
 const busy = confirmationBusy,
-    error = ref<string | null>(null)
+    failure = shallowRef<BusinessFailure | null>(null)
 watch(currentConfirmation, () => {
     busy.value = false
-    error.value = null
+    failure.value = null
 })
 async function confirm() {
     const request = currentConfirmation.value
-    if (!request || busy.value) return
+    if (!request || busy.value || failure.value?.outcomeUncertain) return
     busy.value = true
     try {
         await request.options.confirmCallback?.()
         if (currentConfirmation.value === request) settleConfirmation(true)
     } catch (e) {
-        if (currentConfirmation.value === request) error.value = e instanceof Error ? e.message : '操作失败，请重试'
+        if (currentConfirmation.value === request) {
+            const config = (e as { config?: { method?: string } } | null)?.config
+            const result = normalizeFailure(e, config?.method ? {} : { operation: 'write' })
+            if (!result.cancelled) failure.value = result
+        }
     } finally {
         if (currentConfirmation.value === request) busy.value = false
     }
@@ -44,10 +50,12 @@ onUnmounted(cleanupConfirmations)
         :title="currentConfirmation.options.title"
         :description="currentConfirmation.options.content"
         :busy="busy"
-        :error="error"
+        :confirm-disabled="failure?.outcomeUncertain"
         :confirm-text="currentConfirmation.options.confirmText"
         :cancel-text="currentConfirmation.options.cancelText"
         @confirm="confirm"
         @cancel="cancel"
-    />
+    >
+        <FailureFeedback :failure="failure" />
+    </component>
 </template>

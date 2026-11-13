@@ -6,7 +6,7 @@ import { getConsents, revokeConsent } from '../api'
 import { useCursorPage } from '@/composables/use-cursor-page'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { emitToast } from '@/utils/toast'
-import { showModal } from '@/utils/modal'
+import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiButton from '@/components/ui/button/button.vue'
@@ -32,21 +32,18 @@ const filtered = computed(() => {
     )
 })
 async function withdraw(id: number, name: string) {
-    const confirmed = await showModal({
+    const confirmed = await mutation.confirm({
         title: '撤回资料授权',
         content: `撤回后，${name} 需要重新获取你的同意才能读取账户资料。企业访问分配不会被改变。`,
         confirmText: '撤回授权',
         destructive: true,
-    })
-    if (!confirmed) return
-    await mutation.run(
-        () => revokeConsent(id),
-        async () => {
-            await state.refresh()
-            emitToast({ type: 'success', message: '资料授权已撤回，该环境原应用授权已失效' })
-        },
-    )
+    }, () => revokeConsent(id))
+    if (confirmed) {
+        await state.refresh()
+        emitToast({ type: 'success', message: '资料授权已撤回，该环境原应用授权已失效' })
+    }
 }
+
 </script>
 <template>
     <div class="workspace-page">
@@ -55,7 +52,9 @@ async function withdraw(id: number, name: string) {
             eyebrow="CONSENTS"
             description="撤回后该应用环境需要重新获取你的同意；企业访问分配保持独立管理。"
         />
-        <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
+        <FailureFeedback :failure="mutation.failure.value" :message="writeError"
+            :recovery-label="['reload', 'check-result'].includes(mutation.failure.value?.recovery ?? '') ? '重新加载并核对' : undefined"
+            :recover="() => state.refresh()" />
 
         <section class="panel">
             <div class="table-toolbar">

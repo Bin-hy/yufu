@@ -152,7 +152,7 @@ it('只读接口 403 不丢弃有效 CSRF 证明', async () => {
         return response(config, {})
     } })
     await request({ url: 'first', method: 'POST' })
-    await expect(request({ url: 'restricted', errorPresentation: 'local' })).rejects.toThrow('forbidden')
+    await expect(request({ url: 'restricted', errorPresentation: 'local' })).rejects.toThrow('权限')
     await request({ url: 'second', method: 'POST' })
     expect(challenges).toBe(1)
 })
@@ -336,4 +336,24 @@ it('旧会话的成功响应被取消', async () => {
     resetSession()
     release()
     expect(axios.isCancel(await result)).toBe(true)
+})
+
+it('结构化异常保留响应，local 不弹 Toast，全局同原因并发去重', async () => {
+    const store = useToastStore(pinia)
+    store.clear()
+    let id = 0
+    const request = createHttpClient({ adapter: async config => {
+        const result = { ...response(config, { code: 'owner_required', request_id: `req-${++id}` }), status: 409 }
+        throw new axios.AxiosError('raw error', 'ERR_BAD_REQUEST', config, {}, result)
+    } })
+    const local = await request({ url: 'admin/accounts', errorPresentation: 'local' }).catch(e => e)
+    if (!axios.isAxiosError(local)) throw Error('预期保留 Axios 异常')
+    expect(local.response.status).toBe(409)
+    expect(local.response.data.code).toBe('owner_required')
+    expect(local.message).toContain('转交负责人')
+    expect(store.toasts).toHaveLength(0)
+    await Promise.allSettled([request({ url: 'one' }), request({ url: 'two' })])
+    expect(store.toasts).toHaveLength(1)
+    expect(store.toasts[0]?.message).toContain('转交负责人')
+    store.clear()
 })

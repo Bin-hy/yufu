@@ -8,9 +8,12 @@ import { useUserStore } from '@/pinia/stores/user'
 import { useCursorPage } from '@/composables/use-cursor-page'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { useEphemeralResult, useOperationKey } from '@/composables/use-ephemeral-result'
+import { createVerifiedCreate } from '@/composables/use-verified-create'
+import { sessionEpoch } from '@/workspace/session'
+import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import { useFormDraft } from '@/composables/use-form-draft'
 import { listApps, registerApp, registerAdminApp } from '../api'
-import { type Registration, type RegistrationReceipt } from '../api/type'
+import { type Application, type Registration, type RegistrationReceipt } from '../api/type'
 import { newRegistrationDraft } from '../api/registration'
 import {
     environmentConfigIssue,
@@ -84,6 +87,9 @@ const receipt = result.value
 const mutation = useAsyncMutation()
 const { pending, error: writeError } = mutation
 const operationKey = useOperationKey()
+type RegistrationOutcome = { receipt: RegistrationReceipt } | { application: Application }
+let verifiedRegistration: ReturnType<typeof createVerifiedCreate<RegistrationOutcome>> | null = null
+const recoveredApplication = ref<Application | null>(null)
 
 const draft = useFormDraft('应用注册', () => ({ form, owner: owner.value, limitation: limitation.value }), {
     enabled: opened,
@@ -124,6 +130,9 @@ function clearFieldErrors() {
 }
 
 function resetRegistration() {
+    verifiedRegistration = null
+    recoveredApplication.value = null
+    mutation.clearError()
     Object.assign(form, newRegistrationDraft(administrator.value))
     automaticAppKey.value = form.app_key
     customAppKey.value = ''
@@ -284,6 +293,7 @@ const uriList = (values: string[], emptyText: string) =>
     values.length ? values.join('；') : emptyText
 
 async function register() {
+    if (mutation.failure.value?.outcomeUncertain || recoveredApplication.value) return
     const metaIssue = ownerIssue() ?? limitationIssue()
     const issue = metaIssue ?? registrationIssue(form, administrator.value)
     if (issue) {
@@ -299,29 +309,45 @@ async function register() {
         focusIssue(issue)
         return
     }
-    const data: Registration = { ...form, description: form.description?.trim() || null }
-    await mutation.run(
-        () => {
-            return administrator.value
-                ? registerAdminApp(
-                      {
-                          application: data,
-                          owner_user_id: owner.value,
-                          assignments: [],
-                          accept_logout_limitation: limitation.value,
-                      },
-                      operationKey({ data, owner: owner.value, limitation: limitation.value }),
-                  )
-                : registerApp(data, operationKey(data))
-        },
-        async (value) => {
-            receipt.value = value
-            resetRegistration()
-            draft.markSaved()
-            await list.refresh()
-            emitToast({ type: 'success', message: '应用已建立，请查看回执中的接入配置与后续步骤' })
-        },
-    )
+    const data: Registration = JSON.parse(JSON.stringify({ ...form, description: form.description?.trim() || null }))
+    const admin = administrator.value, ownerId = owner.value, accepted = limitation.value
+    const key = operationKey({ data, owner: ownerId, limitation: accepted })
+    verifiedRegistration = createVerifiedCreate<RegistrationOutcome>(async () => ({
+        receipt: admin
+            ? await registerAdminApp({ application: data, owner_user_id: ownerId, assignments: [], accept_logout_limitation: accepted }, key)
+            : await registerApp(data, key),
+    }), async () => {
+        const epoch = sessionEpoch.value
+        let after: number | undefined
+        // Bound the scan; failure to find a record never authorizes another write.
+        for (let page = 0; page < 100; page++) {
+            const value = await listApps(admin, after)
+            if (epoch !== sessionEpoch.value) throw Error('会话已改变')
+            const application = value.items.find(app => app.app_key === data.app_key)
+            if (application) return { application }
+            if (value.next == null || value.next === after) break
+            after = value.next
+        }
+        return null
+    })
+    await mutation.run(() => verifiedRegistration!.run(), finishRegistration)
+}
+async function finishRegistration(value: RegistrationOutcome) {
+    if ('application' in value) {
+        recoveredApplication.value = value.application
+        await list.refresh()
+        return
+    }
+    receipt.value = value.receipt
+    resetRegistration()
+    draft.markSaved()
+    await list.refresh()
+    emitToast({ type: 'success', message: '应用已建立，请查看回执中的接入配置与后续步骤' })
+}
+async function verifyRegistration() {
+    if (!verifiedRegistration?.uncertain.value || pending.value) return
+    mutation.clearError()
+    await mutation.run(() => verifiedRegistration!.run(), finishRegistration)
 }
 
 async function copy(value: string, label: string) {
@@ -348,7 +374,14 @@ async function copy(value: string, label: string) {
             </UiButton>
         </PageHeader>
 
-        <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
+        <FailureFeedback :failure="mutation.failure.value" :message="writeError"
+            :recovery-label="mutation.failure.value?.outcomeUncertain ? '核对创建结果（不会再次提交）' : undefined"
+            :recover="verifyRegistration" />
+        <section v-if="recoveredApplication" class="panel mb-5 surface-body" role="status">
+            <h2>已找到相同标识的应用，请核对</h2>
+            <p class="my-2 text-sm">{{ recoveredApplication.name }}（{{ recoveredApplication.app_key }}）。请查看详情确认结果；响应中丢失的一次性密钥无法恢复，必要时可在环境详情重置。</p>
+            <RouterLink class="ui-button ui-button-outline" :to="{ name: administrator ? 'admin-app' : 'developer-app', params: { id: recoveredApplication.application_id } }">查看应用并核对</RouterLink>
+        </section>
 
         <div class="metric-grid mb-5">
             <article class="metric-card">
@@ -568,7 +601,7 @@ async function copy(value: string, label: string) {
                 <div class="wizard-actions">
                     <UiButton v-if="stepIndex > 0" variant="outline" type="button" :disabled="pending" @click="previousStep">上一步</UiButton>
                     <UiButton v-if="stepIndex < registrationSteps.length - 1" type="button" :disabled="pending" @click="nextStep">下一步</UiButton>
-                    <UiButton v-else type="submit" :disabled="pending" :loading="pending">{{ pending ? '正在建立应用…' : '确认并建立应用' }}</UiButton>
+                    <UiButton v-else type="submit" :disabled="pending || mutation.failure.value?.outcomeUncertain || !!recoveredApplication" :loading="pending">{{ pending ? '正在建立应用…' : '确认并建立应用' }}</UiButton>
                 </div>
             </footer>
         </form>

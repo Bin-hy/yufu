@@ -9,12 +9,13 @@ import {
     type ShallowRef,
 } from 'vue'
 import { sessionEpoch, registerRead } from '@/workspace/session'
-import { errorMessage } from './use-async-mutation'
+import { normalizeFailure, formatFailure, type BusinessFailure } from '@/http/errors'
 export interface AsyncQuery<T> {
     data: ShallowRef<T | null>
     status: Ref<'idle' | 'loading' | 'ready' | 'error'>
     refreshing: Ref<boolean>
     error: Ref<string | null>
+    failure: ShallowRef<BusinessFailure | null>
     stale: Ref<boolean>
     refresh: () => Promise<void>
     invalidate: () => void
@@ -28,6 +29,7 @@ export function useAsyncQuery<T>(options: {
     const status = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
     const refreshing = ref(false)
     const error = ref<string | null>(null)
+    const failure = shallowRef<BusinessFailure | null>(null)
     const stale = ref(true)
     let sequence = 0,
         loadedKey = ''
@@ -60,6 +62,7 @@ export function useAsyncQuery<T>(options: {
         }
         refreshing.value = preserving
         error.value = null
+        failure.value = null
         const valid = () => id === sequence && epoch === sessionEpoch.value && !signal.aborted
         try {
             const result = await options.loader(signal)
@@ -70,7 +73,14 @@ export function useAsyncQuery<T>(options: {
             stale.value = false
         } catch (e) {
             if (!valid()) return
-            error.value = errorMessage(e)
+            const result = normalizeFailure(e)
+            if (result.cancelled) {
+                status.value = preserving ? 'ready' : 'idle'
+                stale.value = true
+                return
+            }
+            failure.value = result
+            error.value = formatFailure(result)
             status.value = preserving ? 'ready' : 'error'
             stale.value = true
         } finally {
@@ -111,6 +121,7 @@ export function useAsyncQuery<T>(options: {
         refreshing,
         error,
         stale,
+        failure,
         refresh,
         invalidate: () => {
             stale.value = true

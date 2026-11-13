@@ -18,6 +18,7 @@ const props = withDefaults(
         description?: string
         busy?: boolean
         error?: string | null
+        confirmDisabled?: boolean
         confirmText?: string
         cancelText?: string
         focusOrigin?: HTMLElement | null
@@ -98,7 +99,7 @@ function restoreFocus(event: Event) {
                     }}</UiButton>
                     <UiButton
                         variant="destructive"
-                        :disabled="busy"
+                        :disabled="busy || confirmDisabled"
                         :loading="busy"
                         @click="emit('confirm')"
                         >{{ confirmText }}</UiButton

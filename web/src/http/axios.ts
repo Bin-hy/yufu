@@ -2,6 +2,7 @@ import axios, { type AxiosRequestConfig, type AxiosInstance, type InternalAxiosR
 import { getToken, setToken } from '@/common/cache/cookies'
 import { emitToast } from '@/utils/toast'
 import { expireSession, sessionEpoch } from '@/workspace/session'
+import { formatFailure, normalizeFailure, isHtmlResponse } from './errors'
 export interface RequestOptions extends AxiosRequestConfig {
     errorPresentation?: 'local' | 'global'
 }
@@ -13,23 +14,6 @@ type InternalRequest = InternalAxiosRequestConfig & {
 }
 const csrfLifetime = 5 * 60 * 1000
 const htmlResponseMessage = '接口返回了 HTML 页面，请检查 API 地址或代理配置'
-const browserRejectionMessages: Record<string, string> = {
-    csrf_origin_missing: '请求缺少来源信息，请通过浏览器页面登录',
-    csrf_origin_invalid: '请求来源信息无效，请使用完整的服务地址访问',
-    csrf_origin_not_allowed: '当前访问地址未获授权，请使用服务地址或在 auth.origins 中配置完整来源（含端口）',
-    csrf_cookie_invalid: '浏览器认证 Cookie 无效，请清除此站点的 Cookie 后重试',
-    csrf_cookie_missing: '浏览器未发送认证 Cookie，请检查 Cookie 设置并使用同一地址访问',
-    csrf_cookie_requires_https: '浏览器未发送安全认证 Cookie；本机 HTTP 开发启动需加 --allow-insecure-loopback-cookies，其他环境请使用 HTTPS',
-    csrf_proof_missing: '请求缺少认证校验信息，请强制刷新页面后重试',
-    csrf_proof_mismatch: '认证校验信息已变化，请重新点击登录或刷新页面后重试',
-    csrf_proof_invalid: '认证校验信息已失效，请刷新页面后重试',
-}
-function isHtmlResponse(response?: { data?: unknown; headers?: Record<string, unknown> }) {
-    return (
-        String(response?.headers?.['content-type'] ?? '').toLowerCase().includes('text/html') ||
-        (typeof response?.data === 'string' && /^\s*(?:<!doctype\s+html|<html\b)/i.test(response.data))
-    )
-}
 export function createHttpClient(options?: {
     adapter?: AxiosRequestConfig['adapter']
     refresh?: () => Promise<string>
@@ -44,7 +28,8 @@ export function createHttpClient(options?: {
     function presentError(error: object, config: RequestOptions, message: string) {
         if (config.errorPresentation !== 'local' && !presentedErrors.has(error)) {
             presentedErrors.add(error)
-            emitToast({ type: 'error', message })
+            const failure = normalizeFailure(error)
+            emitToast({ type: 'error', message, dedupeKey: failure.code, durationMs: failure.outcomeUncertain ? 0 : undefined })
         }
     }
     function proofKey(config: AxiosRequestConfig) {
@@ -189,18 +174,7 @@ export function createHttpClient(options?: {
                     headers: { ...original.headers, Authorization: 'Bearer ' + token },
                 } as AxiosRequestConfig)
             }
-            const message =
-                isHtmlResponse(error.response)
-                    ? htmlResponseMessage
-                    : status === 403 && Object.prototype.hasOwnProperty.call(browserRejectionMessages, error.response?.data?.code)
-                      ? browserRejectionMessages[error.response.data.code]
-                    : status === 503 && error.response?.data === 'security dependency unavailable'
-                      ? '认证服务暂不可用，请检查后端时钟同步与依赖状态'
-                    : status === 400 && error.response?.data?.code === 'invalid_input'
-                      ? `输入内容不符合要求，请按表单提示检查后重试${typeof error.response.data.request_id === 'string' && error.response.data.request_id ? `（请求标识 ${error.response.data.request_id}）` : ''}`
-                    : typeof error.response?.data === 'string'
-                      ? error.response.data
-                      : (error.response?.data?.message ?? error.message ?? '请求失败，请重试')
+            const message = formatFailure(normalizeFailure(error))
             error.message = message
             presentError(error, original, message)
             throw error

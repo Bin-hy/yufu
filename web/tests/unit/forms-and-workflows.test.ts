@@ -21,17 +21,17 @@ describe('接口错误提示', () => {
             errorMessage({
                 response: { data: { code: 'deadline_exceeded', request_id: 'req-1' } },
             }),
-        ).toBe('认证服务响应超时，请稍后重试')
+        ).toBe('认证服务响应超时，请稍后重试。（请求标识 req-1）')
         expect(
             errorMessage({
                 response: { data: { code: 'dependency_unavailable' } },
             }),
-        ).toBe('认证服务暂时不可用，请稍后重试')
+        ).toBe('认证服务暂时不可用，请稍后重试；持续失败请联系管理员。')
     })
-    it('优先使用服务端明确消息', () => {
+    it('未知服务端消息使用安全兜底', () => {
         expect(
             errorMessage({ response: { data: { message: '账号或密码不正确' } } }),
-        ).toBe('账号或密码不正确')
+        ).toBe('操作失败，请稍后重试。')
     })
 })
 describe('表单值与分页', () => {

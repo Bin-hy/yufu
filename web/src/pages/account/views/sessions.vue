@@ -8,7 +8,7 @@ import { useCursorPage } from '@/composables/use-cursor-page'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { useUserStore } from '@/pinia/stores/user'
 import { emitToast } from '@/utils/toast'
-import { showModal } from '@/utils/modal'
+import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiButton from '@/components/ui/button/button.vue'
@@ -20,6 +20,7 @@ const mutation = useAsyncMutation(),
     { pending, error: writeError } = mutation,
     user = useUserStore(),
     router = useRouter()
+const refreshSessions = () => Promise.all([centers.refresh(), rps.refresh()])
 const date = (seconds: number) => new Date(seconds * 1000).toLocaleString('zh-CN')
 const live = (expires: number, revoked?: number | null) => !revoked && expires * 1000 > Date.now()
 const activeCenters = computed(
@@ -32,21 +33,15 @@ const activeRps = computed(
         ).length ?? 0,
 )
 async function revoke(kind: 'center' | 'rp' | 'all', id = '') {
-    if (kind !== 'rp') {
-        const confirmed = await showModal({
-            title: kind === 'all' ? '退出全部会话' : '退出此中心会话',
-            content:
-                kind === 'all'
-                    ? '所有中心会话与应用授权都会被撤销，当前浏览器也会退出登录。'
-                    : '该中心会话及其关联的应用授权将立即失效。',
-            confirmText: kind === 'all' ? '退出全部会话' : '退出此会话',
-            destructive: true,
-        })
-        if (!confirmed) return
-    }
-    const saved = await mutation.run(() =>
-        kind === 'all' ? centerLogout(true) : kind === 'rp' ? revokeRp(id) : revokeCenter(id),
-    )
+    const write = () => kind === 'all' ? centerLogout(true) : kind === 'rp' ? revokeRp(id) : revokeCenter(id)
+    const saved = kind !== 'rp' ? await mutation.confirm({
+        title: kind === 'all' ? '退出全部会话' : '退出此中心会话',
+        content: kind === 'all'
+            ? '所有中心会话与应用授权都会被撤销，当前浏览器也会退出登录。'
+            : '该中心会话及其关联的应用授权将立即失效。',
+        confirmText: kind === 'all' ? '退出全部会话' : '退出此会话',
+        destructive: true,
+    }, write) : await mutation.run(write)
     if (!saved) return
     if (kind === 'all' || (kind === 'center' && id === user.centerSession?.sso_session_id)) {
         user.logout()
@@ -68,7 +63,9 @@ async function revoke(kind: 'center' | 'rp' | 'all', id = '') {
                 <LogOut v-if="!pending" :size="14" aria-hidden="true" />退出全部中心与应用授权
             </UiButton>
         </PageHeader>
-        <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
+        <FailureFeedback :failure="mutation.failure.value" :message="writeError"
+            :recovery-label="['reload', 'check-result'].includes(mutation.failure.value?.recovery ?? '') ? '重新加载并核对' : undefined"
+            :recover="refreshSessions" />
 
         <div class="metric-grid mb-5">
             <article class="metric-card">

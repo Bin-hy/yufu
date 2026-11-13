@@ -110,3 +110,18 @@ it('回执深链直接选中生产环境', async () => {
     const wrapper = await render('/admin/apps/1?environment=production')
     expect(wrapper.text()).toContain('环境 IDprod')
 })
+
+it('配置冲突显示核对入口，重新读取保留未提交内容且不重放写入', async () => {
+    mocked.changeApp.mockRejectedValue({ response: { status: 409, data: { code: 'conflict', request_id: 'req-conflict' } } })
+    const wrapper = await render()
+    await wrapper.get('#detail-config-launch-url').setValue('https://app.example/my-draft')
+    const form = wrapper.findAll('form').find(form => form.find('#detail-config-launch-url').exists())!
+    await form.trigger('submit'); await flushPromises()
+    expect(wrapper.text()).toContain('数据已被其他操作修改')
+    expect(wrapper.text()).toContain('req-conflict')
+    mocked.getApp.mockResolvedValue({ ...application, revision: 5, environments: [{ ...application.environments[0], revision: 5, latest: { ...application.environments[0].latest, config: { ...active, launch_url: 'https://app.example/someone-else' } } }] })
+    await wrapper.findAll('button').find(b => b.text() === '加载最新数据（保留输入）')!.trigger('click'); await flushPromises()
+    expect((wrapper.get('#detail-config-launch-url').element as HTMLInputElement).value).toBe('https://app.example/my-draft')
+    expect(mocked.changeApp).toHaveBeenCalledTimes(1)
+    expect(mocked.getApp).toHaveBeenCalledTimes(2)
+})

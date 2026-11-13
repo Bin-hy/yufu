@@ -57,7 +57,7 @@ describe('确认宿主的结束与失败路径', () => {
         expect(confirmationBusy.value).toBe(true)
         reject(Error('service failed'))
         await flushPromises()
-        expect(document.querySelector('[role="alert"]')?.textContent).toContain('service failed')
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain('操作失败，请稍后重试')
         button('确认').click()
         await expect(result).resolves.toBe(true)
         expect(confirmationBusy.value).toBe(false)
@@ -94,7 +94,7 @@ describe('分页候选与完整基线', () => {
         active.value = true
         await flushPromises()
         await options.loadNext()
-        expect(options.error.value).toContain('page failed')
+        expect(options.error.value).toContain('操作失败，请稍后重试')
         await options.retry()
         await options.loadNext()
         expect(options.items.value.map((row) => row.id)).toEqual([1, 2, 3])
@@ -181,4 +181,16 @@ describe('非幂等创建结果核对', () => {
             }, find).run(),
         ).rejects.toEqual({ code: 'ERR_CANCELED' })
     })
+})
+
+it('服务端提交结果未知只核对读取，并保留原请求标识', async () => {
+    const { normalizeFailure } = await import('@/http/errors')
+    const write = vi.fn().mockRejectedValue({ response: { status: 503, data: { code: 'commit_uncertain', request_id: 'req-uncertain' } } })
+    const find = vi.fn().mockResolvedValue(null)
+    const flow = createVerifiedCreate(write, find)
+    const error = await flow.run().catch(error => error)
+    expect(normalizeFailure(error).requestId).toBe('req-uncertain')
+    await expect(flow.run()).rejects.toThrow('创建结果未知')
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(find).toHaveBeenCalledTimes(2)
 })

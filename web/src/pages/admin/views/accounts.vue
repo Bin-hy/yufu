@@ -10,7 +10,7 @@ import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { useEphemeralResult } from '@/composables/use-ephemeral-result'
 import { useUserStore } from '@/pinia/stores/user'
 import { emitToast } from '@/utils/toast'
-import { showModal } from '@/utils/modal'
+import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiInput from '@/components/ui/input/input.vue'
@@ -147,52 +147,42 @@ async function reset(account: EnterpriseAccount) {
 async function change(account: EnterpriseAccount, field: 'enabled' | 'developer') {
     const disabling = field === 'enabled' && account.enabled
     const revoking = field === 'developer' && account.developer_enabled
-    if (disabling || revoking) {
-        const confirmed = await showModal({
+    const write = () => setAccount(account.user_id, field,
+        !(field === 'developer' ? account.developer_enabled : account.enabled), account.revision)
+    const saved = disabling || revoking
+        ? await mutation.confirm({
             title: disabling ? '停用账户' : '撤销开发者资格',
             content: disabling
                 ? `停用 ${account.nickname || account.username} 后将撤销其全部登录会话与应用授权。`
                 : `撤销 ${account.nickname || account.username} 的开发者资格后，其将无法进入开发者控制台。`,
             confirmText: disabling ? '停用并撤销登录' : '撤销开发者资格',
             destructive: true,
-        })
-        if (!confirmed) return
+        }, write)
+        : await mutation.run(write)
+    if (!saved) return
+    await list.refresh()
+    if (account.user_id === user.centerSession?.user_id) {
+        await user.ensureSession()
+        if (!user.centerSession) await router.replace('/login')
     }
-    await mutation.run(
-        () =>
-            setAccount(
-                account.user_id,
-                field,
-                !(field === 'developer' ? account.developer_enabled : account.enabled),
-                account.revision,
-            ),
-        async () => {
-            await list.refresh()
-            if (account.user_id === user.centerSession?.user_id) {
-                await user.ensureSession()
-                if (!user.centerSession) await router.replace('/login')
-            }
-            emitToast({ type: 'success', message: '账户状态已更新' })
-        },
-    )
+    emitToast({ type: 'success', message: '账户状态已更新' })
 }
+
 async function revoke() {
     if (!result.value) return
-    const confirmed = await showModal({
+    const action = result.value.action.id, reset = result.value.reset
+    const saved = await mutation.confirm({
         title: '撤销一次性链接',
         content: '撤销后，已发出的链接将立即失效，接收人无法继续使用。',
         confirmText: '撤销链接',
         destructive: true,
-    })
-    if (!confirmed) return
-    await mutation.run(
-        () => revokeAction(result.value!.action.id, result.value!.reset),
-        () => {
-            issued.clear()
-            emitToast({ type: 'success', message: '链接已撤销' })
-        },
-    )
+    }, () => revokeAction(action, reset))
+    if (saved) {
+        issued.clear()
+        emitToast({ type: 'success', message: '链接已撤销' })
+    }
 }
+
 async function allowCandidate() {
     if (!candidate.requester || !candidate.target) {
         emitToast({ type: 'warning', message: '请选择请求方和候选账户' })
@@ -220,7 +210,9 @@ async function allowCandidate() {
             </UiButton>
         </PageHeader>
 
-        <p v-if="writeError" class="form-alert mb-4" role="alert">{{ writeError }}</p>
+        <FailureFeedback :failure="mutation.failure.value" :message="writeError"
+            :recovery-label="['reload', 'check-result'].includes(mutation.failure.value?.recovery ?? '') ? '重新加载并核对' : undefined"
+            :recover="() => list.refresh()" />
 
         <section v-if="result" class="panel mb-5 border-warning/30">
             <header class="panel-heading bg-warning/[0.04]">

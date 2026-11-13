@@ -8,7 +8,7 @@ import { useCursorPage } from '@/composables/use-cursor-page'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { useOperationKey } from '@/composables/use-ephemeral-result'
 import { emitToast } from '@/utils/toast'
-import { showModal } from '@/utils/modal'
+import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiInput from '@/components/ui/input/input.vue'
@@ -97,24 +97,31 @@ async function save() {
     }
 }
 async function remove(group: Group) {
-    const confirmed = await showModal({
+    const path = '/' + group.group_id, body = { expected_revision: group.revision }
+    const confirmed = await mutation.confirm({
         title: '删除用户组',
         content: `删除“${group.name}”会移除该组的成员关系与访问来源。组内成员账户不会被删除。`,
         confirmText: '删除组并移除访问来源',
         destructive: true,
-    })
-    if (confirmed)
-        await change('/' + group.group_id, 'DELETE', { expected_revision: group.revision })
+    }, () => groupChange(path, 'DELETE', body, key({ path, body })))
+    if (confirmed) {
+        selected.value = undefined
+        await list.refresh()
+        emitToast({ type: 'success', message: '用户组已删除' })
+    }
 }
+
 async function addMember(group: Group) {
     if (!member.value) return
     await change(`/${group.group_id}/members/${Number(member.value)}`, 'PATCH', {
         present: true,
         expected_revision: group.revision,
     })
-    member.value = ''
-    memberLabel.value = ''
-    memberSecondary.value = ''
+    if (!writeError.value) {
+        member.value = ''
+        memberLabel.value = ''
+        memberSecondary.value = ''
+    }
 }
 async function removeMember(group: Group, userId: number) {
     await change(`/${group.group_id}/members/${userId}`, 'PATCH', {
@@ -132,7 +139,9 @@ async function removeMember(group: Group, userId: number) {
         >
             <UiButton @click="create"><Plus :size="14" aria-hidden="true" />新建用户组</UiButton>
         </PageHeader>
-        <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
+        <FailureFeedback :failure="mutation.failure.value" :message="writeError"
+            :recovery-label="['reload', 'check-result'].includes(mutation.failure.value?.recovery ?? '') ? '重新加载并核对' : undefined"
+            :recover="() => list.refresh()" />
 
         <div class="table-toolbar mb-4 rounded-xl border border-border">
             <div class="search-box">
