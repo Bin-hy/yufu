@@ -238,3 +238,14 @@ configuration fields against `yufu.toml.example`.
 
 Related: [Production deployment](/en/operations/deployment/) ·
 [Configuration](/en/reference/configuration/) · [Security and backup](/en/operations/security/)
+
+
+## Container publishing timeouts
+
+If the last line is still `Compiling ...` followed by `The operation was canceled`, compare elapsed time with the job's `timeout-minutes`. A two-hour run with a 120-minute limit is consistent with automatic cancellation. The last printed crate name does not identify a compiler error.
+
+Container publishing builds `linux/amd64` on `ubuntu-24.04` and `linux/arm64` on `ubuntu-24.04-arm`. Each native job uses its own registry cache, pushes an immutable digest, and runs a `--version` smoke test. Version and moving tags are published only after both builds pass and the combined manifest contains both platforms. Prereleases receive only exact-version and commit tags.
+
+Website sources, screenshots and documentation are excluded from the image context, while the website package manifest remains available for pnpm workspace resolution. BuildKit cache mounts persist on the same builder; they are not exported with registry layer caches, so fresh runners do not receive a complete incremental Cargo build cache.
+
+References: [GitHub job timeouts](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idtimeout-minutes), [Docker multi-platform builds](https://docs.docker.com/build/building/multi-platform/), and [Dockerfile cache mounts](https://docs.docker.com/reference/dockerfile/#run---mounttypecache).

@@ -39,3 +39,9 @@ Thumbs.db
 
 # 本地品牌工作目录，不入镜像
 brand
+
+# Documentation and screenshots do not participate in the service image.
+# Retain the website manifest for pnpm's workspace/lockfile resolution.
+docs
+website/*
+!website/package.json

@@ -19,7 +19,7 @@ ARG RUNTIME_IMAGE=debian:bookworm-slim
 # --- 1. Console bundle ------------------------------------------------------
 # Output goes to <repo>/assets/web, which is what rust-embed reads when the
 # service is compiled with --features webui.
-FROM ${NODE_IMAGE} AS webui
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS webui
 ARG PNPM_VERSION=12.10.1
 WORKDIR /src
 # The workspace manifests are required so pnpm can resolve the locked project
@@ -31,13 +31,16 @@ RUN npm install --global "pnpm@${PNPM_VERSION}" \
 
 # --- 2. Identity service ---------------------------------------------------
 FROM ${RUST_IMAGE} AS build
+ARG TARGETARCH
 WORKDIR /src
 COPY . .
 COPY --from=webui /src/assets/web ./assets/web
-# Cache mounts keep the registry and intermediates between builds; the binary
-# itself is copied to /out so it survives into the runtime stage.
+# Cache mounts persist only on the same builder; registry layer exports do not
+# preserve their contents across fresh CI runners. Separate target caches by
+# architecture so multi-platform local builds do not serialize or mix artifacts.
+# Copy the binary to /out so it survives into the runtime stage.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/src/target,sharing=locked \
+    --mount=type=cache,id=yufu-target-${TARGETARCH},target=/src/target,sharing=locked \
     cargo build --locked --release --bin yufu --features webui \
     && mkdir -p /out \
     && cp /src/target/release/yufu /out/yufu

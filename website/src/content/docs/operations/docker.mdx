@@ -226,3 +226,14 @@ docker compose up -d --build
 
 相关：[生产部署](/operations/deployment/) · [配置项](/reference/configuration/) ·
 [安全与备份](/operations/security/)
+
+
+## 镜像发布构建超时
+
+构建日志最后仍为 `Compiling ...`，随后出现 `The operation was canceled` 时，应先比较实际运行时长与工作流的 `timeout-minutes`。运行约两小时且任务上限为 120 分钟，符合自动超时取消；最后显示的 crate 名称不等于该 crate 编译出错。
+
+容器发布使用两个原生 runner：`ubuntu-24.04` 构建 `linux/amd64`，`ubuntu-24.04-arm` 构建 `linux/arm64`。两边独立缓存、推送不可变 digest 并执行 `--version` 冒烟检查，再校验和合并多架构 manifest。只有两边通过后才发布版本、minor 和 latest 标签；预发布只保留精确版本和 commit 标签。
+
+官网源码、截图与文档不进入镜像构建上下文，避免纯文档更新使 Rust 编译层失效。BuildKit 的 cache mount 只保存在同一 builder 中；registry layer cache 不会保存挂载目录里的 Cargo 中间文件，不能把它当成跨 runner 的完整增量编译缓存。
+
+参见 [GitHub 超时配置](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idtimeout-minutes)、[Docker 多平台构建](https://docs.docker.com/build/building/multi-platform/) 和 [Dockerfile 缓存挂载](https://docs.docker.com/reference/dockerfile/#run---mounttypecache)。

@@ -1,16 +1,7 @@
 name: Container image
 
-# Builds the identity service image and publishes it to ghcr.io.
-#
-# Two entry points:
-#   • release.yml calls this right after the GitHub release is published, so a
-#     single tag push produces both the release assets and the matching image.
-#   • workflow_dispatch republishes an image without cutting a new release.
-#
-# After the first publish the package is private by default. Anonymous
-# `docker pull` only works once it is switched to public in
-# Repository → Packages → yufu → Package settings.
-
+# Release publishing and manual republishing use the same native builds.
+# Moving tags are published only after BOTH architectures build and smoke-test.
 on:
   workflow_call:
     inputs:
@@ -19,7 +10,7 @@ on:
         required: true
         type: string
       prerelease:
-        description: 'true keeps only the exact version tag, with no minor and no latest'
+        description: 'true publishes only the exact version and commit tags'
         required: false
         type: string
         default: 'false'
@@ -30,7 +21,7 @@ on:
         required: true
         type: string
       prerelease:
-        description: 'true keeps only the exact version tag, with no minor and no latest'
+        description: 'true publishes only the exact version and commit tags'
         required: false
         type: string
         default: 'false'
@@ -40,81 +31,149 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
   DOCKERFILE: deploy/docker/Dockerfile
 
 jobs:
-  publish:
-    name: Build and push linux/amd64 + linux/arm64
-    runs-on: ubuntu-22.04
+  prepare:
+    name: Validate image metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.metadata.outputs.image }}
+      tags: ${{ steps.metadata.outputs.tags }}
+    steps:
+      - name: Resolve image and tags
+        id: metadata
+        env:
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo 'Invalid container version' >&2
+            exit 1
+          fi
+          if [[ "$PRERELEASE" != 'true' && "$PRERELEASE" != 'false' ]]; then
+            echo 'Invalid prerelease flag' >&2
+            exit 1
+          fi
+          if [[ "$VERSION" == *-* && "$PRERELEASE" != 'true' ]]; then
+            echo 'Prerelease versions must set prerelease=true' >&2
+            exit 1
+          fi
+          image="ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          tags="${image}:sha-${COMMIT:0:7},${image}:${VERSION}"
+          if [[ "$PRERELEASE" == 'false' ]]; then
+            tags="${tags},${image}:${VERSION%.*},${image}:latest"
+          fi
+          printf 'image=%s\ntags=%s\n' "$image" "$tags" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Native build linux/${{ matrix.arch }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    env:
+      IMAGE: ${{ needs.prepare.outputs.image }}
+      ARCH: ${{ matrix.arch }}
+      EXPECTED_MACHINE: ${{ matrix.machine }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-
-      # A Docker reference must be lowercase, while github.repository keeps the
-      # owner's display casing (here Bin-hy/yufu). Docker rejects the mixed-case
-      # form with "repository name must be lowercase", so normalise it once and
-      # let every later step read the corrected IMAGE from the environment.
-      - name: Normalise the image name
+      - name: Verify native architecture
+        shell: bash
         run: |
           set -euo pipefail
-          printf 'IMAGE=%s\n' "$(printf '%s' "$IMAGE" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
-
-      # arm64 layers are produced under emulation on the amd64 runner.
-      - name: Enable arm64 emulation
-        run: docker run --privileged --rm tonistiigi/binfmt:latest --install arm64
-
+          test "$(uname -m)" = "$EXPECTED_MACHINE"
+          docker version
+          docker buildx version
       - name: Log in to ghcr.io
-        run: |
-          printf '%s' "${{ secrets.GITHUB_TOKEN }}" \
-            | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
-
-      - name: Resolve image tags
-        id: tags
         env:
-          VERSION: ${{ inputs.version }}
-          PRERELEASE: ${{ inputs.prerelease }}
-          SHA: ${{ github.sha }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Build and push immutable digest
+        shell: bash
         run: |
           set -euo pipefail
-          # Every build is addressable by commit, so an image can always be traced
-          # back to the tree it came from even when the moving tags move on.
-          tags="${IMAGE}:sha-${SHA:0:7},${IMAGE}:${VERSION}"
-          if [ "$PRERELEASE" != "true" ]; then
-            tags="${tags},${IMAGE}:${VERSION%.*},${IMAGE}:latest"
-          fi
-          printf 'tags=%s\n' "$tags" >> "$GITHUB_OUTPUT"
-          printf 'resolved tags: %s\n' "$tags"
-
-      - name: Build and push
-        env:
-          TAGS: ${{ steps.tags.outputs.tags }}
-        run: |
-          set -euo pipefail
-          # A container driver keeps the registry cache across runs and can push a
-          # multi-arch result without a local image store.
           docker buildx create --driver docker-container --name yufu-image --use
-          tag_args=()
-          IFS=',' read -ra tag_list <<< "$TAGS"
-          for tag in "${tag_list[@]}"; do
-            tag_args+=(--tag "$tag")
-          done
+          docker buildx inspect --bootstrap
           docker buildx build \
             --builder yufu-image \
             --file "$DOCKERFILE" \
-            --platform linux/amd64,linux/arm64 \
-            "${tag_args[@]}" \
-            --cache-from "type=registry,ref=${IMAGE}:buildcache" \
-            --cache-to "type=registry,ref=${IMAGE}:buildcache,mode=max" \
+            --platform "linux/${ARCH}" \
+            --cache-from "type=registry,ref=${IMAGE}:buildcache-${ARCH}" \
+            --cache-to "type=registry,ref=${IMAGE}:buildcache-${ARCH},mode=max" \
+            --metadata-file "$RUNNER_TEMP/build-metadata.json" \
             --provenance mode=max \
             --sbom true \
-            --push .
-
-      - name: Report the pushed tags
-        env:
-          TAGS: ${{ steps.tags.outputs.tags }}
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" .
+      - name: Smoke test and record digest
+        shell: bash
         run: |
-          printf 'Pushed:\n'
-          printf '%s\n' "$TAGS" | tr ',' '\n' | sed 's/^/  /'
+          set -euo pipefail
+          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$RUNNER_TEMP/build-metadata.json")
+          docker run --rm --platform "linux/${ARCH}" --entrypoint /usr/local/bin/yufu "${IMAGE}@${digest}" --version
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-digest-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  publish:
+    name: Publish verified multi-platform manifest
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      IMAGE: ${{ needs.prepare.outputs.image }}
+      TAGS: ${{ needs.prepare.outputs.tags }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: container-digest-linux-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+      - name: Log in to ghcr.io
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Assemble tags only after both native builds pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=("$RUNNER_TEMP/digests/"*)
+          test "${#files[@]}" -eq 2
+          sources=()
+          for file in "${files[@]}"; do
+            digest="${file##*/}"
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+            sources+=("${IMAGE}@sha256:${digest}")
+          done
+          tag_args=()
+          IFS=',' read -ra tag_list <<< "$TAGS"
+          for tag in "${tag_list[@]}"; do tag_args+=(--tag "$tag"); done
+          docker buildx imagetools create --dry-run "${sources[@]}" > "$RUNNER_TEMP/image-index.json"
+          jq -e '[.manifests[].platform | select(.os != "unknown") | .os + "/" + .architecture] | sort | unique == ["linux/amd64", "linux/arm64"]' "$RUNNER_TEMP/image-index.json"
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+          printf 'Pushed:\n%s\n' "$TAGS" | tr ',' '\n'
