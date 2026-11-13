@@ -5,8 +5,9 @@ on:
         branches:
             - main
         # This pipeline compiles the workspace on three operating systems. It has
-        # nothing to check in documentation, the Astro site, the Go SDK or the
-        # container recipe, so those changes must not burn a matrix run.
+        # nothing to check in documentation, the Astro site or the Go SDK, and the
+        # container recipe is covered by docker-lint.yml, so none of those changes
+        # may burn a matrix run.
         paths-ignore: &ignored
             - 'docs/**'
             - '**/*.md'
@@ -23,6 +24,12 @@ on:
             - main
         paths-ignore: *ignored
 
+# The automatic token only ever reads this repository. Keep the ceiling explicit
+# so a repository default of read-write cannot widen it, matching the other
+# workflows in this directory.
+permissions:
+    contents: read
+
 env:
     CARGO_TERM_COLOR: always
     YUFU_READINESS_OUTPUT: docs/specs/product-readiness/evidence/ci
@@ -30,6 +37,9 @@ env:
 jobs:
     check:
         name: Build (${{ matrix.os }})
+        # A cold release build of the whole workspace runs on three operating
+        # systems; the default six-hour ceiling would hide a hung build.
+        timeout-minutes: 90
         strategy:
             fail-fast: false
             matrix:
@@ -37,14 +47,16 @@ jobs:
         runs-on: ${{ matrix.os }}
         steps:
             - name: Checkout source code
-              uses: actions/checkout@v6
+              uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+              with:
+                  persist-credentials: false
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
               with:
                   toolchain: stable
                   components: rustfmt, clippy
             - name: Cache cargo registry and build
-              uses: Swatinem/rust-cache@v2
+              uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
             - name: Show version information
               run: |
                   cargo --version
@@ -52,14 +64,14 @@ jobs:
                   cargo clippy --version
 
             - name: Install Node
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
               with:
                   node-version: '24'
             - name: Install frontend dependencies
               run: |
                   npm install --global pnpm@12.10.1
                   pnpm install --frozen-lockfile
-            - uses: actions/setup-python@v6
+            - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
               with:
                   python-version: '3.11'
             - name: Build authentication frontend
@@ -83,16 +95,21 @@ jobs:
     verify:
         name: Tests (Ubuntu, disposable PostgreSQL)
         runs-on: ubuntu-latest
+        # Integration tests drive disposable PostgreSQL containers and a real
+        # browser, so a stuck fixture must fail fast instead of holding a runner.
+        timeout-minutes: 90
         steps:
-            - uses: actions/checkout@v6
-            - uses: dtolnay/rust-toolchain@stable
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+              with:
+                  persist-credentials: false
+            - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
               with:
                   components: rustfmt, clippy
-            - uses: Swatinem/rust-cache@v2
-            - uses: actions/setup-node@v4
+            - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
               with:
                   node-version: '24'
-            - uses: actions/setup-python@v6
+            - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
               with:
                   python-version: '3.11'
             - name: Install frontend dependencies
@@ -110,6 +127,8 @@ jobs:
                   python scripts/readiness.py run web-tests
                   python scripts/readiness.py run web-check
                   python scripts/readiness.py run web-lint
+            # tests/yufu/routes/identity_browser_e2e.rs drives the Node runner,
+            # which launches all three Playwright engines against real TLS fronts.
             - name: Install browser engines
               working-directory: web
               run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
