@@ -1,6 +1,7 @@
 {
   "name": "yufu",
   "private": true,
+  "license": "Apache-2.0",
   "version": "1.0.0",
   "description": "Authentication center (Rust + Vue) with standard OIDC examples",
   "scripts": {
