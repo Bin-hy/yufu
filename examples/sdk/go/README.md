@@ -12,6 +12,28 @@ application:
 - `POST /oidc/backchannel-logout` verifies a logout token and acknowledges
   replayed `jti` values idempotently.
 
+## SDK dependency
+
+The SDK is maintained in [Bin-hy/yufu-sdk-go](https://github.com/Bin-hy/yufu-sdk-go).
+This example pins an independent SDK version in `go.mod`; no local SDK checkout
+is needed for normal use. Requires Go 1.22 or later.
+
+To test unpublished SDK changes, clone both repositories and create a temporary
+workspace outside them (substitute your actual checkout paths):
+
+```bash
+mkdir -p /tmp/yufu-sdk-dev
+cd /tmp/yufu-sdk-dev
+go work init /path/to/yufu-sdk-go /path/to/yufu/examples/sdk/go
+cd /path/to/yufu/examples/sdk/go
+GOWORK=/tmp/yufu-sdk-dev/go.work go test -race -count=1 ./...
+# Or run the real-server harness against the local SDK:
+GOWORK=/tmp/yufu-sdk-dev/go.work ./run-integration.sh
+```
+
+Without `GOWORK`, the example uses the version pinned in `go.mod`.
+Keep machine-specific paths out of committed module files.
+
 ## Offline contract test (no server required)
 
 ```bash

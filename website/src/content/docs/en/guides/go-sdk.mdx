@@ -7,7 +7,8 @@ description: Install the yufu runtime SDK, run the code flow, verify tokens, and
 a thin, dependency-free HTTP / OIDC client.
 
 :::note
-This is a v0.1 reference SDK. The module path is provisional until the SDK moves out of the server repository.
+The SDK is maintained in the independent [yufu-sdk-go repository](https://github.com/Bin-hy/yufu-sdk-go)
+and requires Go 1.22 or later. It is versioned independently of the server.
 :::
 
 ## Scope
@@ -24,16 +25,17 @@ console APIs.
 ## Install
 
 ```bash
-go get github.com/Bin-hy/yufu-sdk-go
+go get github.com/Bin-hy/yufu-sdk-go@latest
 ```
 
-While the SDK lives in the server repository, use a `replace` directive:
+Import the client as:
 
 ```go
-require github.com/Bin-hy/yufu-sdk-go v0.0.0
-
-replace github.com/Bin-hy/yufu-sdk-go => /path/to/yufu/sdk/go
+import yufu "github.com/Bin-hy/yufu-sdk-go"
 ```
+
+The server repository retains the [Web example and integration harness](https://github.com/Bin-hy/yufu/tree/main/examples/sdk/go).
+For local SDK development, follow the temporary Go workspace instructions in the example README.
 
 ## Quickstart
 

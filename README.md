@@ -156,7 +156,7 @@ cargo run --bin yufu --features webui -- \
 | OIDC 协议与令牌语义 | [OIDC 接入](https://yufu-sso.pages.dev/guides/oidc-integration/) | [端点与令牌](https://yufu-sso.pages.dev/reference/endpoints/) |
 | 机密 Web 应用 | [Web 接入指南](https://yufu-sso.pages.dev/guides/web-app/) | [examples/oidc-web](examples/oidc-web/README.md)，基于 `openid-client`，含独立保护 API |
 | 公共 SPA | [SPA 接入指南](https://yufu-sso.pages.dev/guides/spa/) | [examples/oidc-spa](examples/oidc-spa/README.md)，基于 `oidc-client-ts` |
-| Go 服务 | [Go SDK 指南](https://yufu-sso.pages.dev/guides/go-sdk/) | [sdk/go](sdk/go/README.md) · [联调示例](examples/sdk/go/README.md) |
+| Go 服务 | [Go SDK 指南](https://yufu-sso.pages.dev/guides/go-sdk/) | [yufu-sdk-go](https://github.com/Bin-hy/yufu-sdk-go) · [联调示例](examples/sdk/go/README.md) |
 
 API 默认前缀为 `/api/v1`。应用权限同步使用 `/application/sync-permissions`，
 旧 `/enforce` 保留拒绝响应，不提供可直接接入的公开 PDP 决策 API；中心内部的授权判断不等于外部接口可用。
@@ -184,7 +184,6 @@ yufu/
 ├── yufu/                     # 身份服务、协议端点、治理与数据库迁移
 ├── libs/auth/                # 共享认证与安全能力
 ├── web/                      # Vue 3 控制台
-├── sdk/go/                   # Go Runtime SDK
 ├── examples/                 # Web、SPA 与 Go 接入参考
 ├── website/                  # Astro + Starlight 中英双语官网
 ├── deploy/docker/            # 容器部署：Dockerfile、Compose 与 Caddy 入口
@@ -221,8 +220,8 @@ pnpm test:examples
 pnpm build:web
 cargo build --bin yufu --features webui --release
 
-# Go SDK：离线契约测试与真实 issuer 联调
-(cd sdk/go && go test ./... && go vet ./...)
+# 独立 Go SDK 在 https://github.com/Bin-hy/yufu-sdk-go 维护
+# 本仓库保留 Go 接入示例：离线契约测试与真实 issuer 联调
 (cd examples/sdk/go && go test ./... && go vet ./...)
 (cd examples/sdk/go && ./run-integration.sh)  # 需要 Docker
 

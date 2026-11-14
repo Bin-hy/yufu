@@ -7,7 +7,8 @@ description: yufu Runtime SDK 的安装、授权码流程、令牌校验与后�
 无额外依赖的 HTTP / OIDC 客户端。
 
 :::note
-当前为 v0.1 参考 SDK。模块路径在 SDK 迁出服务端仓库前是临时的。
+SDK 在独立的 [yufu-sdk-go 仓库](https://github.com/Bin-hy/yufu-sdk-go)维护，
+需要 Go 1.22 或更新版本，版本独立于服务端。
 :::
 
 ## 范围
@@ -22,16 +23,17 @@ refresh token 轮换（single-flight）、UserInfo、JWKS 缓存与 RS256 校验
 ## 安装
 
 ```bash
-go get github.com/Bin-hy/yufu-sdk-go
+go get github.com/Bin-hy/yufu-sdk-go@latest
 ```
 
-SDK 仍在服务端仓库内时，使用 `replace`：
+导入客户端：
 
 ```go
-require github.com/Bin-hy/yufu-sdk-go v0.0.0
-
-replace github.com/Bin-hy/yufu-sdk-go => /path/to/yufu/sdk/go
+import yufu "github.com/Bin-hy/yufu-sdk-go"
 ```
+
+服务端仓库保留 [Web 示例与联调脚本](https://github.com/Bin-hy/yufu/tree/main/examples/sdk/go)。
+本地开发 SDK 时，可按示例 README 的说明建立临时 Go workspace。
 
 ## 快速开始
 

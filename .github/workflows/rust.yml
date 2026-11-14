@@ -5,7 +5,7 @@ on:
         branches:
             - main
         # This pipeline compiles the workspace on three operating systems. It has
-        # nothing to check in documentation, the Astro site or the Go SDK, and the
+        # nothing to check in documentation, the Astro site, and the
         # container recipe is covered by docker-lint.yml, so none of those changes
         # may burn a matrix run.
         paths-ignore: &ignored
@@ -13,7 +13,6 @@ on:
             - '**/*.md'
             - '*.md'
             - 'website/**'
-            - 'sdk/go/**'
             - 'deploy/docker/**'
             - 'brand/**'
             - '.gitignore'
