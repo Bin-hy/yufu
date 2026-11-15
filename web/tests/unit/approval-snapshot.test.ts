@@ -24,6 +24,7 @@ const application = {
     application_id: 1, app_key: 'app', name: 'App', description: null, management_mode: 'developer_managed' as const, third_party: false,
     active: true, revision: 3, owner_user_id: 12, members: [{ user_id: 12, member_role: 'owner' }],
     environments: [{ environment_id: 'prod', kind: 'production' as const, client_id: 'client', primary_client_kind: 'server_web' as const, secret_revision: 1, revision: 3, lifecycle_epoch: 1, active_version_id: 'v1', latest: { version_id: 'v2', version: 2, config: active, candidate_client_id: null }, active_config: active, pending_approval: 'ap1' }],
+    access: { assignments: [], test_users: [] },
 }
 let wrappers: VueWrapper[] = []
 beforeEach(() => {

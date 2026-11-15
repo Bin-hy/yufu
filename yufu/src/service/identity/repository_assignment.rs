@@ -36,6 +36,20 @@ impl PgSecurityTransaction {
             .collect::<Vec<_>>();
         let application_ids = self.identity_rows("SELECT application_id FROM identity_app_assignment WHERE group_id=$1 ORDER BY application_id LIMIT 1001", vec![id.into()]).await?
             .iter().map(|row| get(row, "application_id")).collect::<Result<Vec<_>, _>>()?;
+        let application_labels = self
+            .identity_rows(
+                "SELECT x.application_id,a.name FROM identity_app_assignment x JOIN application a ON a.id=x.application_id WHERE x.group_id=$1 ORDER BY x.application_id LIMIT 1001",
+                vec![id.into()],
+            )
+            .await?
+            .into_iter()
+            .map(|row| {
+                Ok(ApplicationLabel {
+                    application_id: get(&row, "application_id")?,
+                    name: get(&row, "name")?,
+                })
+            })
+            .collect::<Result<Vec<_>, IdentityError>>()?;
         if members.len() > 1000 || application_ids.len() > 1000 {
             return Err(IdentityError::CapacityExceeded);
         }
@@ -47,6 +61,7 @@ impl PgSecurityTransaction {
             members,
             member_profiles,
             application_ids,
+            application_labels,
         })
     }
     pub(crate) async fn identity_group_ids(
@@ -112,6 +127,36 @@ impl PgSecurityTransaction {
                     target,
                     label,
                     secondary,
+                })
+            })
+            .collect()
+    }
+    pub(crate) async fn identity_test_user_summaries(
+        &self,
+        app: i32,
+    ) -> Result<Vec<TestUserSummary>, IdentityError> {
+        let rows = self
+            .identity_rows(
+                "SELECT t.user_id,t.environment_id,u.username,u.nickname FROM identity_app_test_user t JOIN identity_app_environment e ON e.id=t.environment_id JOIN \"user\" u ON u.id=t.user_id WHERE e.application_id=$1 AND e.kind='development' ORDER BY t.user_id LIMIT 1001",
+                vec![app.into()],
+            )
+            .await?;
+        if rows.len() > 1000 {
+            return Err(IdentityError::CapacityExceeded);
+        }
+        rows.into_iter()
+            .map(|row| {
+                let user_id = get(&row, "user_id")?;
+                let username = get::<Option<String>>(&row, "username")?
+                    .unwrap_or_else(|| format!("account-{user_id}"));
+                let nickname = get::<Option<String>>(&row, "nickname")?
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| username.clone());
+                Ok(TestUserSummary {
+                    user_id,
+                    environment_id: get(&row, "environment_id")?,
+                    username,
+                    nickname,
                 })
             })
             .collect()

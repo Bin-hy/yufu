@@ -320,8 +320,26 @@ pub struct ApplicationWorkspace {
     pub owner_user_id: i32,
     pub members: Vec<ApplicationMemberSummary>,
     pub environments: Vec<EnvironmentWorkspace>,
+    pub access: ApplicationAccessSummary,
     #[serde(skip_serializing)]
     pub locks: IdentityLockScope,
+}
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ApplicationAccessSummary {
+    pub assignments: Vec<AssignmentTargetSummary>,
+    pub test_users: Vec<TestUserSummary>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TestUserSummary {
+    pub user_id: i32,
+    pub environment_id: Uuid,
+    pub username: String,
+    pub nickname: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ApplicationLabel {
+    pub application_id: i32,
+    pub name: String,
 }
 #[derive(serde::Serialize)]
 pub struct ApplicationMemberSummary {
@@ -486,6 +504,7 @@ pub struct GroupWorkspace {
     pub members: Vec<i32>,
     pub member_profiles: Vec<GroupMemberSummary>,
     pub application_ids: Vec<i32>,
+    pub application_labels: Vec<ApplicationLabel>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct GroupMemberSummary {

@@ -196,7 +196,12 @@ async function removeMember(group: Group, userId: number) {
                                 已分配应用 · {{ group.application_ids.length }}
                             </p>
                             <div class="flex flex-wrap gap-1.5">
-                                <span v-for="appId in group.application_ids" :key="appId" class="status-badge status-brand">应用 {{ appId }}</span>
+                                <RouterLink
+                                    v-for="app in group.application_labels || []"
+                                    :key="app.application_id"
+                                    class="status-badge status-brand"
+                                    :to="{ name: 'admin-app', params: { id: app.application_id } }"
+                                >{{ app.name }}</RouterLink>
                                 <span v-if="!group.application_ids.length" class="text-[11px] text-muted-foreground">尚未分配应用访问</span>
                             </div>
                         </div>

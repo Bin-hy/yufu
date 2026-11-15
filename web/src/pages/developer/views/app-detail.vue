@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Copy, KeyRound, RefreshCw, ShieldCheck, Users } from '@lucide/vue'
+import { Copy, KeyRound, RefreshCw, ShieldCheck, Users, X } from '@lucide/vue'
 import { usePageContext } from '@/workspace/page-context'
 import { useUserStore } from '@/pinia/stores/user'
 import { useAsyncQuery } from '@/composables/use-async-query'
@@ -18,7 +18,7 @@ import {
     getProviderMetadata,
 } from '../api'
 import { getAssignments, searchAccounts, searchGroups, setAssignment, setTestUser } from '@/pages/admin/api'
-import type { Environment, EnvironmentConfig, Reader } from '../api/type'
+import type { Assignment, Environment, EnvironmentConfig, Reader, TestUserSummary } from '../api/type'
 import { validateEnvironmentConfig } from '../api/validation'
 import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
@@ -380,10 +380,35 @@ async function test(present: boolean) {
         present,
         revision: data.value.revision,
     }
-    await mutation.run(
+    const done = await mutation.run(
         () => setTestUser(id.value, selected.value, Number(testUser.value), present, data.value!.revision, operationKey(body)),
         () => state.refresh(),
     )
+    if (done) {
+        emitToast({ type: 'success', message: present ? '已添加开发测试访问' : '已移除开发测试访问' })
+        clearTestUser()
+    }
+}
+async function removeAssignment(target: Assignment) {
+    if (!data.value) return
+    const body = { target, present: false, revision: data.value.revision }
+    const done = await mutation.run(
+        () => setAssignment(id.value, target, false, data.value!.revision, operationKey(body)),
+        async () => {
+            await state.refresh()
+            await assignments.refresh()
+        },
+    )
+    if (done) emitToast({ type: 'success', message: '已移除生产访问分配' })
+}
+async function removeTestUser(user: TestUserSummary) {
+    if (!data.value) return
+    const body = { id: id.value, env: user.environment_id, user: user.user_id, present: false, revision: data.value.revision }
+    const done = await mutation.run(
+        () => setTestUser(id.value, user.environment_id, user.user_id, false, data.value!.revision, operationKey(body)),
+        () => state.refresh(),
+    )
+    if (done) emitToast({ type: 'success', message: `已移除 ${user.nickname || user.username} 的测试访问` })
 }
 async function toggleLifecycle() {
     if (!data.value) return
@@ -697,17 +722,40 @@ const envStatus = computed(() => {
                         </section>
 
                         <section v-if="administrator" class="panel">
-                            <header class="panel-heading"><div><h2>生产访问分配</h2><p>只有明确分配的账户或用户组才能访问此环境。</p></div></header>
+                            <header class="panel-heading"><div><h2>可访问团队与账户</h2><p>生产环境只有明确分配的账户或用户组才能访问；开发环境额外允许维护者与本页列出的测试账户。</p></div></header>
                             <div class="surface-body space-y-4">
                                 <p v-if="assignments.error.value" class="inline-error">{{ assignments.error.value }}</p>
-                                <div class="flex flex-wrap gap-1.5">
-                                    <span v-for="entry in assignments.data.value" :key="entry.target.kind + ':' + entry.target.id" class="flex max-w-full flex-col rounded-lg border border-border bg-muted/30 px-2.5 py-1.5">
-                                        <span class="truncate text-[11px] font-semibold">{{ entry.label }}</span>
-                                        <span class="truncate text-[9.5px] text-muted-foreground">{{ entry.secondary }}</span>
-                                    </span>
-                                    <span v-if="!assignments.data.value?.length" class="text-[11px] text-muted-foreground">尚未明确分配</span>
+                                <div>
+                                    <p class="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                        <ShieldCheck :size="11" aria-hidden="true" />生产访问 · {{ assignments.data.value?.length ?? 0 }}
+                                    </p>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        <span v-for="entry in assignments.data.value" :key="entry.target.kind + ':' + entry.target.id" class="flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/30 px-2.5 py-1.5">
+                                            <span class="flex min-w-0 flex-col">
+                                                <span class="truncate text-[11px] font-semibold">{{ entry.label }}</span>
+                                                <span class="truncate text-[9.5px] text-muted-foreground">{{ entry.secondary }}</span>
+                                            </span>
+                                            <button type="button" class="icon-button text-destructive" :disabled="pending" :aria-label="'移除 ' + entry.label" title="移除" @click="removeAssignment(entry.target)"><X :size="12" aria-hidden="true" /></button>
+                                        </span>
+                                        <span v-if="!assignments.data.value?.length" class="text-[11px] text-muted-foreground">尚未明确分配</span>
+                                    </div>
                                 </div>
-                                <form class="flex flex-wrap items-end gap-3" @submit.prevent="assign">
+                                <div>
+                                    <p class="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                        <Users :size="11" aria-hidden="true" />开发测试账户 · {{ data.access.test_users.length }}
+                                    </p>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        <span v-for="entry in data.access.test_users" :key="entry.user_id" class="flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/30 px-2.5 py-1.5">
+                                            <span class="flex min-w-0 flex-col">
+                                                <span class="truncate text-[11px] font-semibold">{{ entry.nickname || entry.username }}</span>
+                                                <span class="truncate text-[9.5px] text-muted-foreground">账户 {{ entry.user_id }} · @{{ entry.username }}</span>
+                                            </span>
+                                            <button type="button" class="icon-button text-destructive" :disabled="pending" :aria-label="'移除测试访问 ' + entry.username" title="移除" @click="removeTestUser(entry)"><X :size="12" aria-hidden="true" /></button>
+                                        </span>
+                                        <span v-if="!data.access.test_users.length" class="text-[11px] text-muted-foreground">尚未添加测试账户</span>
+                                    </div>
+                                </div>
+                                <form class="flex flex-wrap items-end gap-3 border-t border-border pt-4" @submit.prevent="assign">
                                     <UiFormField id="assign-kind" label="对象类型" class="w-32">
                                         <select id="assign-kind" v-model="assignment.kind" class="ui-select"><option value="user">账户</option><option value="group">用户组</option></select>
                                     </UiFormField>
@@ -724,7 +772,7 @@ const envStatus = computed(() => {
                                             @select="chooseAssignmentTarget"
                                         />
                                     </UiFormField>
-                                    <label class="checkbox-field mb-2"><input v-model="assignment.present" type="checkbox" /><span>授予访问（取消为移除）</span></label>
+                                    <label class="checkbox-field mb-2"><input v-model="assignment.present" type="checkbox" /><span>授予生产访问（取消为移除）</span></label>
                                     <UiButton type="submit" :disabled="pending" :loading="pending">更新明确分配</UiButton>
                                 </form>
                                 <div v-if="env?.kind === 'development'" class="flex flex-wrap items-end gap-3 border-t border-border pt-4">
@@ -742,7 +790,6 @@ const envStatus = computed(() => {
                                         />
                                     </UiFormField>
                                     <UiButton :disabled="pending || !testUser" :loading="pending" @click="test(true)">添加测试访问</UiButton>
-                                    <UiButton variant="outline" :disabled="pending || !testUser" @click="test(false)">移除测试访问</UiButton>
                                 </div>
                             </div>
                         </section>

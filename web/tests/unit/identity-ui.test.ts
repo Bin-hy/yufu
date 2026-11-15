@@ -284,7 +284,7 @@ it('创建结果未知后仅核对，找到同标识应用时不伪造回执或�
     await verify().trigger('click'); await flushPromises()
     expect(mocked.register).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('可能已经生效')
-    mocked.apps.mockResolvedValue({ items: [{ application_id: 55, app_key: 'my-app', name: 'My App', environments: [], active: true }], next: null })
+    mocked.apps.mockResolvedValue({ items: [{ application_id: 55, app_key: 'my-app', name: 'My App', environments: [], active: true, access: { assignments: [], test_users: [] } }], next: null })
     await verify().trigger('click'); await flushPromises()
     expect(mocked.register).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('已找到相同标识的应用，请核对')

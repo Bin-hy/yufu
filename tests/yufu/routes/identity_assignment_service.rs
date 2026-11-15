@@ -10,6 +10,7 @@ use yufu::{
         error::IdentityError,
     },
     service::identity::{
+        application::ApplicationService,
         assignment::{AssignmentMutation, AssignmentService},
         repository::*,
     },
@@ -329,5 +330,100 @@ async fn identity_assignment_service_authority_revision_and_commit_failure_are_a
         .err(),
         Some(IdentityError::Forbidden)
     );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn identity_assignment_workspace_reports_access_sources_and_application_names() {
+    let f = IdentityFixture::start().await;
+    let a = app(&f, "service-access-summary", false).await;
+    let user = collaborator(&f).await;
+    let e = evidence(&f, a.owner).await;
+    let s = service(&f);
+    let first = s
+        .mutate(
+            &e,
+            AssignmentMutation::CreateGroup {
+                name: "access-summary".into(),
+                description: None,
+            },
+            "summary-group",
+            Uuid::new_v4(),
+            &budget(&f),
+        )
+        .await
+        .unwrap();
+    let group = group_id(&first);
+    s.mutate(
+        &e,
+        AssignmentMutation::SetGroupMember {
+            group_id: group,
+            user_id: user,
+            present: true,
+            expected_revision: 0,
+        },
+        "summary-member",
+        Uuid::new_v4(),
+        &budget(&f),
+    )
+    .await
+    .unwrap();
+    s.mutate(
+        &e,
+        AssignmentMutation::SetAssignment {
+            application_id: a.app,
+            target: AssignmentTarget::Group(group),
+            present: true,
+            expected_revision: 0,
+        },
+        "summary-assign",
+        Uuid::new_v4(),
+        &budget(&f),
+    )
+    .await
+    .unwrap();
+    s.mutate(
+        &e,
+        AssignmentMutation::SetTestUser {
+            application_id: a.app,
+            environment_id: a.development,
+            user_id: user,
+            present: true,
+            expected_revision: 1,
+        },
+        "summary-test-user",
+        Uuid::new_v4(),
+        &budget(&f),
+    )
+    .await
+    .unwrap();
+    let (_, secret) = center_secret(&f, a.owner).await;
+    let workspace = ApplicationService::new(Arc::new(repository(&f)), f.clock.clone())
+        .detail(&secret, a.app, &budget(&f))
+        .await
+        .unwrap();
+    assert_eq!(
+        workspace.access.assignments,
+        vec![AssignmentTargetSummary {
+            target: AssignmentTarget::Group(group),
+            label: "access-summary".into(),
+            secondary: format!("用户组 {group} · 1 位成员"),
+        }]
+    );
+    assert_eq!(workspace.access.test_users.len(), 1);
+    assert_eq!(workspace.access.test_users[0].user_id, user);
+    assert_eq!(workspace.access.test_users[0].environment_id, a.development);
+    assert_eq!(workspace.access.test_users[0].nickname, "Partner");
+    let mut tx = repository(&f).begin(&budget(&f)).await.unwrap();
+    let loaded = tx.group_workspace(group).await.unwrap();
+    assert_eq!(loaded.application_ids, vec![a.app]);
+    assert_eq!(
+        loaded.application_labels,
+        vec![ApplicationLabel {
+            application_id: a.app,
+            name: "service-access-summary".into(),
+        }]
+    );
+    tx.commit().await.unwrap();
     f.close().await;
 }
