@@ -3,9 +3,10 @@ defineOptions({ name: 'AdminGroups' })
 import { onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Network, Pencil, Plus, Search, Trash2, UserPlus, Users } from '@lucide/vue'
 import { listGroups, groupChange, searchAccounts } from '../api'
-import type { Group } from '../api/type'
-import { useCursorPage } from '@/composables/use-cursor-page'
-import { useAsyncMutation } from '@/composables/use-async-mutation'
+import type { Group, GroupMember } from '../api/type'
+import { useCursorList } from '@/composables/use-cursor-list'
+import { useRowMutation } from '@/composables/use-row-mutation'
+import { useRouteFilters } from '@/composables/use-route-filters'
 import { useOperationKey } from '@/composables/use-ephemeral-result'
 import { emitToast } from '@/utils/toast'
 import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
@@ -18,50 +19,58 @@ import UiFormField from '@/components/ui/form-field/form-field.vue'
 import EntityPicker from '@/components/ui/entity-picker/entity-picker.vue'
 import type { PickerOption } from '@/components/ui/entity-picker/types'
 import { accountOption } from '@/lib/picker-options'
-const directoryQuery = ref(''),
-    debouncedDirectoryQuery = ref('')
+
+const filters = useRouteFilters({ q: '' })
+const directoryQuery = ref(filters.values.value.q)
 let directoryTimer: number | undefined
 watch(directoryQuery, (value) => {
     window.clearTimeout(directoryTimer)
     directoryTimer = window.setTimeout(() => {
-        debouncedDirectoryQuery.value = value.trim()
+        void filters.set({ q: value.trim() })
     }, 240)
 })
+watch(
+    () => filters.values.value.q,
+    (value) => {
+        if (value !== directoryQuery.value.trim()) directoryQuery.value = value
+    },
+)
 onBeforeUnmount(() => window.clearTimeout(directoryTimer))
-const list = useCursorPage(
-    () => `enterprise-groups:${debouncedDirectoryQuery.value}`,
+const list = useCursorList(
+    () => `enterprise-groups:${filters.values.value.q}`,
     (after, signal) =>
-        listGroups(after, signal, debouncedDirectoryQuery.value || undefined),
+        listGroups(after, signal, filters.values.value.q || undefined),
 ),
-    { data, status, error, refreshing } = list
-const mutation = useAsyncMutation(),
-    { pending, error: writeError } = mutation,
+    { items, hasMore, status, error, refreshing } = list
+const mutation = useRowMutation(),
+    { pending, error: writeError, rowPending } = mutation,
     key = useOperationKey()
 const form = reactive({ name: '', description: '' }),
     selected = ref<Group>(),
-    member = ref<number | ''>(''),
-    memberLabel = ref(''),
-    memberSecondary = ref(''),
     editorOpen = ref(false)
-watch(debouncedDirectoryQuery, () => list.first())
+/** Member-picker state is isolated per group so choosing a person in one card never leaks into another. */
+interface MemberDraft { picks: PickerOption[]; pickerValue: number | null }
+const drafts = reactive<Record<string, MemberDraft>>({})
+function draft(group: Group): MemberDraft {
+    return (drafts[group.group_id] ??= { picks: [], pickerValue: null })
+}
+function pickMember(group: Group, option: PickerOption) {
+    const target = draft(group)
+    const id = Number(option.value)
+    if (
+        !target.picks.some((pick) => Number(pick.value) === id) &&
+        !group.members.includes(id)
+    )
+        target.picks.push({ ...option, value: id })
+    target.pickerValue = null
+}
+function unpickMember(group: Group, value: string | number) {
+    const target = draft(group)
+    target.picks = target.picks.filter((pick) => pick.value !== value)
+}
 const loadAccountOptions = async (query: string, signal: AbortSignal): Promise<PickerOption[]> => {
     const page = await searchAccounts(query, signal)
     return page.items.map(accountOption)
-}
-function chooseMember(option: PickerOption) {
-    member.value = Number(option.value)
-    memberLabel.value = option.label
-    memberSecondary.value = option.secondary ?? ''
-}
-async function change(path: string, method: 'POST' | 'PATCH' | 'DELETE', body: unknown) {
-    await mutation.run(
-        () => groupChange(path, method, body, key({ path, body })),
-        async () => {
-            selected.value = undefined
-            await list.refresh()
-            emitToast({ type: 'success', message: method === 'DELETE' ? '用户组已删除' : '用户组已更新' })
-        },
-    )
 }
 function create() {
     selected.value = undefined
@@ -81,16 +90,21 @@ async function save() {
         document.getElementById('group-name')?.focus()
         return
     }
-    await change(
-        selected.value ? '/' + selected.value.group_id : '',
-        selected.value ? 'PATCH' : 'POST',
-        {
-            name: form.name.trim(),
-            description: form.description.trim() || null,
-            ...(selected.value ? { expected_revision: selected.value.revision } : {}),
+    const path = selected.value ? '/' + selected.value.group_id : ''
+    const body = {
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        ...(selected.value ? { expected_revision: selected.value.revision } : {}),
+    }
+    const saved = await mutation.run(
+        () => groupChange(path, selected.value ? 'PATCH' : 'POST', body, key({ path, body })),
+        async () => {
+            await list.refresh()
+            emitToast({ type: 'success', message: selected.value ? '用户组已更新' : '用户组已创建' })
         },
     )
-    if (!writeError.value) {
+    if (saved) {
+        selected.value = undefined
         editorOpen.value = false
         form.name = ''
         form.description = ''
@@ -98,7 +112,7 @@ async function save() {
 }
 async function remove(group: Group) {
     const path = '/' + group.group_id, body = { expected_revision: group.revision }
-    const confirmed = await mutation.confirm({
+    const confirmed = await mutation.confirmRow(group.group_id, {
         title: '删除用户组',
         content: `删除“${group.name}”会移除该组的成员关系与访问来源。组内成员账户不会被删除。`,
         confirmText: '删除组并移除访问来源',
@@ -111,23 +125,51 @@ async function remove(group: Group) {
     }
 }
 
-async function addMember(group: Group) {
-    if (!member.value) return
-    await change(`/${group.group_id}/members/${Number(member.value)}`, 'PATCH', {
-        present: true,
-        expected_revision: group.revision,
-    })
-    if (!writeError.value) {
-        member.value = ''
-        memberLabel.value = ''
-        memberSecondary.value = ''
-    }
+async function addMembers(group: Group) {
+    const target = draft(group)
+    const picks = [...target.picks]
+    if (!picks.length) return
+    const added = await mutation.runRow(
+        `${group.group_id}:add`,
+        async () => {
+            let revision = group.revision
+            for (const pick of picks) {
+                const path = `/${group.group_id}/members/${Number(pick.value)}`
+                const body = { present: true, expected_revision: revision }
+                const receipt = await groupChange(path, 'PATCH', body, key({ path, body }))
+                const next = Number(receipt.summary.revision)
+                if (Number.isFinite(next)) revision = next
+            }
+        },
+        async () => {
+            target.picks = []
+            await list.refresh()
+            emitToast({
+                type: 'success',
+                message: picks.length > 1 ? `已添加 ${picks.length} 名成员` : '成员已添加',
+            })
+        },
+    )
+    if (!added) await list.refresh()
 }
-async function removeMember(group: Group, userId: number) {
-    await change(`/${group.group_id}/members/${userId}`, 'PATCH', {
-        present: false,
-        expected_revision: group.revision,
-    })
+async function removeMember(group: Group, profile: GroupMember) {
+    const name = profile.nickname || profile.username || `账户 ${profile.user_id}`
+    const path = `/${group.group_id}/members/${profile.user_id}`
+    const body = { present: false, expected_revision: group.revision }
+    const confirmed = await mutation.confirmRow(
+        `${group.group_id}:remove:${profile.user_id}`,
+        {
+            title: '移除组成员',
+            content: `将把 ${name} 移出“${group.name}”。该成员经由此组获得的应用访问会一并失效，账户本身不受影响。`,
+            confirmText: '移除成员',
+            destructive: true,
+        },
+        () => groupChange(path, 'PATCH', body, key({ path, body })),
+    )
+    if (confirmed) {
+        await list.refresh()
+        emitToast({ type: 'success', message: `已将 ${name} 移出用户组` })
+    }
 }
 </script>
 <template>
@@ -154,7 +196,7 @@ async function removeMember(group: Group, userId: number) {
                 />
             </div>
             <span class="toolbar-spacer text-[11px] text-muted-foreground">
-                {{ data?.items.length ?? 0 }} 个用户组
+                已加载 {{ items.length }} 个用户组{{ hasMore ? '，还有更多' : '' }}
             </span>
         </div>
 
@@ -162,14 +204,19 @@ async function removeMember(group: Group, userId: number) {
             :status="status"
             :error="error"
             :refreshing="refreshing"
-            :empty="!data?.items.length"
-            empty-title="还没有用户组"
-            empty-description="创建第一个用户组，把成员和访问来源集中管理。"
+            :empty="!items.length"
+            :empty-title="filters.values.value.q ? '没有匹配的用户组' : '还没有用户组'"
+            :empty-description="filters.values.value.q ? '换个关键词再试试。' : '创建第一个用户组，把成员和访问来源集中管理。'"
             :skeleton-rows="3"
             @retry="list.refresh()"
         >
+            <template #actions>
+                <UiButton v-if="!filters.values.value.q" @click="create">
+                    <Plus :size="14" aria-hidden="true" />新建用户组
+                </UiButton>
+            </template>
             <div class="grid gap-4 md:grid-cols-2">
-                <article v-for="group in data?.items" :key="group.group_id" class="panel">
+                <article v-for="group in items" :key="group.group_id" class="panel">
                     <header class="panel-heading">
                         <div class="flex min-w-0 items-start gap-3">
                             <span class="list-icon !h-9 !w-9"><Network :size="16" aria-hidden="true" /></span>
@@ -210,44 +257,58 @@ async function removeMember(group: Group, userId: number) {
                                 <Users :size="11" aria-hidden="true" />成员 · {{ group.members.length }}
                             </p>
                             <div class="flex flex-wrap gap-1.5">
-                                <button
+                                <span
                                     v-for="profile in group.member_profiles || group.members.map(id => ({ user_id: id, username: '', nickname: '' }))"
                                     :key="profile.user_id"
-                                    type="button"
-                                    class="group inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-[10.5px] transition-colors hover:border-destructive/30 hover:text-destructive"
-                                    :disabled="pending"
-                                    :aria-label="'移除账户 ' + (profile.nickname || profile.username || profile.user_id)"
-                                    @click="removeMember(group, profile.user_id)"
+                                    class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-[10.5px]"
                                 >
                                     <span class="truncate">{{ profile.nickname || profile.username || '账户 ' + profile.user_id }}</span>
                                     <span v-if="profile.username" class="truncate opacity-60">@{{ profile.username }}</span>
-                                    <span class="opacity-50 group-hover:opacity-100">×</span>
-                                </button>
+                                    <button
+                                        type="button"
+                                        class="rounded px-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                        :disabled="pending"
+                                        :aria-label="'移除成员 ' + (profile.nickname || profile.username || profile.user_id)"
+                                        title="移除成员"
+                                        @click="removeMember(group, profile)"
+                                    >×</button>
+                                </span>
                                 <span v-if="!group.members.length" class="text-[11px] text-muted-foreground">暂无成员</span>
                             </div>
                         </div>
-                        <form class="flex items-end gap-2 border-t border-border pt-4" @submit.prevent="addMember(group)">
-                            <UiFormField :id="'group-member-' + group.group_id" label="搜索并添加成员" class="min-w-0 flex-1" hint="按显示名称、用户名或账户 ID 搜索。">
+                        <form class="space-y-2 border-t border-border pt-4" @submit.prevent="addMembers(group)">
+                            <UiFormField :id="'group-member-' + group.group_id" label="搜索并添加成员" class="min-w-0" hint="可连续选择多人后一次添加。">
                                 <EntityPicker
                                     :id="'group-member-' + group.group_id"
-                                    :model-value="member"
-                                    :selected-label="memberLabel"
-                                    :selected-secondary="memberSecondary"
+                                    :model-value="draft(group).pickerValue"
                                     :load="loadAccountOptions"
                                     placeholder="搜索账户名称或用户名…"
                                     :disabled="pending"
-                                    @update:model-value="(value) => { if (value === null) { member = ''; memberLabel = ''; memberSecondary = '' } }"
-                                    @select="chooseMember"
+                                    @update:model-value="(value) => { draft(group).pickerValue = value === null ? null : Number(value) }"
+                                    @select="(option) => pickMember(group, option)"
                                 />
                             </UiFormField>
-                            <UiButton type="submit" variant="outline" size="sm" :disabled="pending || !member">
-                                <UserPlus :size="13" aria-hidden="true" />添加成员
+                            <div v-if="draft(group).picks.length" class="flex flex-wrap gap-1.5">
+                                <span v-for="pick in draft(group).picks" :key="pick.value" class="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-[10.5px]">
+                                    {{ pick.label }}
+                                    <button type="button" class="ml-0.5 text-muted-foreground hover:text-destructive" :aria-label="'取消选择 ' + pick.label" @click="unpickMember(group, pick.value)">×</button>
+                                </span>
+                            </div>
+                            <UiButton
+                                type="submit"
+                                variant="outline"
+                                size="sm"
+                                :disabled="pending || !draft(group).picks.length"
+                                :loading="rowPending(`${group.group_id}:add`)"
+                            >
+                                <UserPlus :size="13" aria-hidden="true" />
+                                {{ draft(group).picks.length > 1 ? `添加 ${draft(group).picks.length} 名成员` : '添加成员' }}
                             </UiButton>
                         </form>
                     </div>
                 </article>
             </div>
-            <div v-if="data?.next" class="mt-4 flex justify-center">
+            <div v-if="hasMore" class="mt-4 flex justify-center">
                 <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.next()">加载更多用户组</UiButton>
             </div>
         </DataState>

@@ -43,6 +43,7 @@ pub enum ConsoleQuery {
         after: i32,
         limit: u32,
         search: Option<String>,
+        enabled: Option<bool>,
     },
     Audit {
         after: Option<Uuid>,
@@ -51,6 +52,17 @@ pub enum ConsoleQuery {
     Deliveries {
         after: Option<Uuid>,
         limit: u32,
+        status: Option<String>,
+    },
+    /// Aggregated administrator counters; every section is gated by its own
+    /// read operation and omitted (None) when the actor lacks that grant.
+    Overview {
+        accounts: bool,
+        deliveries: bool,
+        approvals: bool,
+        migrations: bool,
+        /// Lower bound (epoch milliseconds) for the audit failure counter.
+        audit_since: Option<i64>,
     },
     AppDeliveries {
         application_id: i32,
@@ -85,6 +97,26 @@ pub fn validate_limit(limit: u32) -> Result<(), IdentityError> {
         Err(IdentityError::InvalidInput)
     }
 }
+/// The closed set of delivery states the outbox writes; filters outside it are rejected.
+pub const DELIVERY_STATUSES: &[&str] = &[
+    "pending",
+    "leased",
+    "retry",
+    "delivered",
+    "permanent_failure",
+    "expired",
+];
+pub fn validate_delivery_status(status: Option<&str>) -> Result<Option<String>, IdentityError> {
+    status
+        .map(|value| {
+            if DELIVERY_STATUSES.contains(&value) {
+                Ok(value.to_owned())
+            } else {
+                Err(IdentityError::InvalidInput)
+            }
+        })
+        .transpose()
+}
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum ConsoleResult {
@@ -95,6 +127,44 @@ pub enum ConsoleResult {
     Accounts(ConsolePage<ConsoleAccount, i32>),
     Audit(ConsolePage<ConsoleAudit, Uuid>),
     Deliveries(ConsolePage<ConsoleDelivery, Uuid>),
+    Overview(ConsoleOverview),
+}
+#[derive(Serialize)]
+pub struct ConsoleOverview {
+    pub accounts: Option<AccountOverview>,
+    pub deliveries: Option<DeliveryOverview>,
+    pub approvals: Option<ApprovalOverview>,
+    pub migrations: Option<MigrationOverview>,
+    pub audit: Option<AuditOverview>,
+}
+#[derive(Serialize)]
+pub struct AccountOverview {
+    pub total: u64,
+    pub disabled: u64,
+    pub developers: u64,
+}
+#[derive(Serialize)]
+pub struct DeliveryOverview {
+    pub pending: u64,
+    pub leased: u64,
+    pub retry: u64,
+    pub delivered: u64,
+    pub permanent_failure: u64,
+    pub expired: u64,
+}
+#[derive(Serialize)]
+pub struct ApprovalOverview {
+    pub pending: u64,
+}
+#[derive(Serialize)]
+pub struct MigrationOverview {
+    pub unmanaged: u64,
+    pub unresolved_conflicts: u64,
+}
+#[derive(Serialize)]
+pub struct AuditOverview {
+    /// Events inside the requested window whose result is not success.
+    pub recent_failures: u64,
 }
 #[derive(Serialize)]
 pub struct PersonalApplication {

@@ -4,6 +4,15 @@ export interface GroupMember { user_id: number; username: string; nickname: stri
 export interface ApplicationLabel { application_id: number; name: string }
 export interface Group { group_id: string; name: string; description: string | null; revision: number; members: number[]; member_profiles?: GroupMember[]; application_ids: number[]; application_labels?: ApplicationLabel[] }
 export interface Audit { id: string; request_id: string; actor_id: number | null; action: string; object_kind: string; object_id: string; happened_at: number; result: string; reason_code: string | null; change_summary: Record<string, unknown> }
+/** Server-side audit query; `from`/`to` are RFC 3339 timestamps, `actor` is a user id or "anonymous". */
+export interface AuditSearchFilter { from?: string; to?: string; actor?: string; action?: string; object_kind?: string; object_id?: string; request_id?: string; application_id?: number; result?: 'success' | 'denied' | 'failure' }
+export interface AdminOverview {
+    accounts: { total: number; disabled: number; developers: number } | null
+    deliveries: { pending: number; leased: number; retry: number; delivered: number; permanent_failure: number; expired: number } | null
+    approvals: { pending: number } | null
+    migrations: { unmanaged: number; unresolved_conflicts: number } | null
+    audit: { recent_failures: number } | null
+}
 export interface Delivery { id: string; event_id: string; application_id: number; name: string; environment: string; status: string; attempt_count: number; next_attempt_at: number; last_error_code: string | null; created_at: number; delivered_at: number | null }
 export interface IssuedAction { id: string; secret: string; expires_at: number }
 export interface LegacyClient { oauth_client_id: number; client_id: string; name: string; candidate_owner_id: number; public_client: boolean; management_state: string; candidate_application_ids: number[]; conflict_kinds: string[]; snapshot: string }

@@ -528,3 +528,141 @@ async fn identity_console_app_deliveries_are_environment_scoped_paginated_and_me
     );
     f.close().await;
 }
+#[tokio::test]
+async fn identity_console_filters_and_overview_follow_grants_and_closed_sets() {
+    let f = IdentityFixture::start().await;
+    let a = app(&f, "console-overview", false).await;
+    let mut cookies = BrowserCookies::default();
+    http_login(&f, &mut cookies).await;
+    let repo = repository(&f);
+    let mut tx = repo.begin(&budget(&f)).await.unwrap();
+    let IdentityWriteResult::Account(disabled) = tx
+        .apply(IdentityWrite::CreateAccount(NewAccountWrite {
+            username: "filter-disabled".into(),
+            nickname: "Filtered".into(),
+            password_hash: auth::security::identity::SecretToken::new(
+                bcrypt::hash("fixture-password", 4).unwrap(),
+            )
+            .unwrap(),
+            person_kind: PersonKind::Collaborator,
+            developer_enabled: false,
+        }))
+        .await
+        .unwrap()
+    else {
+        panic!("account")
+    };
+    let IdentityWriteResult::Account(ordinary) = tx
+        .apply(IdentityWrite::CreateAccount(NewAccountWrite {
+            username: "filter-ordinary".into(),
+            nickname: "Ordinary".into(),
+            password_hash: auth::security::identity::SecretToken::new(
+                bcrypt::hash("fixture-password", 4).unwrap(),
+            )
+            .unwrap(),
+            person_kind: PersonKind::Collaborator,
+            developer_enabled: false,
+        }))
+        .await
+        .unwrap()
+    else {
+        panic!("account")
+    };
+    tx.commit().await.unwrap();
+    f.db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "UPDATE \"user\" SET enabled=FALSE WHERE id=$1",
+        [disabled.user_id.into()],
+    ))
+    .await
+    .unwrap();
+    // The enabled filter narrows on the server, so page one is already exact.
+    let only_disabled = get(&f, &cookies, "/admin/accounts?enabled=false")
+        .await
+        .json::<Value>()
+        .await
+        .unwrap();
+    let items = only_disabled["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["user_id"], disabled.user_id);
+    let only_enabled = get(&f, &cookies, "/admin/accounts?enabled=true&q=filter")
+        .await
+        .json::<Value>()
+        .await
+        .unwrap();
+    let items = only_enabled["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["user_id"], ordinary.user_id);
+    assert_eq!(
+        get(&f, &cookies, "/admin/accounts?enabled=maybe")
+            .await
+            .status(),
+        400
+    );
+    // Delivery status filtering accepts only the closed outbox vocabulary.
+    for status in [
+        "pending",
+        "leased",
+        "retry",
+        "delivered",
+        "permanent_failure",
+        "expired",
+    ] {
+        let response = get(
+            &f,
+            &cookies,
+            &format!("/admin/logout-deliveries?status={status}"),
+        )
+        .await;
+        assert_eq!(response.status(), 200, "{status}");
+        assert_eq!(response.json::<Value>().await.unwrap()["items"], json!([]));
+    }
+    assert_eq!(
+        get(&f, &cookies, "/admin/logout-deliveries?status=bogus")
+            .await
+            .status(),
+        400
+    );
+    assert_eq!(
+        get(&f, &cookies, "/admin/audit-events?status=pending")
+            .await
+            .status(),
+        400
+    );
+    // Overview aggregates every granted section with real totals.
+    let response = get(&f, &cookies, "/admin/overview").await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let body = response.json::<Value>().await.unwrap();
+    safe(&body);
+    assert_eq!(body["accounts"]["disabled"], 1);
+    assert!(body["accounts"]["total"].as_u64().unwrap() >= 3);
+    assert_eq!(body["deliveries"]["pending"], 0);
+    assert_eq!(body["approvals"]["pending"], 0);
+    assert_eq!(body["migrations"]["unmanaged"], 0);
+    assert!(body["audit"]["recent_failures"].as_u64().is_some());
+    // Revoking one read hides that section only instead of failing the page.
+    f.db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,"INSERT INTO user_authority(user_id,authority_id,allow,create_time,update_time) SELECT $1,id,FALSE,NOW(),NOW() FROM authority WHERE method='GET' AND authority_uri='/admin/accounts'",[a.owner.into()])).await.unwrap();
+    let gated = get(&f, &cookies, "/admin/overview")
+        .await
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert!(gated["accounts"].is_null());
+    assert_eq!(gated["deliveries"]["pending"], 0);
+    // Ordinary users and anonymous callers get the usual refusals.
+    let (_, other_secret) = center_secret(&f, ordinary.user_id).await;
+    let mut other = BrowserCookies::default();
+    other.0.insert("yufu-dev-sso".into(), other_secret);
+    assert_eq!(get(&f, &other, "/admin/overview").await.status(), 403);
+    assert_eq!(
+        f.client
+            .get(format!("{}/api/v1/admin/overview", f.base_url))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    f.close().await;
+}
