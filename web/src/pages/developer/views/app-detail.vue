@@ -772,7 +772,7 @@ const envStatus = computed(() => {
                                             @select="chooseAssignmentTarget"
                                         />
                                     </UiFormField>
-                                    <label class="checkbox-field mb-2"><input v-model="assignment.present" type="checkbox" /><span>授予生产访问（取消为移除）</span></label>
+                                    <label class="checkbox-field mb-2"><input id="assign-present" v-model="assignment.present" type="checkbox" /><span>授予生产访问（取消为移除）</span></label>
                                     <UiButton type="submit" :disabled="pending" :loading="pending">更新明确分配</UiButton>
                                 </form>
                                 <div v-if="env?.kind === 'development'" class="flex flex-wrap items-end gap-3 border-t border-border pt-4">
