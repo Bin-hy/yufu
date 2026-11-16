@@ -59,6 +59,15 @@ impl Config {
         }
     }
 
+    /// Domain used to synthesize an address for accounts that have none.
+    ///
+    /// Relying parties render profiles and several refuse a login whose claims
+    /// carry no `email`, so `[oidc].email_domain` has to reach every profile
+    /// loader rather than only the documentation.
+    pub fn email_domain(&self) -> &str {
+        self.oidc.email_domain.trim()
+    }
+
     pub fn validate_identity_policy(&self) -> anyhow::Result<()> {
         self.validate_browser_cookie_policy()?;
         let issuer = self.issuer();

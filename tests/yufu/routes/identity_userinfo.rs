@@ -63,8 +63,11 @@ async fn identity_protocol_userinfo_discloses_only_the_token_scope_and_real_curr
         .await
         .unwrap();
     let value = serde_json::to_value(profile).unwrap();
-    assert!(value.get("email").is_none());
-    assert!(value.get("email_verified").is_none());
+    // No stored address remains, so the claim is synthesized from
+    // [oidc].email_domain rather than omitted: relying parties reject a login
+    // whose profile carries no email. It is never reported as verified.
+    assert_eq!(value["email"], "identity-admin@yufu.local");
+    assert_eq!(value["email_verified"], false);
     assert_eq!(value["sub"], a.owner.to_string());
     f.close().await;
 }

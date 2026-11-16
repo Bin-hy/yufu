@@ -891,7 +891,7 @@ impl IdentityUnitOfWork for ProfileUpdate<'_> {
         )
         .await?;
         transaction
-            .load_profile(actor.account().user_id)
+            .load_profile(actor.account().user_id, self.service.config.email_domain())
             .await?
             .ok_or(IdentityError::NotFound)
     }

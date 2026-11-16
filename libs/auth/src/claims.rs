@@ -119,6 +119,38 @@ pub struct IdentityProfile {
     pub email_verified: Option<bool>,
 }
 
+impl IdentityProfile {
+    /// Synthesizes `<preferred_username>@<domain>` for accounts without a stored
+    /// address.
+    ///
+    /// Several relying parties (for example Outline) reject an OIDC login whose
+    /// profile carries no `email` claim, so an account created without one would
+    /// be unable to sign in anywhere. Historical deployments answered with
+    /// `{username}@{email_domain}`; this keeps that contract and covers every
+    /// profile consumer at once, because the fallback lives on the value that is
+    /// loaded once per flow.
+    ///
+    /// The synthesized address is never authoritative: it is reported as
+    /// unverified, and it leaves an explicitly stored address untouched. An empty
+    /// or blank domain disables the fallback.
+    pub fn with_email_domain(mut self, domain: &str) -> Self {
+        let domain = domain.trim();
+        if self.email.is_some() || domain.is_empty() {
+            return self;
+        }
+        let username = self
+            .preferred_username
+            .as_deref()
+            .map(str::trim)
+            .filter(|username| !username.is_empty());
+        if let Some(username) = username {
+            self.email = Some(format!("{username}@{domain}"));
+            self.email_verified = Some(false);
+        }
+        self
+    }
+}
+
 /// An ID Token's signed session reference, never an authentication credential.
 pub struct LogoutReference {
     pub issuer: String,
@@ -139,4 +171,68 @@ pub struct LogoutTokenClaims {
     pub sub: String,
     pub sid: String,
     pub events: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IdentityProfile;
+
+    fn profile(username: Option<&str>, email: Option<&str>) -> IdentityProfile {
+        IdentityProfile {
+            name: None,
+            preferred_username: username.map(str::to_owned),
+            email: email.map(str::to_owned),
+            email_verified: email.map(|_| true),
+        }
+    }
+
+    #[test]
+    fn identity_profile_synthesizes_missing_address() {
+        let filled = profile(Some("cargo"), None).with_email_domain("binhy.email");
+        assert_eq!(filled.email.as_deref(), Some("cargo@binhy.email"));
+        // A synthesized address is never reported as verified.
+        assert_eq!(filled.email_verified, Some(false));
+    }
+
+    #[test]
+    fn identity_profile_keeps_stored_address_and_verification() {
+        let kept =
+            profile(Some("cargo"), Some("real@example.test")).with_email_domain("binhy.email");
+        assert_eq!(kept.email.as_deref(), Some("real@example.test"));
+        assert_eq!(kept.email_verified, Some(true));
+    }
+
+    #[test]
+    fn identity_profile_skips_fallback_without_a_domain_or_username() {
+        assert!(
+            profile(Some("cargo"), None)
+                .with_email_domain("")
+                .email
+                .is_none()
+        );
+        assert!(
+            profile(Some("cargo"), None)
+                .with_email_domain("   ")
+                .email
+                .is_none()
+        );
+        assert!(
+            profile(None, None)
+                .with_email_domain("binhy.email")
+                .email
+                .is_none()
+        );
+        assert!(
+            profile(Some("  "), None)
+                .with_email_domain("binhy.email")
+                .email
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn identity_profile_trims_domain() {
+        let trimmed = profile(Some("cargo"), None).with_email_domain(" binhy.email ");
+        assert_eq!(trimmed.email.as_deref(), Some("cargo@binhy.email"));
+    }
 }

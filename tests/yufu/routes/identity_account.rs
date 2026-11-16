@@ -582,7 +582,14 @@ async fn identity_account_service_profile_changes_keep_subject_and_clear_email_v
         .update_profile(&evidence, "New Name", None, Uuid::new_v4(), &budget(&f))
         .await
         .unwrap();
-    assert!(missing.email.is_none() && missing.email_verified.is_none());
+    // Clearing the stored address falls back to the synthesized one, which is
+    // never reported as verified.
+    assert_eq!(
+        missing.email.as_deref(),
+        Some("identity-admin@yufu.local"),
+        "clearing the stored address should synthesize one from [oidc].email_domain"
+    );
+    assert_eq!(missing.email_verified, Some(false));
     let mut tx = repository(&f).begin(&budget(&f)).await.unwrap();
     let restored = tx
         .load_browser_session(&SecretDigest::of(&center))
@@ -996,9 +1003,22 @@ async fn identity_account_profile_returns_only_real_optional_email() {
     let f = IdentityFixture::start().await;
     let actor = admin_id(&f).await;
     let mut tx = repository(&f).begin(&budget(&f)).await.unwrap();
-    let profile = tx.load_profile(actor).await.unwrap().unwrap();
-    assert!(profile.email.is_none());
-    assert!(profile.email_verified.is_none());
+    // Storage holds no address, so the profile reports the synthesized one and
+    // never claims it was verified.
+    let profile = tx
+        .load_profile(actor, "binhy.email")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        profile
+            .email
+            .as_deref()
+            .is_some_and(|email| email.ends_with("@binhy.email")),
+        "expected a synthesized address, got {:?}",
+        profile.email
+    );
+    assert_eq!(profile.email_verified, Some(false));
     tx.commit().await.unwrap();
     f.db.execute_raw(Statement::from_sql_and_values(
         DbBackend::Postgres,
@@ -1008,7 +1028,12 @@ async fn identity_account_profile_returns_only_real_optional_email() {
     .await
     .unwrap();
     let mut tx = repository(&f).begin(&budget(&f)).await.unwrap();
-    let profile = tx.load_profile(actor).await.unwrap().unwrap();
+    // A stored address always wins over the synthesized one.
+    let profile = tx
+        .load_profile(actor, "binhy.email")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(profile.email.as_deref(), Some("actual@example.test"));
     assert_eq!(profile.email_verified, Some(true));
     tx.commit().await.unwrap();

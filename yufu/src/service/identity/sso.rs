@@ -66,6 +66,7 @@ impl SsoService {
             &RestoreBrowser {
                 digest: SecretDigest::of(cookie_secret),
                 issuer: &self.config.issuer(),
+                email_domain: self.config.email_domain(),
                 clock: self.clock.as_ref(),
             },
         )
@@ -97,6 +98,7 @@ impl SsoService {
                 authenticated_at: now(self.clock.as_ref())?,
                 clock: self.clock.as_ref(),
                 issuer: &self.config.issuer(),
+                email_domain: self.config.email_domain(),
                 ttl_seconds: self.config.identity.sso_session_ttl_seconds,
                 entropy: rand::random(),
                 root_id: uuid::Uuid::new_v4(),
@@ -143,6 +145,7 @@ struct AuthenticatePassword<'a> {
     authenticated_at: u64,
     clock: &'a dyn Clock,
     issuer: &'a str,
+    email_domain: &'a str,
     ttl_seconds: u64,
     entropy: [u8; 32],
     root_id: uuid::Uuid,
@@ -287,7 +290,7 @@ impl IdentityUnitOfWork for AuthenticatePassword<'_> {
             })
             .await?;
         let profile = transaction
-            .load_profile(current.account.user_id)
+            .load_profile(current.account.user_id, self.email_domain)
             .await?
             .ok_or(IdentityError::Unauthenticated)?;
         Ok(PasswordLogin {
@@ -304,6 +307,7 @@ impl IdentityUnitOfWork for AuthenticatePassword<'_> {
 struct RestoreBrowser<'a> {
     digest: SecretDigest,
     issuer: &'a str,
+    email_domain: &'a str,
     clock: &'a dyn Clock,
 }
 #[async_trait::async_trait]
@@ -326,7 +330,7 @@ impl IdentityUnitOfWork for RestoreBrowser<'_> {
             .ok_or(IdentityError::Unauthenticated)?;
         root.validate(&account, now(self.clock)?)?;
         let profile = transaction
-            .load_profile(root.user_id)
+            .load_profile(root.user_id, self.email_domain)
             .await?
             .ok_or(IdentityError::Unauthenticated)?;
         Ok(BrowserAuthentication {

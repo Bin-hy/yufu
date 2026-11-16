@@ -363,7 +363,11 @@ pub async fn identity_tokens_for_environment(
     })
     .await
     .unwrap();
-    let profile = tx.load_profile(root.user_id).await.unwrap().unwrap();
+    let profile = tx
+        .load_profile(root.user_id, "binhy.email")
+        .await
+        .unwrap()
+        .unwrap();
     let lifecycle = CredentialLifecycle::new(
         Arc::new(PgSecurityRepository::new(f.db.clone(), f.clock.clone())),
         f.clock.clone(),

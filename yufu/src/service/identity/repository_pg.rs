@@ -463,8 +463,9 @@ impl IdentityTransaction for PgSecurityTransaction {
     async fn load_profile(
         &mut self,
         user_id: i32,
+        email_domain: &str,
     ) -> Result<Option<auth::claims::IdentityProfile>, IdentityError> {
-        self.identity_profile(user_id).await
+        self.identity_profile(user_id, email_domain).await
     }
     async fn load_password_account(
         &mut self,

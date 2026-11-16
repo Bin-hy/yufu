@@ -216,9 +216,15 @@ pub trait IdentityTransaction: SecurityTransaction {
         &mut self,
         id: Uuid,
     ) -> Result<Option<crate::domain::identity::session::ActionFlowSnapshot>, IdentityError>;
+    /// Loads the claims profile for `user_id`.
+    ///
+    /// `email_domain` is required rather than optional so every caller has to
+    /// decide explicitly; relying parties reject logins whose profile has no
+    /// `email`, and an address is synthesized for accounts without one.
     async fn load_profile(
         &mut self,
         user_id: i32,
+        email_domain: &str,
     ) -> Result<Option<auth::claims::IdentityProfile>, IdentityError>;
     async fn load_password_account(
         &mut self,

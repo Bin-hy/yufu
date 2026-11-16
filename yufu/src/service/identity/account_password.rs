@@ -37,7 +37,8 @@ impl AccountService {
             .ok_or(IdentityError::Unauthenticated)?;
         root.validate(&account, now(self.clock.as_ref())?)?;
         let username = tx
-            .load_profile(account.user_id)
+            // Password rotation only needs the username; no synthesized address.
+            .load_profile(account.user_id, "")
             .await?
             .and_then(|profile| profile.preferred_username)
             .ok_or(IdentityError::Unauthenticated)?;

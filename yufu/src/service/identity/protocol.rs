@@ -107,7 +107,7 @@ impl ProtocolService {
                 }
             };
             let profile = transaction
-                .load_profile(user_id)
+                .load_profile(user_id, self.config.email_domain())
                 .await?
                 .ok_or(IdentityError::AccessDenied)?;
             Ok((
@@ -374,7 +374,7 @@ impl IdentityUnitOfWork for Refresh<'_> {
             }
         }
         let profile = transaction
-            .load_profile(user_id)
+            .load_profile(user_id, self.service.config.email_domain())
             .await?
             .ok_or(IdentityError::AccessDenied)?;
         let tokens = self
@@ -522,7 +522,7 @@ impl IdentityUnitOfWork for Exchange<'_> {
                 error => error.into(),
             })?;
         let profile = transaction
-            .load_profile(code.user_id)
+            .load_profile(code.user_id, self.service.config.email_domain())
             .await?
             .ok_or(IdentityError::Unauthenticated)?;
         let tokens = self

@@ -267,6 +267,7 @@ impl PgSecurityTransaction {
     pub(crate) async fn identity_profile(
         &self,
         user_id: i32,
+        email_domain: &str,
     ) -> Result<Option<auth::claims::IdentityProfile>, IdentityError> {
         use super::repository::pg::get;
         let rows = self.identity_rows("SELECT nickname,username,email,email_verified_at FROM \"user\" WHERE id=$1 AND enabled", vec![user_id.into()]).await?;
@@ -274,7 +275,7 @@ impl PgSecurityTransaction {
             .next()
             .map(|row| {
                 let email: Option<String> = get(&row, "email")?;
-                Ok(auth::claims::IdentityProfile {
+                let profile = auth::claims::IdentityProfile {
                     name: get(&row, "nickname")?,
                     preferred_username: Some(get(&row, "username")?),
                     email_verified: if email.is_some() {
@@ -283,7 +284,10 @@ impl PgSecurityTransaction {
                         None
                     },
                     email,
-                })
+                };
+                // Accounts created without an address still need a usable profile:
+                // relying parties reject logins whose email claim is absent.
+                Ok(profile.with_email_domain(email_domain))
             })
             .transpose()
     }

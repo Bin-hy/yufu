@@ -182,7 +182,7 @@ impl AuthorizationService {
                 };
                 if admission_denied {
                     let username = transaction
-                        .load_profile(root.user_id)
+                        .load_profile(root.user_id, self.config.email_domain())
                         .await?
                         .and_then(|profile| profile.preferred_username);
                     return Ok(AuthorizationFlowSummary {
@@ -212,7 +212,7 @@ impl AuthorizationService {
             };
             let username = match root {
                 Some(root) => transaction
-                    .load_profile(root.user_id)
+                    .load_profile(root.user_id, self.config.email_domain())
                     .await?
                     .and_then(|p| p.preferred_username),
                 None => None,
