@@ -15,6 +15,7 @@ export const navigationGroups: NavigationGroup[] = [
         { name: 'developer-apps', title: '我的应用', icon: AppWindow },
     ] },
     { title: '企业管理', qualification: 'administrator', items: [
+        { name: 'admin-overview', title: '管理总览', icon: LayoutDashboard },
         { name: 'admin-accounts', title: '账户与邀请', icon: Users },
         { name: 'admin-groups', title: '用户组', icon: Network },
         { name: 'admin-apps', title: '应用与审批', icon: AppWindow },

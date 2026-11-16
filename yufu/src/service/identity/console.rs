@@ -18,6 +18,14 @@ pub struct ConsoleService {
     repository: Arc<dyn IdentityRepository>,
     clock: Arc<dyn Clock>,
 }
+/// Per-kind list refinements; a filter set on a kind that cannot honor it is rejected.
+#[derive(Default)]
+pub struct ConsoleListFilter<'a> {
+    pub search: Option<&'a str>,
+    pub environment: Option<crate::domain::identity::application::AppEnvironmentKind>,
+    pub enabled: Option<bool>,
+    pub status: Option<&'a str>,
+}
 impl ConsoleService {
     pub fn new(repository: Arc<dyn IdentityRepository>, clock: Arc<dyn Clock>) -> Self {
         Self { repository, clock }
@@ -31,23 +39,43 @@ impl ConsoleService {
         search: Option<&str>,
         budget: &SecurityBudget,
     ) -> Result<ConsoleResult, IdentityError> {
-        self.list_filtered(secret, kind, after, limit, search, None, budget)
-            .await
+        self.list_filtered(
+            secret,
+            kind,
+            after,
+            limit,
+            ConsoleListFilter {
+                search,
+                ..ConsoleListFilter::default()
+            },
+            budget,
+        )
+        .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn list_filtered(
         &self,
         secret: &str,
         kind: ConsoleKind,
         after: Option<&str>,
         limit: u32,
-        search: Option<&str>,
-        environment: Option<crate::domain::identity::application::AppEnvironmentKind>,
+        filter: ConsoleListFilter<'_>,
         budget: &SecurityBudget,
     ) -> Result<ConsoleResult, IdentityError> {
         validate_limit(limit)?;
-        let search = super::search::normalize_query(search)?;
+        if filter.environment.is_some() && !matches!(kind, ConsoleKind::Applications) {
+            return Err(IdentityError::InvalidInput);
+        }
+        if filter.enabled.is_some() && !matches!(kind, ConsoleKind::Accounts) {
+            return Err(IdentityError::InvalidInput);
+        }
+        if filter.status.is_some() && !matches!(kind, ConsoleKind::Deliveries) {
+            return Err(IdentityError::InvalidInput);
+        }
+        let status = validate_delivery_status(filter.status)?;
+        let search = super::search::normalize_query(filter.search)?;
+        let environment = filter.environment;
+        let enabled = filter.enabled;
         super::sso::validate_opaque(secret)?;
         let mut tx = self.repository.begin(budget).await?;
         let result = async {
@@ -117,6 +145,7 @@ impl ConsoleService {
                     after: integer_cursor()?,
                     limit,
                     search,
+                    enabled,
                 },
                 ConsoleKind::Audit => ConsoleQuery::Audit {
                     after: uuid_cursor()?,
@@ -125,10 +154,61 @@ impl ConsoleService {
                 ConsoleKind::Deliveries => ConsoleQuery::Deliveries {
                     after: uuid_cursor()?,
                     limit,
+                    status,
                 },
                 ConsoleKind::AppDeliveries => return Err(IdentityError::InvalidInput),
             };
             tx.console_read(query).await
+        }
+        .await;
+        finish_read(tx, result, budget).await
+    }
+    /// Administrator landing counters. Each section requires its own read
+    /// operation; sections the actor may not read come back as None instead
+    /// of failing the whole overview.
+    pub async fn overview(
+        &self,
+        secret: &str,
+        budget: &SecurityBudget,
+    ) -> Result<ConsoleResult, IdentityError> {
+        super::sso::validate_opaque(secret)?;
+        let mut tx = self.repository.begin(budget).await?;
+        let result = async {
+            let at = now(self.clock.as_ref())?;
+            let actor = read_current_actor(tx.as_mut(), &SecretDigest::of(secret), at).await?;
+            if !actor.account().administrator {
+                return Err(IdentityError::Forbidden);
+            }
+            let mut granted = [false; 5];
+            for (slot, operation) in granted.iter_mut().zip([
+                IdentityOperation::AccountRead,
+                IdentityOperation::DeliveryRead,
+                IdentityOperation::ApplicationRead,
+                IdentityOperation::MigrationRead,
+                IdentityOperation::AuditRead,
+            ]) {
+                *slot = match tx.authorize_identity_operation(&actor, operation).await {
+                    Ok(()) => true,
+                    Err(IdentityError::Forbidden) => false,
+                    Err(error) => return Err(error),
+                };
+            }
+            let audit_since = if granted[4] {
+                Some(
+                    i64::try_from(at.saturating_sub(86_400_000))
+                        .map_err(|_| IdentityError::InvalidInput)?,
+                )
+            } else {
+                None
+            };
+            tx.console_read(ConsoleQuery::Overview {
+                accounts: granted[0],
+                deliveries: granted[1],
+                approvals: granted[2],
+                migrations: granted[3],
+                audit_since,
+            })
+            .await
         }
         .await;
         finish_read(tx, result, budget).await

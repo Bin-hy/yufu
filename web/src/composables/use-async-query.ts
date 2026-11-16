@@ -23,6 +23,12 @@ export interface AsyncQuery<T> {
 export function useAsyncQuery<T>(options: {
     key: MaybeRefOrGetter<string>
     active?: MaybeRefOrGetter<boolean>
+    /**
+     * Data continuity scope: while this stays the same, a key change keeps the
+     * previous result on screen (refresh bar) instead of resetting to the
+     * skeleton. Defaults to the key itself (previous behavior).
+     */
+    preserveKey?: MaybeRefOrGetter<string>
     loader: (signal: AbortSignal) => Promise<T>
 }): AsyncQuery<T> {
     const data = shallowRef<T | null>(null)
@@ -32,10 +38,13 @@ export function useAsyncQuery<T>(options: {
     const failure = shallowRef<BusinessFailure | null>(null)
     const stale = ref(true)
     let sequence = 0,
-        loadedKey = ''
+        loadedKey = '',
+        loadedPreserveKey = ''
     let controller: AbortController | null = null
     let unregister: (() => void) | null = null
     const active = () => options.active === undefined || toValue(options.active)
+    const preserveKey = () =>
+        options.preserveKey === undefined ? toValue(options.key) : toValue(options.preserveKey)
     function cancel() {
         sequence++
         controller?.abort()
@@ -51,11 +60,12 @@ export function useAsyncQuery<T>(options: {
         cancel()
         const id = sequence,
             epoch = sessionEpoch.value,
-            key = toValue(options.key)
+            key = toValue(options.key),
+            scope = preserveKey()
         controller = new AbortController()
         const signal = controller.signal
         unregister = registerRead(controller)
-        const preserving = loadedKey === key && data.value !== null
+        const preserving = loadedPreserveKey === scope && data.value !== null
         if (!preserving) {
             data.value = null
             status.value = 'loading'
@@ -69,6 +79,7 @@ export function useAsyncQuery<T>(options: {
             if (!valid()) return
             data.value = result
             loadedKey = key
+            loadedPreserveKey = scope
             status.value = 'ready'
             stale.value = false
         } catch (e) {
@@ -98,6 +109,7 @@ export function useAsyncQuery<T>(options: {
             if (old && old[2] !== epoch) {
                 data.value = null
                 loadedKey = ''
+                loadedPreserveKey = ''
                 stale.value = true
             }
             if (!enabled) {

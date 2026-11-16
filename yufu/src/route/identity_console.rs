@@ -35,6 +35,7 @@ pub fn get_routes() -> Router<AppState> {
         .route("/admin/audit-events", get(audit))
         .route("/admin/logout-deliveries", get(deliveries))
         .route("/admin/logout-deliveries/{id}/retry", post(retry))
+        .route("/admin/overview", get(overview))
         .route(
             "/developer/apps/{id}/environments/{env}/logout-deliveries",
             get(app_deliveries),
@@ -58,6 +59,15 @@ struct AccountsQuery {
     #[serde(default = "default_limit")]
     limit: u32,
     q: Option<String>,
+    enabled: Option<bool>,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeliveriesQuery {
+    after: Option<String>,
+    #[serde(default = "default_limit")]
+    limit: u32,
+    status: Option<String>,
 }
 fn default_limit() -> u32 {
     25
@@ -132,8 +142,11 @@ async fn apps(
                 ConsoleKind::Applications,
                 page.after.as_deref(),
                 page.limit,
-                page.q.as_deref(),
-                page.environment,
+                crate::service::identity::console::ConsoleListFilter {
+                    search: page.q.as_deref(),
+                    environment: page.environment,
+                    ..Default::default()
+                },
                 &context.budget,
             )
             .await
@@ -191,12 +204,16 @@ async fn accounts(
         let Query(page) = query.map_err(|_| IdentityError::InvalidInput)?;
         let secret = browser::read_sso_cookie(&state.config, &headers)?;
         console(&state)?
-            .list(
+            .list_filtered(
                 &secret,
                 ConsoleKind::Accounts,
                 page.after.as_deref(),
                 page.limit,
-                page.q.as_deref(),
+                crate::service::identity::console::ConsoleListFilter {
+                    search: page.q.as_deref(),
+                    enabled: page.enabled,
+                    ..Default::default()
+                },
                 &context.budget,
             )
             .await
@@ -205,7 +222,44 @@ async fn accounts(
     response(result, context.id)
 }
 list_route!(audit, Audit);
-list_route!(deliveries, Deliveries);
+async fn deliveries(
+    State(state): State<AppState>,
+    Extension(context): Extension<IdentityRequest>,
+    headers: HeaderMap,
+    query: Result<Query<DeliveriesQuery>, QueryRejection>,
+) -> ManagementResponse {
+    let result = async {
+        let Query(page) = query.map_err(|_| IdentityError::InvalidInput)?;
+        let secret = browser::read_sso_cookie(&state.config, &headers)?;
+        console(&state)?
+            .list_filtered(
+                &secret,
+                ConsoleKind::Deliveries,
+                page.after.as_deref(),
+                page.limit,
+                crate::service::identity::console::ConsoleListFilter {
+                    status: page.status.as_deref(),
+                    ..Default::default()
+                },
+                &context.budget,
+            )
+            .await
+    }
+    .await;
+    response(result, context.id)
+}
+async fn overview(
+    State(state): State<AppState>,
+    Extension(context): Extension<IdentityRequest>,
+    headers: HeaderMap,
+) -> ManagementResponse {
+    let result = async {
+        let secret = browser::read_sso_cookie(&state.config, &headers)?;
+        console(&state)?.overview(&secret, &context.budget).await
+    }
+    .await;
+    response(result, context.id)
+}
 async fn app_deliveries(
     State(state): State<AppState>,
     Extension(context): Extension<IdentityRequest>,

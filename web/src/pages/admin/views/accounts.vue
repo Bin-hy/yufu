@@ -5,11 +5,15 @@ import { useRouter } from 'vue-router'
 import { Copy, Link2, Search, UserPlus, Users } from '@lucide/vue'
 import { listAccounts, searchAccounts, setAccount, issueInvitation, issueReset, revokeAction, setCandidate } from '../api'
 import type { EnterpriseAccount, IssuedAction } from '../api/type'
-import { useCursorPage } from '@/composables/use-cursor-page'
-import { useAsyncMutation } from '@/composables/use-async-mutation'
+import { useCursorList } from '@/composables/use-cursor-list'
+import { useRowMutation } from '@/composables/use-row-mutation'
+import { useRouteFilters } from '@/composables/use-route-filters'
 import { useEphemeralResult } from '@/composables/use-ephemeral-result'
+import { errorMessage } from '@/composables/use-async-mutation'
 import { useUserStore } from '@/pinia/stores/user'
 import { emitToast } from '@/utils/toast'
+import { formatUntil, nowSeconds, subscribeClock } from '@/utils/time'
+import { personKindName } from '@/lib/identity-labels'
 import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
@@ -21,33 +25,50 @@ import UiDialog from '@/components/ui/dialog/dialog.vue'
 import EntityPicker from '@/components/ui/entity-picker/entity-picker.vue'
 import type { PickerOption } from '@/components/ui/entity-picker/types'
 import { accountOption } from '@/lib/picker-options'
-const directoryQuery = ref(''),
-    debouncedDirectoryQuery = ref('')
+
+const filters = useRouteFilters({ q: '', status: 'all' })
+const statusFilter = filters.model('status')
+const directoryQuery = ref(filters.values.value.q)
 let directoryTimer: number | undefined
 watch(directoryQuery, (value) => {
     window.clearTimeout(directoryTimer)
     directoryTimer = window.setTimeout(() => {
-        debouncedDirectoryQuery.value = value.trim()
+        void filters.set({ q: value.trim() })
     }, 240)
 })
-onBeforeUnmount(() => window.clearTimeout(directoryTimer))
-const list = useCursorPage<EnterpriseAccount, number>(
-    () => `enterprise-accounts:${debouncedDirectoryQuery.value}`,
+watch(
+    () => filters.values.value.q,
+    (value) => {
+        if (value !== directoryQuery.value.trim()) directoryQuery.value = value
+    },
+)
+const unsubscribeClock = subscribeClock()
+onBeforeUnmount(() => {
+    window.clearTimeout(directoryTimer)
+    unsubscribeClock()
+})
+const list = useCursorList<EnterpriseAccount, number>(
+    () => `enterprise-accounts:${filters.values.value.q}:${filters.values.value.status}`,
     (after, signal) =>
-        listAccounts(after, signal, debouncedDirectoryQuery.value || undefined),
+        listAccounts(
+            after,
+            signal,
+            filters.values.value.q || undefined,
+            filters.values.value.status === 'all'
+                ? undefined
+                : filters.values.value.status === 'active',
+        ),
 ),
-    { data, status, error, refreshing } = list
-watch(debouncedDirectoryQuery, () => list.first())
+    { items, hasMore, status, error, refreshing } = list
 const loadAccountOptions = async (query: string, signal: AbortSignal): Promise<PickerOption[]> => {
     const page = await searchAccounts(query, signal)
     return page.items.map(accountOption)
 }
-const mutation = useAsyncMutation(),
-    { pending, error: writeError } = mutation,
+const mutation = useRowMutation(),
+    { pending, error: writeError, rowPending } = mutation,
     user = useUserStore(),
     router = useRouter()
-const opened = ref(false),
-    statusFilter = ref<'all' | 'active' | 'disabled'>('all')
+const opened = ref(false)
 const form = reactive({
     purpose: 'onboarding' as 'onboarding' | 'qualification',
     target: '' as number | '',
@@ -67,13 +88,29 @@ const candidate = reactive({
 })
 const issued = useEphemeralResult<{ action: IssuedAction; reset: boolean }>(),
     result = issued.value
-const filtered = computed(() =>
-    (data.value?.items ?? []).filter(
-        (account) =>
-            statusFilter.value === 'all' ||
-            (statusFilter.value === 'active' ? account.enabled : !account.enabled),
-    ),
+const expiry = computed(() =>
+    result.value ? formatUntil(result.value.action.expires_at, nowSeconds.value) : '',
 )
+const selectedIds = ref(new Set<number>())
+const allSelected = computed(
+    () => items.value.length > 0 && items.value.every((account) => selectedIds.value.has(account.user_id)),
+)
+watch(items, (accounts) => {
+    const visible = new Set(accounts.map((account) => account.user_id))
+    const kept = new Set([...selectedIds.value].filter((id) => visible.has(id)))
+    if (kept.size !== selectedIds.value.size) selectedIds.value = kept
+})
+function toggleSelect(id: number) {
+    const next = new Set(selectedIds.value)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    selectedIds.value = next
+}
+function toggleAll() {
+    selectedIds.value = allSelected.value
+        ? new Set()
+        : new Set(items.value.map((account) => account.user_id))
+}
 function chooseInvitationTarget(option: PickerOption) {
     form.target = Number(option.value)
     form.targetLabel = option.label
@@ -136,7 +173,8 @@ async function invite() {
     )
 }
 async function reset(account: EnterpriseAccount) {
-    await mutation.run(
+    await mutation.runRow(
+        `${account.user_id}:reset`,
         () => issueReset(account.user_id),
         (value) => {
             result.value = { action: value, reset: true }
@@ -144,13 +182,21 @@ async function reset(account: EnterpriseAccount) {
         },
     )
 }
+async function afterAccountsChanged(disabledSelf: boolean) {
+    await list.refresh()
+    if (disabledSelf) {
+        await user.ensureSession()
+        if (!user.centerSession) await router.replace('/login')
+    }
+}
 async function change(account: EnterpriseAccount, field: 'enabled' | 'developer') {
     const disabling = field === 'enabled' && account.enabled
     const revoking = field === 'developer' && account.developer_enabled
+    const row = `${account.user_id}:${field}`
     const write = () => setAccount(account.user_id, field,
         !(field === 'developer' ? account.developer_enabled : account.enabled), account.revision)
     const saved = disabling || revoking
-        ? await mutation.confirm({
+        ? await mutation.confirmRow(row, {
             title: disabling ? '停用账户' : '撤销开发者资格',
             content: disabling
                 ? `停用 ${account.nickname || account.username} 后将撤销其全部登录会话与应用授权。`
@@ -158,14 +204,51 @@ async function change(account: EnterpriseAccount, field: 'enabled' | 'developer'
             confirmText: disabling ? '停用并撤销登录' : '撤销开发者资格',
             destructive: true,
         }, write)
-        : await mutation.run(write)
+        : await mutation.runRow(row, write)
     if (!saved) return
-    await list.refresh()
-    if (account.user_id === user.centerSession?.user_id) {
-        await user.ensureSession()
-        if (!user.centerSession) await router.replace('/login')
-    }
+    await afterAccountsChanged(disabling && account.user_id === user.centerSession?.user_id)
     emitToast({ type: 'success', message: '账户状态已更新' })
+}
+async function bulkChange(enabled: boolean) {
+    const targets = items.value.filter(
+        (account) => selectedIds.value.has(account.user_id) && account.enabled !== enabled,
+    )
+    if (!targets.length) {
+        emitToast({ type: 'info', message: enabled ? '选中的账户都已是启用状态' : '选中的账户都已是停用状态' })
+        return
+    }
+    const failures: string[] = []
+    let attempted = false
+    const confirmed = await mutation.confirm(
+        {
+            title: enabled ? '批量启用账户' : '批量停用账户',
+            content: enabled
+                ? `将启用 ${targets.length} 个账户。`
+                : `将停用 ${targets.length} 个账户，并撤销它们的全部登录会话与应用授权。`,
+            confirmText: enabled ? `启用 ${targets.length} 个账户` : `停用 ${targets.length} 个账户`,
+            destructive: !enabled,
+        },
+        async () => {
+            attempted = true
+            for (const account of targets) {
+                try {
+                    await setAccount(account.user_id, 'enabled', enabled, account.revision)
+                } catch (error) {
+                    failures.push(`${account.nickname || account.username}：${errorMessage(error)}`)
+                }
+            }
+            if (failures.length)
+                throw new Error(
+                    `${targets.length - failures.length} 个成功，${failures.length} 个失败。${failures[0]}`,
+                )
+        },
+    )
+    if (!attempted) return
+    selectedIds.value = new Set()
+    await afterAccountsChanged(
+        !enabled && targets.some((account) => account.user_id === user.centerSession?.user_id),
+    )
+    if (confirmed) emitToast({ type: 'success', message: `已${enabled ? '启用' : '停用'} ${targets.length} 个账户` })
 }
 
 async function revoke() {
@@ -221,7 +304,7 @@ async function allowCandidate() {
                         <Link2 :size="15" class="text-warning" aria-hidden="true" />
                         {{ result.reset ? '密码重置链接' : '企业邀请链接' }}（仅此次展示）
                     </h2>
-                    <p>到期 {{ new Date(result.action.expires_at * 1000).toLocaleString('zh-CN') }}</p>
+                    <p>{{ expiry }} · {{ new Date(result.action.expires_at * 1000).toLocaleString('zh-CN') }}</p>
                 </div>
                 <span class="status-badge status-warning">一次性</span>
             </header>
@@ -251,22 +334,38 @@ async function allowCandidate() {
                     <button class="filter-chip" type="button" :aria-pressed="statusFilter === 'active'" @click="statusFilter = 'active'">启用</button>
                     <button class="filter-chip" type="button" :aria-pressed="statusFilter === 'disabled'" @click="statusFilter = 'disabled'">停用</button>
                 </div>
-                <span class="toolbar-spacer text-[11px] text-muted-foreground">{{ filtered.length }} 个账户</span>
+                <span class="toolbar-spacer text-[11px] text-muted-foreground">
+                    已加载 {{ items.length }} 个账户{{ hasMore ? '，还有更多' : '' }}
+                </span>
+            </div>
+            <div v-if="selectedIds.size" class="flex flex-wrap items-center gap-2 border-b border-border bg-accent/20 px-5 py-2.5" role="toolbar" aria-label="批量操作">
+                <span class="text-[11px] font-semibold">已选 {{ selectedIds.size }} 个账户</span>
+                <UiButton variant="outline" size="sm" :disabled="pending" @click="bulkChange(true)">批量启用</UiButton>
+                <UiButton variant="outline" size="sm" class="!border-destructive/25 !text-destructive hover:!bg-destructive/5" :disabled="pending" @click="bulkChange(false)">批量停用</UiButton>
+                <UiButton variant="ghost" size="sm" @click="selectedIds = new Set()">取消选择</UiButton>
             </div>
             <DataState
                 :status="status"
                 :error="error"
                 :refreshing="refreshing"
-                :empty="!data?.items.length"
-                empty-title="还没有企业账户"
-                empty-description="签发第一张企业邀请，受控创建账户。"
+                :empty="!items.length"
+                :empty-title="filters.values.value.q || statusFilter !== 'all' ? '没有匹配的账户' : '还没有企业账户'"
+                :empty-description="filters.values.value.q || statusFilter !== 'all' ? '换个关键词，或切换状态筛选。' : '签发第一张企业邀请，受控创建账户。'"
                 :skeleton-rows="3"
                 @retry="list.refresh()"
             >
+                <template #actions>
+                    <UiButton v-if="!filters.values.value.q && statusFilter === 'all'" @click="opened = true">
+                        <UserPlus :size="14" aria-hidden="true" />签发邀请
+                    </UiButton>
+                </template>
                 <div class="table-scroll desktop-table">
                     <table class="data-table">
                         <thead>
                             <tr>
+                                <th class="w-10">
+                                    <input type="checkbox" :checked="allSelected" aria-label="选择本页全部账户" @change="toggleAll" />
+                                </th>
                                 <th>账户</th>
                                 <th>类型</th>
                                 <th>状态</th>
@@ -275,7 +374,15 @@ async function allowCandidate() {
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="account in filtered" :key="account.user_id">
+                            <tr v-for="account in items" :key="account.user_id">
+                                <td>
+                                    <input
+                                        type="checkbox"
+                                        :checked="selectedIds.has(account.user_id)"
+                                        :aria-label="'选择账户 ' + (account.nickname || account.username)"
+                                        @change="toggleSelect(account.user_id)"
+                                    />
+                                </td>
                                 <td>
                                     <div class="flex items-center gap-3">
                                         <span class="list-icon !h-9 !w-9 !rounded-lg text-[11px] font-semibold">
@@ -287,7 +394,7 @@ async function allowCandidate() {
                                         </div>
                                     </div>
                                 </td>
-                                <td>{{ account.person_kind === 'employee' ? '企业员工' : '合作方' }}</td>
+                                <td>{{ personKindName(account.person_kind) }}</td>
                                 <td>
                                     <span class="status-badge" :class="account.enabled ? 'status-success' : 'status-muted'">
                                         {{ account.enabled ? '启用' : '停用' }}
@@ -300,8 +407,8 @@ async function allowCandidate() {
                                 </td>
                                 <td class="cell-actions">
                                     <div class="table-actions">
-                                        <UiButton variant="ghost" size="sm" :disabled="pending" @click="reset(account)">重置密码</UiButton>
-                                        <UiButton variant="ghost" size="sm" :disabled="pending" @click="change(account, 'developer')">
+                                        <UiButton variant="ghost" size="sm" :disabled="pending" :loading="rowPending(`${account.user_id}:reset`)" @click="reset(account)">重置密码</UiButton>
+                                        <UiButton variant="ghost" size="sm" :disabled="pending" :loading="rowPending(`${account.user_id}:developer`)" @click="change(account, 'developer')">
                                             {{ account.developer_enabled ? '撤销开发者' : '授予开发者' }}
                                         </UiButton>
                                         <UiButton
@@ -309,6 +416,7 @@ async function allowCandidate() {
                                             :class="account.enabled ? '!border-destructive/25 !text-destructive hover:!bg-destructive/5' : ''"
                                             size="sm"
                                             :disabled="pending"
+                                            :loading="rowPending(`${account.user_id}:enabled`)"
                                             @click="change(account, 'enabled')"
                                         >
                                             {{ account.enabled ? '停用' : '启用' }}
@@ -320,7 +428,7 @@ async function allowCandidate() {
                     </table>
                 </div>
                 <div class="mobile-list">
-                    <article v-for="account in filtered" :key="account.user_id" class="list-card">
+                    <article v-for="account in items" :key="account.user_id" class="list-card">
                         <div class="flex items-start gap-3">
                             <span class="list-icon">{{ (account.nickname || account.username).slice(0, 1).toUpperCase() }}</span>
                             <div class="min-w-0">
@@ -328,18 +436,17 @@ async function allowCandidate() {
                                     <h3 class="list-title">{{ account.nickname || account.username }}</h3>
                                     <span class="status-badge" :class="account.enabled ? 'status-success' : 'status-muted'">{{ account.enabled ? '启用' : '停用' }}</span>
                                 </div>
-                                <p class="list-meta">{{ account.username }} · #{{ account.user_id }} · {{ account.person_kind === 'employee' ? '企业员工' : '合作方' }}</p>
+                                <p class="list-meta">{{ account.username }} · #{{ account.user_id }} · {{ personKindName(account.person_kind) }}</p>
                             </div>
                         </div>
                         <div class="list-row-actions">
-                            <UiButton variant="outline" size="sm" :disabled="pending" @click="reset(account)">重置密码</UiButton>
-                            <UiButton variant="outline" size="sm" :disabled="pending" @click="change(account, 'developer')">{{ account.developer_enabled ? '撤销开发者' : '授予开发者' }}</UiButton>
-                            <UiButton :variant="account.enabled ? 'outline' : 'default'" :class="account.enabled ? '!border-destructive/25 !text-destructive hover:!bg-destructive/5' : ''" size="sm" :disabled="pending" @click="change(account, 'enabled')">{{ account.enabled ? '停用' : '启用' }}</UiButton>
+                            <UiButton variant="outline" size="sm" :disabled="pending" :loading="rowPending(`${account.user_id}:reset`)" @click="reset(account)">重置密码</UiButton>
+                            <UiButton variant="outline" size="sm" :disabled="pending" :loading="rowPending(`${account.user_id}:developer`)" @click="change(account, 'developer')">{{ account.developer_enabled ? '撤销开发者' : '授予开发者' }}</UiButton>
+                            <UiButton :variant="account.enabled ? 'outline' : 'default'" :class="account.enabled ? '!border-destructive/25 !text-destructive hover:!bg-destructive/5' : ''" size="sm" :disabled="pending" :loading="rowPending(`${account.user_id}:enabled`)" @click="change(account, 'enabled')">{{ account.enabled ? '停用' : '启用' }}</UiButton>
                         </div>
                     </article>
                 </div>
-                <p v-if="!filtered.length" class="empty-filter">没有匹配当前筛选条件的账户。</p>
-                <div v-if="data?.next" class="flex justify-center border-t border-border p-4">
+                <div v-if="hasMore" class="flex justify-center border-t border-border p-4">
                     <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.next()">加载更多账户</UiButton>
                 </div>
             </DataState>

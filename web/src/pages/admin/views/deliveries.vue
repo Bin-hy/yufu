@@ -1,58 +1,78 @@
 <script setup lang="ts">
 defineOptions({ name: 'AdminDeliveries' })
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount } from 'vue'
 import { RefreshCw, RotateCcw, Send, TriangleAlert } from '@lucide/vue'
-import { listDeliveries, retryDelivery } from '../api'
-import { useCursorPage } from '@/composables/use-cursor-page'
-import { useAsyncMutation } from '@/composables/use-async-mutation'
+import { listDeliveries, retryDelivery, getOverview } from '../api'
+import { useCursorList } from '@/composables/use-cursor-list'
+import { useAsyncQuery } from '@/composables/use-async-query'
+import { useRowMutation } from '@/composables/use-row-mutation'
+import { useRouteFilters } from '@/composables/use-route-filters'
+import { usePageContext } from '@/workspace/page-context'
 import { emitToast } from '@/utils/toast'
+import {
+    deliveryRetryable,
+    deliveryStatusName,
+    deliveryStatusTone,
+    deliveryStatuses,
+    environmentName,
+} from '@/lib/identity-labels'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
+import RelativeTime from '@/components/workspace/relative-time.vue'
 import UiButton from '@/components/ui/button/button.vue'
-const list = useCursorPage('logout-deliveries', listDeliveries),
-    { data, status, error, refreshing } = list
-const mutation = useAsyncMutation(),
-    { pending, error: writeError } = mutation
-const statusFilter = ref('all')
-const statusNames: Record<string, string> = {
-    pending: '等待发送',
-    leased: '发送处理中',
-    retry: '等待重试',
-    delivered: '已送达',
-    permanent_failure: '发送失败',
-    expired: '已超过期限',
-}
-const statusTone = (status: string) =>
-    status === 'delivered'
-        ? 'status-success'
-        : ['pending', 'leased', 'retry'].includes(status)
-          ? 'status-info'
-          : status === 'expired'
-            ? 'status-muted'
-            : 'status-danger'
-const statuses = computed(() => {
-    const values = new Set((data.value?.items ?? []).map((item) => item.status))
-    return ['all', ...values]
+
+const context = usePageContext()
+const filters = useRouteFilters({ status: 'all' })
+const statusFilter = filters.model('status')
+const list = useCursorList(
+    () => `logout-deliveries:${filters.values.value.status}`,
+    (after, signal) =>
+        listDeliveries(
+            after,
+            signal,
+            filters.values.value.status === 'all' ? undefined : filters.values.value.status,
+        ),
+),
+    { items, hasMore, status, error, refreshing } = list
+const overview = useAsyncQuery({
+    key: 'admin-overview:deliveries',
+    active: () => context.active.value,
+    loader: (signal) => getOverview(signal),
 })
-const filtered = computed(() =>
-    statusFilter.value === 'all'
-        ? (data.value?.items ?? [])
-        : (data.value?.items ?? []).filter((item) => item.status === statusFilter.value),
+const stats = computed(() => overview.data.value?.deliveries ?? null)
+const attention = computed(() =>
+    stats.value
+        ? stats.value.permanent_failure + stats.value.retry + stats.value.expired
+        : null,
 )
-const failureCount = computed(
-    () =>
-        data.value?.items.filter((item) =>
-            ['permanent_failure', 'retry', 'expired'].includes(item.status),
-        ).length ?? 0,
+const inFlight = computed(() =>
+    stats.value
+        ? stats.value.pending + stats.value.leased + stats.value.retry > 0
+        : items.value.some((item) => ['pending', 'leased', 'retry'].includes(item.status)),
 )
+/** In-flight states change on their own; poll softly while the page is visible. */
+const POLL_INTERVAL = 20_000
+const timer = setInterval(() => {
+    if (!context.active.value || document.hidden || !inFlight.value || refreshing.value) return
+    void list.refresh()
+    void overview.refresh()
+}, POLL_INTERVAL)
+onBeforeUnmount(() => clearInterval(timer))
+const mutation = useRowMutation(),
+    { pending, error: writeError, rowPending } = mutation
 async function retry(id: string) {
-    await mutation.run(
+    await mutation.runRow(
+        id,
         () => retryDelivery(id),
         async () => {
-            await list.refresh()
+            await Promise.all([list.refresh(), overview.refresh()])
             emitToast({ type: 'success', message: '已按原目标重新排队' })
         },
     )
+}
+function reload() {
+    void overview.refresh()
+    return list.refresh()
 }
 </script>
 <template>
@@ -62,27 +82,27 @@ async function retry(id: string) {
             eyebrow="DELIVERIES"
             description="通知结果用于运维追踪。授权撤销在通知发送前已经生效，投递失败不会影响本地退出。"
         >
-            <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.first()">
+            <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="reload">
                 <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />重新读取
             </UiButton>
         </PageHeader>
         <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
 
-        <div class="metric-grid mb-5">
+        <div v-if="stats" class="metric-grid mb-5">
             <article class="metric-card">
-                <span class="metric-label"><Send :size="13" aria-hidden="true" />当前页记录</span>
-                <strong class="metric-value">{{ data?.items.length ?? 0 }}</strong>
-                <span class="metric-meta">已加载的退出通知</span>
+                <span class="metric-label"><Send :size="13" aria-hidden="true" />进行中</span>
+                <strong class="metric-value">{{ stats.pending + stats.leased + stats.retry }}</strong>
+                <span class="metric-meta">等待发送 {{ stats.pending }} · 处理中 {{ stats.leased }} · 待重试 {{ stats.retry }}</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><TriangleAlert :size="13" aria-hidden="true" />需要关注</span>
-                <strong class="metric-value">{{ failureCount }}</strong>
-                <span class="metric-meta">失败、待重试或已过期</span>
+                <strong class="metric-value" :class="attention ? '!text-destructive' : ''">{{ attention }}</strong>
+                <span class="metric-meta">全库统计：失败 {{ stats.permanent_failure }} · 待重试 {{ stats.retry }} · 过期 {{ stats.expired }}</span>
             </article>
             <article class="metric-card">
-                <span class="metric-label"><RotateCcw :size="13" aria-hidden="true" />重试策略</span>
-                <strong class="metric-value !text-base">按原目标排队</strong>
-                <span class="metric-meta">重试不会撤销已生效的本地授权</span>
+                <span class="metric-label"><RotateCcw :size="13" aria-hidden="true" />已送达</span>
+                <strong class="metric-value">{{ stats.delivered }}</strong>
+                <span class="metric-meta">重试按原目标排队，不会撤销已生效的本地授权</span>
             </article>
         </div>
 
@@ -90,29 +110,35 @@ async function retry(id: string) {
             <div class="table-toolbar">
                 <div class="filter-chips" role="group" aria-label="投递状态筛选">
                     <button
-                        v-for="value in statuses"
+                        type="button"
+                        class="filter-chip"
+                        :aria-pressed="statusFilter === 'all'"
+                        @click="statusFilter = 'all'"
+                    >全部</button>
+                    <button
+                        v-for="value in deliveryStatuses"
                         :key="value"
                         type="button"
                         class="filter-chip"
                         :aria-pressed="statusFilter === value"
                         @click="statusFilter = value"
                     >
-                        {{ value === 'all' ? '全部' : statusNames[value] || value }}
+                        {{ deliveryStatusName(value) }}
                     </button>
                 </div>
-                <span class="toolbar-spacer text-[11px] text-muted-foreground">{{ filtered.length }} 条通知</span>
+                <span class="toolbar-spacer text-[11px] text-muted-foreground">已加载 {{ items.length }} 条{{ hasMore ? '，还有更多' : '' }}</span>
             </div>
             <DataState
                 :status="status"
                 :error="error"
                 :refreshing="refreshing"
-                :empty="!data?.items.length"
-                empty-title="暂无退出通知"
-                empty-description="应用登记退出通知地址后，投递结果会显示在这里。"
+                :empty="!items.length"
+                :empty-title="statusFilter === 'all' ? '暂无退出通知' : '该状态下没有通知'"
+                :empty-description="statusFilter === 'all' ? '应用登记退出通知地址后，投递结果会显示在这里。' : '切换到其他状态，或查看全部通知。'"
                 :skeleton-rows="3"
                 @retry="list.refresh()"
             >
-                <div v-if="filtered.length" class="table-scroll desktop-table">
+                <div class="table-scroll desktop-table">
                     <table class="data-table">
                         <thead>
                             <tr>
@@ -124,27 +150,27 @@ async function retry(id: string) {
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="delivery in filtered" :key="delivery.id">
+                            <tr v-for="delivery in items" :key="delivery.id">
                                 <td>
                                     <p class="cell-primary">{{ delivery.name }}</p>
-                                    <p class="cell-muted mt-0.5">{{ delivery.environment === 'development' ? '开发环境' : '生产环境' }}</p>
+                                    <p class="cell-muted mt-0.5">{{ environmentName(delivery.environment) }}</p>
                                 </td>
                                 <td>
-                                    <span class="status-badge" :class="statusTone(delivery.status)">{{ statusNames[delivery.status] || delivery.status }}</span>
+                                    <span class="status-badge" :class="deliveryStatusTone(delivery.status)">{{ deliveryStatusName(delivery.status) }}</span>
                                     <p v-if="delivery.last_error_code" class="cell-muted mt-1">{{ delivery.last_error_code }}</p>
                                 </td>
                                 <td>{{ delivery.attempt_count }} 次</td>
                                 <td class="cell-muted">
-                                    {{ new Date(delivery.created_at * 1000).toLocaleString('zh-CN') }}
-                                    <span v-if="delivery.delivered_at"> → {{ new Date(delivery.delivered_at * 1000).toLocaleString('zh-CN') }}</span>
+                                    <RelativeTime :at="delivery.created_at" />
+                                    <template v-if="delivery.delivered_at"> → <RelativeTime :at="delivery.delivered_at" /></template>
                                 </td>
                                 <td class="cell-actions">
                                     <UiButton
-                                        v-if="!['delivered', 'expired', 'leased'].includes(delivery.status)"
+                                        v-if="deliveryRetryable(delivery.status)"
                                         variant="outline"
                                         size="sm"
                                         :disabled="pending"
-                                        :loading="pending"
+                                        :loading="rowPending(delivery.id)"
                                         @click="retry(delivery.id)"
                                     >按原目标重新排队</UiButton>
                                 </td>
@@ -153,27 +179,26 @@ async function retry(id: string) {
                     </table>
                 </div>
                 <div class="mobile-list">
-                    <article v-for="delivery in filtered" :key="delivery.id" class="list-card">
+                    <article v-for="delivery in items" :key="delivery.id" class="list-card">
                         <div class="min-w-0">
                             <div class="flex flex-wrap items-center gap-2">
                                 <h3 class="list-title">{{ delivery.name }}</h3>
-                                <span class="status-badge" :class="statusTone(delivery.status)">{{ statusNames[delivery.status] || delivery.status }}</span>
+                                <span class="status-badge" :class="deliveryStatusTone(delivery.status)">{{ deliveryStatusName(delivery.status) }}</span>
                             </div>
-                            <p class="list-meta">{{ delivery.environment === 'development' ? '开发' : '生产' }} · 尝试 {{ delivery.attempt_count }} 次{{ delivery.last_error_code ? ' · ' + delivery.last_error_code : '' }}</p>
-                            <p class="list-meta">建立 {{ new Date(delivery.created_at * 1000).toLocaleString('zh-CN') }}</p>
+                            <p class="list-meta">{{ environmentName(delivery.environment) }} · 尝试 {{ delivery.attempt_count }} 次{{ delivery.last_error_code ? ' · ' + delivery.last_error_code : '' }}</p>
+                            <p class="list-meta">建立 <RelativeTime :at="delivery.created_at" /></p>
                         </div>
                         <UiButton
-                            v-if="!['delivered', 'expired', 'leased'].includes(delivery.status)"
+                            v-if="deliveryRetryable(delivery.status)"
                             variant="outline"
                             size="sm"
                             :disabled="pending"
-                            :loading="pending"
+                            :loading="rowPending(delivery.id)"
                             @click="retry(delivery.id)"
                         >按原目标重新排队</UiButton>
                     </article>
                 </div>
-                <p v-if="!filtered.length" class="empty-filter">没有匹配当前筛选条件的通知。</p>
-                <div v-if="data?.next" class="flex justify-center border-t border-border p-4">
+                <div v-if="hasMore" class="flex justify-center border-t border-border p-4">
                     <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.next()">加载更多通知</UiButton>
                 </div>
             </DataState>

@@ -383,7 +383,9 @@ async function assignGroup(
   await page.locator('#detail-environment').waitFor({ state: 'visible' })
   await page.selectOption('#assign-kind', 'group')
   await selectSearchOption(page, '#assign-id', groupId, groupId)
-  const present = page.getByLabel('授予访问（取消为移除）')
+  // Anchored on the input id, not the visible copy: the surrounding wording
+  // changed once already and a label-based selector turns that into a timeout.
+  const present = page.locator('#assign-present')
   if (!(await present.isChecked())) await present.check()
   const responsePromise = page.waitForResponse(
     (response) =>

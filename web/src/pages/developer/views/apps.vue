@@ -648,6 +648,11 @@ async function copy(value: string, label: string) {
                                     </span>
                                 </li>
                             </ul>
+                            <p class="mt-2 text-[11px] text-muted-foreground">
+                                可访问 · 直接分配 {{ app.access.assignments.filter((entry) => entry.target.kind === 'user').length }}
+                                · 用户组 {{ app.access.assignments.filter((entry) => entry.target.kind === 'group').length }}
+                                · 测试账户 {{ app.access.test_users.length }}
+                            </p>
                         </div>
                         <ArrowRight :size="16" class="mt-1 shrink-0 text-muted-foreground/45" aria-hidden="true" />
                     </RouterLink>

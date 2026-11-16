@@ -119,6 +119,10 @@ impl PgSecurityTransaction {
         if environments.len() != 2 {
             return Err(IdentityError::DependencyUnavailable);
         }
+        let assignment_summaries = self
+            .identity_assignment_target_summaries(application_id)
+            .await?;
+        let test_users = self.identity_test_user_summaries(application_id).await?;
         Ok(ApplicationWorkspace {
             application_id,
             app_key: get(&app, "app_key")?,
@@ -131,6 +135,10 @@ impl PgSecurityTransaction {
             owner_user_id: owner_id.ok_or(IdentityError::OwnerRequired)?,
             members: summaries,
             environments,
+            access: ApplicationAccessSummary {
+                assignments: assignment_summaries,
+                test_users,
+            },
             locks: IdentityLockScope::new(keys)?,
         })
     }

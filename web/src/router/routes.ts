@@ -1,6 +1,6 @@
 import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layouts/index.vue'
-const queryKeys = ['page_number', 'page_size', 'q', 'roleId', 'application_id', 'user_id']
+const queryKeys = ['page_number', 'page_size', 'q', 'roleId', 'application_id', 'user_id', 'status', 'result', 'from', 'to', 'actor', 'action', 'object_kind']
 const meta = (title: string, extra = {}) => ({
     title,
     workspace: true,
@@ -15,6 +15,7 @@ export const workspaceRoutes: RouteRecordRaw[] = [
     { path: '/account/sessions', name: 'account-sessions', component: () => import('@/pages/account/views/sessions.vue'), meta: meta('登录会话') },
     { path: '/developer/apps', name: 'developer-apps', component: () => import('@/pages/developer/views/apps.vue'), meta: meta('开发者控制台', { qualification: 'developer' }) },
     { path: '/developer/apps/:id', name: 'developer-app', component: () => import('@/pages/developer/views/app-detail.vue'), meta: meta('应用接入', { qualification: 'developer', tabIdentity: 'params', tabParamKeys: ['id'] }) },
+    { path: '/admin', name: 'admin-overview', component: () => import('@/pages/admin/views/overview.vue'), meta: meta('管理总览', { qualification: 'administrator' }) },
     { path: '/admin/accounts', name: 'admin-accounts', component: () => import('@/pages/admin/views/accounts.vue'), meta: meta('企业账户', { qualification: 'administrator' }) },
     { path: '/admin/apps', name: 'admin-apps', component: () => import('@/pages/developer/views/apps.vue'), meta: meta('企业应用', { qualification: 'administrator' }) },
     { path: '/admin/apps/:id', name: 'admin-app', component: () => import('@/pages/developer/views/app-detail.vue'), meta: meta('企业应用配置', { qualification: 'administrator', tabIdentity: 'params', tabParamKeys: ['id'] }) },

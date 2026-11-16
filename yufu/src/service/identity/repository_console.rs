@@ -18,12 +18,13 @@ impl PgSecurityTransaction {
                 after,
                 limit,
                 search,
+                enabled,
             } => {
                 let pattern = search.clone();
                 let exact_id = search
                     .as_deref()
                     .and_then(|value| value.parse::<i32>().ok());
-                let rows=self.identity_rows("SELECT id,username,nickname,enabled,person_kind,developer_enabled,identity_revision FROM \"user\" u WHERE id>$1 AND ($3::text IS NULL OR u.id=$4 OR POSITION(lower($3) IN lower(u.username))>0 OR POSITION(lower($3) IN lower(COALESCE(u.nickname,'')))>0) ORDER BY id LIMIT $2",vec![after.into(),i64::from(limit+1).into(),pattern.into(),exact_id.into()]).await?;
+                let rows=self.identity_rows("SELECT id,username,nickname,enabled,person_kind,developer_enabled,identity_revision FROM \"user\" u WHERE id>$1 AND ($3::text IS NULL OR u.id=$4 OR POSITION(lower($3) IN lower(u.username))>0 OR POSITION(lower($3) IN lower(COALESCE(u.nickname,'')))>0) AND ($5::bool IS NULL OR u.enabled=$5) ORDER BY id LIMIT $2",vec![after.into(),i64::from(limit+1).into(),pattern.into(),exact_id.into(),enabled.into()]).await?;
                 let items = rows
                     .into_iter()
                     .map(|r| {
@@ -204,10 +205,81 @@ impl PgSecurityTransaction {
                     .collect::<Result<Vec<_>, IdentityError>>()?;
                 Ok(ConsoleResult::Audit(page(items, limit, |r| r.id)))
             }
-            ConsoleQuery::Deliveries { after, limit } => {
-                let rows=self.identity_rows("SELECT d.id,d.event_id,d.status,d.attempt_count,d.next_attempt_at,d.last_error_code,d.created_at,d.delivered_at,e.application_id,e.kind,a.name FROM identity_logout_delivery d JOIN identity_oidc_rp_session p ON p.id=d.rp_session_id JOIN identity_app_environment e ON e.id=p.environment_id JOIN application a ON a.id=e.application_id WHERE ($1::uuid IS NULL OR d.id>$1) ORDER BY d.id LIMIT $2",vec![after.into(),i64::from(limit+1).into()]).await?;
+            ConsoleQuery::Deliveries {
+                after,
+                limit,
+                status,
+            } => {
+                let rows=self.identity_rows("SELECT d.id,d.event_id,d.status,d.attempt_count,d.next_attempt_at,d.last_error_code,d.created_at,d.delivered_at,e.application_id,e.kind,a.name FROM identity_logout_delivery d JOIN identity_oidc_rp_session p ON p.id=d.rp_session_id JOIN identity_app_environment e ON e.id=p.environment_id JOIN application a ON a.id=e.application_id WHERE ($1::uuid IS NULL OR d.id>$1) AND ($3::text IS NULL OR d.status=$3) ORDER BY d.id LIMIT $2",vec![after.into(),i64::from(limit+1).into(),status.into()]).await?;
                 let items = console_deliveries(rows)?;
                 Ok(ConsoleResult::Deliveries(page(items, limit, |r| r.id)))
+            }
+            ConsoleQuery::Overview {
+                accounts,
+                deliveries,
+                approvals,
+                migrations,
+                audit_since,
+            } => {
+                fn count(row: &sea_orm::QueryResult, column: &str) -> Result<u64, IdentityError> {
+                    unsigned(get::<i64>(row, column)?)
+                }
+                let accounts = if accounts {
+                    let row = self.identity_one("SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE NOT enabled) AS disabled, COUNT(*) FILTER (WHERE developer_enabled) AS developers FROM \"user\"", vec![]).await?;
+                    Some(AccountOverview {
+                        total: count(&row, "total")?,
+                        disabled: count(&row, "disabled")?,
+                        developers: count(&row, "developers")?,
+                    })
+                } else {
+                    None
+                };
+                let deliveries = if deliveries {
+                    let row = self.identity_one("SELECT COUNT(*) FILTER (WHERE status='pending') AS pending, COUNT(*) FILTER (WHERE status='leased') AS leased, COUNT(*) FILTER (WHERE status='retry') AS retry, COUNT(*) FILTER (WHERE status='delivered') AS delivered, COUNT(*) FILTER (WHERE status='permanent_failure') AS permanent_failure, COUNT(*) FILTER (WHERE status='expired') AS expired FROM identity_logout_delivery", vec![]).await?;
+                    Some(DeliveryOverview {
+                        pending: count(&row, "pending")?,
+                        leased: count(&row, "leased")?,
+                        retry: count(&row, "retry")?,
+                        delivered: count(&row, "delivered")?,
+                        permanent_failure: count(&row, "permanent_failure")?,
+                        expired: count(&row, "expired")?,
+                    })
+                } else {
+                    None
+                };
+                let approvals = if approvals {
+                    let row = self.identity_one("SELECT COUNT(*) AS pending FROM identity_app_approval WHERE status='pending'", vec![]).await?;
+                    Some(ApprovalOverview {
+                        pending: count(&row, "pending")?,
+                    })
+                } else {
+                    None
+                };
+                let migrations = if migrations {
+                    let row = self.identity_one("SELECT (SELECT COUNT(*) FROM oauth_client WHERE management_state='legacy_unmanaged') AS unmanaged, (SELECT COUNT(*) FROM identity_migration_conflict WHERE resolved_at IS NULL) AS unresolved_conflicts", vec![]).await?;
+                    Some(MigrationOverview {
+                        unmanaged: count(&row, "unmanaged")?,
+                        unresolved_conflicts: count(&row, "unresolved_conflicts")?,
+                    })
+                } else {
+                    None
+                };
+                let audit = match audit_since {
+                    Some(since) => {
+                        let row = self.identity_one("SELECT COUNT(*) AS recent_failures FROM identity_audit_event WHERE happened_at>=$1 AND result<>'success'", vec![since.into()]).await?;
+                        Some(AuditOverview {
+                            recent_failures: count(&row, "recent_failures")?,
+                        })
+                    }
+                    None => None,
+                };
+                Ok(ConsoleResult::Overview(ConsoleOverview {
+                    accounts,
+                    deliveries,
+                    approvals,
+                    migrations,
+                    audit,
+                }))
             }
             ConsoleQuery::AppDeliveries {
                 application_id,
