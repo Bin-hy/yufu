@@ -58,6 +58,36 @@ class SkillDistributionTests(unittest.TestCase):
                 self.assertIn(key, versions)
                 self.assertRegex(versions[key], r'^[0-9a-f]{64}$')
 
+    def test_skill_assets_are_tracked(self):
+        if shutil.which('git') is None:
+            self.skipTest('git is not available')
+        assets = SKILL / 'assets'
+        files = sorted(p.relative_to(ROOT).as_posix() for p in assets.rglob('*') if p.is_file())
+        self.assertTrue(files, 'the skill ships no assets')
+        result = subprocess.run(
+            ['git', 'ls-files', '--', *files],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tracked = set(result.stdout.splitlines())
+        missing = [path for path in files if path not in tracked]
+        self.assertEqual(missing, [], 'skill assets must be committed; a .gitignore rule may be hiding them')
+
+    def test_deploy_template_covers_rendered_placeholders(self):
+        template = (SKILL / 'assets' / 'yufu.toml.tmpl').read_text(encoding='utf-8')
+        for key in ('PORT', 'ISSUER', 'ADMIN_USER', 'ADMIN_PASSWORD', 'WORKDIR', 'DATABASE_URL'):
+            with self.subTest(key=key):
+                self.assertIn('{{' + key + '}}', template)
+
+    def test_skill_does_not_reference_the_ignored_template_name(self):
+        offenders = []
+        for path in SKILL.rglob('*'):
+            if not path.is_file() or path.suffix not in {'.sh', '.md'}:
+                continue
+            if 'yufu.local.toml.tmpl' in path.read_text(encoding='utf-8', errors='ignore'):
+                offenders.append(str(path.relative_to(SKILL)))
+        self.assertEqual(offenders, [])
+
     def test_skill_does_not_reference_monorepo_examples(self):
         offenders = []
         for path in SKILL.rglob('*'):

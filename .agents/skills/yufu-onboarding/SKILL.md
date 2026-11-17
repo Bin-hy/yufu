@@ -124,6 +124,15 @@ bash "$SKILL_DIR/scripts/register-app.sh" --mode api
 先跑 `verify-issuer.sh` 排除 issuer 层问题，再查应用层。
 每个脚本失败时输出阶段名与至少一条可执行排查命令。
 
+## 端口
+
+默认端口被占用时脚本会自动改用下一个空闲端口，并把最终端口写入 `state.env`；不会停止其他容器、隧道或服务。
+显式设置 `YUFU_PORT` / `YUFU_PG_PORT` 时以设置为准。Web 示例应用的端口由 `register-app.sh` 从 `8080` 起选择，
+记录为 `YUFU_APP_PORT`，启动时用 `ADDR` 对齐，`REDIRECT_URI` 必须与注册值一致。
+
+数据库会记住首次启动时的 issuer，已初始化的库换端口会启动失败；`deploy-local.sh` 会提前报错。
+此时用回原端口，或换新的 `YUFU_DB_NAME`。
+
 ## 状态与文件
 
 - 状态：`.yufu-onboarding/state.env`（权限 600，不要提交；把 `.yufu-onboarding/` 加入项目 `.gitignore`）。

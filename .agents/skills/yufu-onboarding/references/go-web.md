@@ -13,8 +13,12 @@
 | `REDIRECT_URI` | 注册时的 `YUFU_REDIRECT_URI`，必须逐字符一致 |
 | `AUDIENCE` | `state.env` 的 `YUFU_AUDIENCE` |
 | `SCOPES` | 默认 `openid profile email` |
+| `ADDR` | 可选；默认 `127.0.0.1:8080`，冲突时用 `state.env` 的 `YUFU_APP_PORT` |
 
 secret 只从服务端环境读取，不进入前端、不写进仓库、不打印到日志。
+
+`register-app.sh` 在 `8080` 被占用时会从 `8080` 起选择空闲端口，并写入 `state.env` 的 `YUFU_APP_PORT`。
+启动应用时设置 `ADDR=127.0.0.1:$YUFU_APP_PORT`；`REDIRECT_URI` 必须与注册值逐字符一致。
 
 ## 2. `config.go`
 
@@ -355,7 +359,7 @@ func main() {
 ## 7. 验证
 
 1. `go build ./...` 通过。
-2. 启动后访问 `/login`，应在 yufu 完成登录并回到 `/api/me`，看到稳定 `sub`。
+2. 启动后访问 `/login`（`ADDR` 指定的地址），应在 yufu 完成登录并回到 `/api/me`，看到稳定 `sub`。
 3. 访问 `/logout` 后，再访问 `/api/me` 应重新要求登录。
 4. 不要用 email 或 username 作为本地用户主键；`iss + sub` 才稳定。
 

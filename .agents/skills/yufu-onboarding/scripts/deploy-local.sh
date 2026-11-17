@@ -17,8 +17,10 @@ else
     COMPOSE_FILE="$YUFU_SKILL_DIR/assets/compose.postgres.yaml"
     COMPOSE_PROJECT=yufu-onboarding
 fi
-PORT=${YUFU_PORT:-14000}
-PG_PORT=${YUFU_PG_PORT:-55433}
+STATE_PORT=$(state_get YUFU_PORT 2>/dev/null || true)
+STATE_PG_PORT=$(state_get YUFU_PG_PORT 2>/dev/null || true)
+PORT=${YUFU_PORT:-${STATE_PORT:-14000}}
+PG_PORT=${YUFU_PG_PORT:-${STATE_PG_PORT:-55433}}
 DB_NAME=${YUFU_DB_NAME:-yufu_onboarding}
 ADMIN_USER=${YUFU_ADMIN_USERNAME:-onboard-admin}
 ADMIN_PASSWORD=${YUFU_ADMIN_PASSWORD:-onboard-admin-password}
@@ -26,7 +28,7 @@ ISSUER=${YUFU_ISSUER:-http://127.0.0.1:$PORT}
 CONFIG="$YUFU_WORKDIR/yufu.toml"
 LOG="$YUFU_WORKDIR/yufu.log"
 KEY="$YUFU_WORKDIR/oidc_rsa_private.pem"
-DB_URL="postgres://postgres:postgres@127.0.0.1:$PG_PORT/$DB_NAME"
+TEMPLATE="$YUFU_SKILL_DIR/assets/yufu.toml.tmpl"
 
 state_init
 
@@ -101,7 +103,16 @@ if issuer_matches; then
     exit 0
 fi
 
-if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+if [ -z "${YUFU_PORT:-}" ] && [ -z "${YUFU_ISSUER:-}" ] && port_busy "$PORT"; then
+    next_port=$(pick_port "$PORT" 20 || true)
+    if [ -n "$next_port" ]; then
+        log_info "port $PORT is busy; using $next_port (set YUFU_PORT to override)"
+        PORT=$next_port
+        ISSUER="http://127.0.0.1:$PORT"
+    fi
+fi
+
+if port_busy "$PORT"; then
     die "port $PORT is in use by another process; set YUFU_PORT or stop it"
 fi
 
@@ -116,12 +127,38 @@ fi
 need_cmd curl
 need_cmd python3
 
+if [ -z "${YUFU_PG_PORT:-}" ]; then
+    mapped=$(pg_published_port 2>/dev/null || true)
+    if [ -n "$mapped" ]; then
+        if [ "$mapped" != "$PG_PORT" ]; then
+            log_info "reusing postgres_yufu on host port $mapped"
+            PG_PORT=$mapped
+        fi
+    elif port_busy "$PG_PORT"; then
+        next_port=$(pick_port "$PG_PORT" 20 || true)
+        [ -n "$next_port" ] || die "no free port near $PG_PORT; set YUFU_PG_PORT"
+        log_info "port $PG_PORT is busy; using $next_port for Postgres"
+        PG_PORT=$next_port
+    fi
+fi
+DB_URL="postgres://postgres:postgres@127.0.0.1:$PG_PORT/$DB_NAME"
+
 ensure_postgres "$COMPOSE_FILE" "$COMPOSE_PROJECT" "$PG_PORT"
 
 if ! docker exec postgres_yufu \
     psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1; then
     log_info "creating database $DB_NAME"
     docker exec postgres_yufu createdb -U postgres "$DB_NAME"
+fi
+
+# yufu pins the issuer in identity_provider and exits at startup when a reused
+# database was initialized under a different address.
+persisted_issuer=$(docker exec postgres_yufu \
+    psql -U postgres -d "$DB_NAME" -tAc "SELECT issuer FROM identity_provider WHERE id=1" \
+    2>/dev/null || true)
+persisted_issuer=$(printf '%s' "$persisted_issuer" | tr -d '[:space:]')
+if [ -n "$persisted_issuer" ] && [ "$persisted_issuer" != "$ISSUER" ]; then
+    die "database $DB_NAME was initialized with issuer $persisted_issuer; yufu refuses to start under $ISSUER. Reuse the original port/issuer, pick a different YUFU_DB_NAME, or drop the old database."
 fi
 
 if [ ! -f "$KEY" ]; then
@@ -131,8 +168,9 @@ if [ ! -f "$KEY" ]; then
     chmod 600 "$KEY"
 fi
 
+[ -f "$TEMPLATE" ] || die "missing skill asset: $TEMPLATE (reinstall the skill)"
 log_info "rendering $CONFIG"
-python3 - "$YUFU_SKILL_DIR/assets/yufu.local.toml.tmpl" "$CONFIG" \
+python3 - "$TEMPLATE" "$CONFIG" \
     "PORT=$PORT" "ISSUER=$ISSUER" "ADMIN_USER=$ADMIN_USER" \
     "ADMIN_PASSWORD=$ADMIN_PASSWORD" "WORKDIR=$YUFU_WORKDIR" "DATABASE_URL=$DB_URL" <<'PY'
 import sys

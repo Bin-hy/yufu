@@ -31,9 +31,9 @@ bash "$SKILL_DIR/scripts/verify-issuer.sh"
 
 1. 若 `http://127.0.0.1:14000` 的 discovery 已返回同一 issuer，直接复用。
 2. 启动（或复用）`postgres_yufu`：仓库内用根 `compose.yaml`，安装副本用 Skill 自带的
-   `assets/compose.postgres.yaml`；宿主机端口 `55433`。
+   `assets/compose.postgres.yaml`；宿主机端口 `55433`（被占用时自动改用空闲端口并写入 `state.env`）。
 3. 数据库不存在则创建 `yufu_onboarding`。
-4. 用 `assets/yufu.local.toml.tmpl` 渲染配置到 `.yufu-onboarding/yufu.toml`。
+4. 用 `assets/yufu.toml.tmpl` 渲染配置到 `.yufu-onboarding/yufu.toml`。
 5. 缺少签名私钥时用 `openssl genpkey` 生成 2048 位 PKCS#8 私钥。
 6. 选择二进制：`YUFU_BIN` → 检测到的源码产物（不存在时用本地 Rust 工具链构建）
    → 本地缓存 → 按平台下载 `versions.env` 中的固定版本并校验 SHA-256。
@@ -68,6 +68,31 @@ bash "$SKILL_DIR/scripts/verify-issuer.sh"
 | `YUFU_BIN` | 空 | 指定已有二进制（离线可用） |
 | `YUFU_TARGET` | 按 `uname` 推导 | 覆盖平台；必须是支持列表之一 |
 | `YUFU_WORKDIR` | `./.yufu-onboarding` | 状态、配置、日志、二进制缓存 |
+
+未显式设置 `YUFU_PORT` / `YUFU_PG_PORT` 时，脚本会在默认端口被占用后自动递增，并把最终值写入
+`state.env`；显式设置时严格使用给定值，端口冲突直接报错。
+
+## 端口冲突
+
+脚本不会停止机器上已有的服务。默认端口被占用时：
+
+- `YUFU_PORT`（默认 `14000`）被占用：改用下一个空闲端口，issuer 随之变化并写入 `state.env`。
+- `YUFU_PG_PORT`（默认 `55433`）被占用：优先复用已发布的 `postgres_yufu`，否则改用下一个空闲端口。
+- 显式设置 `YUFU_PORT` 或 `YUFU_PG_PORT` 时以设置为准；端口仍被占用则报错退出，不会自动改值。
+
+Web 示例应用的端口由 `register-app.sh` 从 `8080` 起选择空闲端口，并记录为 `YUFU_APP_PORT`；
+启动应用时用 `ADDR=127.0.0.1:$YUFU_APP_PORT`，且回调地址必须与注册值逐字符一致。
+
+### issuer 与数据库绑定
+
+yufu 在 `identity_provider` 中固定首次启动时的 issuer。已被初始化过的数据库**不能**换端口或 issuer
+复用——服务会在启动阶段因 issuer 不匹配而退出。脚本会在启动前检查并直接报错，此时三种处理方式：
+
+- 用回原来的 `YUFU_PORT` / `YUFU_ISSUER`；
+- 换一个 `YUFU_DB_NAME`（全新库）；
+- 明确要丢弃旧库数据时，自行删除旧数据库后重建。
+
+不要在报错后反复重启同一配置，日志里的 `identity initialization failed` 就是这个原因。
 
 ## 就绪判据
 

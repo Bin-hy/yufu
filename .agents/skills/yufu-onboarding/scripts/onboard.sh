@@ -20,8 +20,8 @@ usage() {
 usage: onboard.sh --mode web|api [options]
 
   --mode web|api          web = SSO backend, api = bearer-token resource server
-  --redirect-uri URI      web: OAuth redirect (default http://127.0.0.1:8080/callback)
-  --post-logout-uri URI   web: post-logout redirect (default http://127.0.0.1:8080/)
+  --redirect-uri URI      web: OAuth redirect (default: first free loopback port from 8080)
+  --post-logout-uri URI   web: post-logout redirect (default: same origin as the redirect)
   --audience AUD          token audience (default urn:app:development)
   --scopes SCOPES         space-separated scopes (default "openid profile email")
   --app-key KEY           idempotency key; defaults to a hash of the project path
@@ -87,6 +87,7 @@ run_stage register bash "$SCRIPT_DIR/register-app.sh" "${register_args[@]}"
 ISSUER=$(state_get YUFU_ISSUER 2>/dev/null || true)
 CLIENT_ID=$(state_get YUFU_CLIENT_ID 2>/dev/null || true)
 SECRET_FILE=$(state_get YUFU_CLIENT_SECRET_FILE 2>/dev/null || true)
+APP_PORT=$(state_get YUFU_APP_PORT 2>/dev/null || true)
 if [ "$MODE" = "web" ]; then
     NEXT="references/go-web.md (SSO login; complete one browser login yourself)"
 else
@@ -99,6 +100,9 @@ printf '  issuer:     %s\n' "$ISSUER"
 printf '  client_id:  %s\n' "$CLIENT_ID"
 if [ -n "$SECRET_FILE" ] && [ -s "$SECRET_FILE" ]; then
     printf '  secret:     %s (mode 600; never print or commit it)\n' "$SECRET_FILE"
+fi
+if [ "$MODE" = "web" ] && [ -n "$APP_PORT" ]; then
+    printf '  app_addr:   127.0.0.1:%s\n' "$APP_PORT"
 fi
 printf '  state:      %s\n' "$STATE_FILE"
 printf '  project:    %s\n' "$PROJECT_DIR"

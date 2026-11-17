@@ -19,8 +19,10 @@ load_versions
 TARGET=""
 TARGET=$(detect_target 2>/dev/null) || TARGET=""
 SOURCE_ROOT=$(detect_source_checkout)
-PORT=${YUFU_PORT:-14000}
-PG_PORT=${YUFU_PG_PORT:-55433}
+STATE_PORT=$(state_get YUFU_PORT 2>/dev/null || true)
+STATE_PG_PORT=$(state_get YUFU_PG_PORT 2>/dev/null || true)
+PORT=${YUFU_PORT:-${STATE_PORT:-14000}}
+PG_PORT=${YUFU_PG_PORT:-${STATE_PG_PORT:-55433}}
 ISSUER=${YUFU_ISSUER:-http://127.0.0.1:$PORT}
 
 blockers=()
@@ -98,15 +100,6 @@ else
 fi
 record "yufu: $YUFU_VERSION ($TARGET)"
 
-port_busy() {
-    local port="$1"
-    if command -v lsof >/dev/null 2>&1; then
-        lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
-    else
-        nc -z 127.0.0.1 "$port" >/dev/null 2>&1
-    fi
-}
-
 issuer_ready=0
 if curl -fsS -m 2 "$ISSUER/.well-known/openid-configuration" >/dev/null 2>&1; then
     issuer_ready=1
@@ -115,26 +108,46 @@ else
     record "issuer: not reachable at $ISSUER"
 fi
 
-# deploy-local.sh reuses the fixed-name container when its published port
-# matches, so that port being busy is not a blocker.
-pg_is_reusable() {
-    [ "$(pg_published_port 2>/dev/null || true)" = "$PG_PORT" ]
-}
-
-for port in "$PORT" "$PG_PORT"; do
-    if port_busy "$port"; then
-        if [ "$port" = "$PORT" ] && [ "$issuer_ready" = "1" ]; then
-            record "port $port: in use by the running issuer"
-        elif [ "$port" = "$PG_PORT" ] && pg_is_reusable; then
-            record "port $port: in use by postgres_yufu (will reuse)"
+if port_busy "$PORT"; then
+    if [ "$issuer_ready" = "1" ]; then
+        record "port $PORT: in use by the running issuer"
+    elif [ -z "${YUFU_PORT:-}" ] && [ -z "${YUFU_ISSUER:-}" ]; then
+        next_port=$(pick_port "$PORT" 20 || true)
+        if [ -n "$next_port" ]; then
+            warnings+=("port $PORT is busy; deploy will use $next_port")
+            record "port $PORT: busy (deploy will use $next_port)"
         else
-            blockers+=("port $port is already in use")
-            record "port $port: busy"
+            blockers+=("port $PORT is busy and no free port was found nearby; set YUFU_PORT")
+            record "port $PORT: busy"
         fi
     else
-        record "port $port: free"
+        blockers+=("port $PORT is already in use")
+        record "port $PORT: busy"
     fi
-done
+else
+    record "port $PORT: free"
+fi
+
+mapped=$(pg_published_port 2>/dev/null || true)
+if [ -n "$mapped" ] && [ -z "${YUFU_PG_PORT:-}" ]; then
+    record "port $mapped: postgres_yufu (will reuse)"
+elif port_busy "$PG_PORT"; then
+    if [ -n "${YUFU_PG_PORT:-}" ]; then
+        blockers+=("port $PG_PORT is already in use by another process")
+        record "port $PG_PORT: busy"
+    else
+        next_port=$(pick_port "$PG_PORT" 20 || true)
+        if [ -n "$next_port" ]; then
+            warnings+=("port $PG_PORT is busy; deploy will use $next_port for Postgres")
+            record "port $PG_PORT: busy (deploy will use $next_port)"
+        else
+            blockers+=("port $PG_PORT is busy and no free port was found nearby; set YUFU_PG_PORT")
+            record "port $PG_PORT: busy"
+        fi
+    fi
+else
+    record "port $PG_PORT: free"
+fi
 
 if [ "$(uname -s)" = "Darwin" ] && ! command -v lsof >/dev/null 2>&1; then
     warnings+=("lsof is missing; port checks fall back to nc")

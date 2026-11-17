@@ -1,0 +1,34 @@
+# Loopback-only development configuration for a locally deployed yufu.
+# Rendered by deploy-local.sh; do not commit the rendered file.
+
+[http]
+listen = "127.0.0.1:{{PORT}}"
+api_prefix = "/api/v1"
+
+[auth]
+allow_insecure_loopback_cookies = true
+exp_seconds = 3600
+refresh_exp_seconds = 86400
+origins = ["{{ISSUER}}"]
+
+[auth.super_admin]
+username = "{{ADMIN_USER}}"
+password = "{{ADMIN_PASSWORD}}"
+
+[oidc]
+issuer = "{{ISSUER}}"
+rsa_private_key_path = "{{WORKDIR}}/oidc_rsa_private.pem"
+signing_algorithm = "RS256"
+
+[database]
+url = "{{DATABASE_URL}}"
+
+[security_clock]
+servers = ["time.cloudflare.com:123", "time.google.com:123", "ntp.aliyun.com:123"]
+min_agreeing_sources = 2
+poll_interval_seconds = 20
+sample_ttl_seconds = 60
+timeout_millis = 2000
+
+[log]
+level = "info"

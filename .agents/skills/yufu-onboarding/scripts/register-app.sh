@@ -39,8 +39,21 @@ ADMIN_PASSWORD=$(state_get YUFU_ADMIN_PASSWORD 2>/dev/null || true)
 [ -n "$ADMIN_USER" ] && [ -n "$ADMIN_PASSWORD" ] || die "no bootstrap credentials recorded in state"
 
 PROJECT_DIR=${YUFU_PROJECT_DIR:-$(pwd)}
-REDIRECT_URI=${REDIRECT_URI:-http://127.0.0.1:8080/callback}
-POST_LOGOUT_URI=${POST_LOGOUT_URI:-http://127.0.0.1:8080/}
+if [ -n "$REDIRECT_URI" ]; then
+    if [ -z "$POST_LOGOUT_URI" ]; then
+        POST_LOGOUT_URI=$(printf '%s' "$REDIRECT_URI" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://[^/]+).*#\1/#')
+    fi
+else
+    APP_PORT=$(state_get YUFU_APP_PORT 2>/dev/null || true)
+    if [ -z "$APP_PORT" ] || port_busy "$APP_PORT"; then
+        APP_PORT=$(pick_port 8080 20 || true)
+        [ -n "$APP_PORT" ] || die "no free loopback port near 8080; pass --redirect-uri"
+        state_set YUFU_APP_PORT "$APP_PORT"
+        log_info "using loopback app port $APP_PORT"
+    fi
+    REDIRECT_URI="http://127.0.0.1:$APP_PORT/callback"
+    POST_LOGOUT_URI="http://127.0.0.1:$APP_PORT/"
+fi
 AUDIENCE=${AUDIENCE:-urn:app:development}
 SCOPES=${SCOPES:-openid profile email}
 APP_KEY=${APP_KEY:-$(state_get YUFU_APP_KEY 2>/dev/null || true)}

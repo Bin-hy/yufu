@@ -252,6 +252,31 @@ pg_running() {
     docker inspect -f '{{.State.Running}}' postgres_yufu 2>/dev/null | grep -qx true
 }
 
+# port_busy PORT
+port_busy() {
+    local port="$1"
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    else
+        nc -z 127.0.0.1 "$port" >/dev/null 2>&1
+    fi
+}
+
+# pick_port PREFERRED [SPAN]
+# Prints the first free port after PREFERRED. Fails when the span is exhausted.
+pick_port() {
+    local port="$1" span="${2:-20}" i=0
+    while [ "$i" -lt "$span" ]; do
+        i=$((i + 1))
+        port=$((port + 1))
+        if ! port_busy "$port"; then
+            printf '%s\n' "$port"
+            return 0
+        fi
+    done
+    return 1
+}
+
 pg_published_port() {
     local running
     running=$(docker inspect -f '{{.State.Running}}' postgres_yufu 2>/dev/null || true)
