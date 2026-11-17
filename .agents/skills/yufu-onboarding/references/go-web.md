@@ -359,4 +359,4 @@ func main() {
 3. 访问 `/logout` 后，再访问 `/api/me` 应重新要求登录。
 4. 不要用 email 或 username 作为本地用户主键；`iss + sub` 才稳定。
 
-本节给出的代码即完整参考实现；back-channel logout 的 `jti` 去重逻辑可在同一路由中按需补充。
+本节代码仅用于本机验收；生产部署必须替换为共享会话存储、补上会话过期与注销联动，并在 HTTPS 下启用 `Secure`。back-channel logout 的 `jti` 去重逻辑可在同一路由中按需补充。
