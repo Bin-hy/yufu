@@ -1,0 +1,75 @@
+package {{PKG}}
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+
+	yufu "github.com/Bin-hy/yufu-sdk-go"
+)
+
+type claimsKey struct{}
+
+// Verifier validates bearer access tokens issued by yufu.
+type Verifier struct {
+	client   *yufu.Client
+	audience string
+}
+
+// NewVerifier wraps an SDK client. audience is the application access audience
+// (for example urn:app:development), not the OIDC client id.
+func NewVerifier(client *yufu.Client, audience string) (*Verifier, error) {
+	if client == nil {
+		return nil, errors.New("yufu_auth: client is nil")
+	}
+	if strings.TrimSpace(audience) == "" {
+		return nil, errors.New("yufu_auth: audience is required")
+	}
+	return &Verifier{client: client, audience: audience}, nil
+}
+
+// Verify checks the token locally against the issuer JWKS.
+func (v *Verifier) Verify(ctx context.Context, token string) (*yufu.AccessTokenClaims, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, errors.New("yufu_auth: missing bearer token")
+	}
+	return v.client.VerifyAccessToken(ctx, token, v.audience)
+}
+
+// Middleware rejects requests that do not carry a valid bearer token.
+func (v *Verifier) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := bearerToken(r.Header.Get("Authorization"))
+		if !ok {
+			unauthorized(w, "missing_token")
+			return
+		}
+		claims, err := v.Verify(r.Context(), token)
+		if err != nil {
+			unauthorized(w, "invalid_token")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsKey{}, claims)))
+	})
+}
+
+// ClaimsFromContext returns the claims attached by Middleware.
+func ClaimsFromContext(ctx context.Context) (*yufu.AccessTokenClaims, bool) {
+	claims, ok := ctx.Value(claimsKey{}).(*yufu.AccessTokenClaims)
+	return claims, ok
+}
+
+func bearerToken(header string) (string, bool) {
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return "", false
+	}
+	token := strings.TrimSpace(header[len(prefix):])
+	return token, token != ""
+}
+
+func unauthorized(w http.ResponseWriter, code string) {
+	w.Header().Set("WWW-Authenticate", `Bearer error="`+code+`"`)
+	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+}

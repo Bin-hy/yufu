@@ -1,0 +1,171 @@
+package {{PKG}}
+
+import (
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	yufu "github.com/Bin-hy/yufu-sdk-go"
+)
+
+const (
+	testAudience = "urn:app:development"
+	testClientID = "app_test"
+)
+
+type testIssuer struct {
+	server *httptest.Server
+	key    *rsa.PrivateKey
+}
+
+func newTestIssuer(t *testing.T) *testIssuer {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	issuer := &testIssuer{key: key}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"issuer":                 issuer.server.URL,
+			"authorization_endpoint": issuer.server.URL + "/oidc/authorize",
+			"token_endpoint":         issuer.server.URL + "/oidc/token",
+			"userinfo_endpoint":      issuer.server.URL + "/oidc/userinfo",
+			"jwks_uri":               issuer.server.URL + "/.well-known/jwks.json",
+		})
+	})
+	mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]any{"keys": []any{map[string]any{
+			"kty": "RSA",
+			"kid": "test",
+			"use": "sig",
+			"alg": "RS256",
+			"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+		}}})
+	})
+	issuer.server = httptest.NewServer(mux)
+	t.Cleanup(issuer.server.Close)
+	return issuer
+}
+
+func (i *testIssuer) token(t *testing.T, audience string, exp time.Time) string {
+	t.Helper()
+	header, _ := json.Marshal(map[string]any{"alg": "RS256", "typ": "at+jwt", "kid": "test"})
+	claims, _ := json.Marshal(map[string]any{
+		"iss":       i.server.URL,
+		"sub":       "user-1",
+		"aud":       audience,
+		"exp":       exp.Unix(),
+		"iat":       time.Now().Add(-time.Minute).Unix(),
+		"scope":     "openid",
+		"client_id": testClientID,
+	})
+	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(claims)
+	digest := sha256.Sum256([]byte(signingInput))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, i.key, crypto.SHA256, digest[:])
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func newTestVerifier(t *testing.T) (*Verifier, *testIssuer) {
+	t.Helper()
+	issuer := newTestIssuer(t)
+	client, err := yufu.New(yufu.Config{Issuer: issuer.server.URL, ClientID: testClientID})
+	if err != nil {
+		t.Fatalf("new sdk client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	verifier, err := NewVerifier(client, testAudience)
+	if err != nil {
+		t.Fatalf("new verifier: %v", err)
+	}
+	return verifier, issuer
+}
+
+func protectedHandler(w http.ResponseWriter, r *http.Request) {
+	claims, ok := ClaimsFromContext(r.Context())
+	if !ok {
+		http.Error(w, "no claims", http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprint(w, claims.Subject)
+}
+
+func doRequest(t *testing.T, verifier *Verifier, authorization string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	if authorization != "" {
+		request.Header.Set("Authorization", authorization)
+	}
+	recorder := httptest.NewRecorder()
+	verifier.Middleware(http.HandlerFunc(protectedHandler)).ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestMiddlewareAcceptsValidToken(t *testing.T) {
+	verifier, issuer := newTestVerifier(t)
+	token := issuer.token(t, testAudience, time.Now().Add(5*time.Minute))
+	recorder := doRequest(t, verifier, "Bearer "+token)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Body.String() != "user-1" {
+		t.Fatalf("subject = %q, want user-1", recorder.Body.String())
+	}
+}
+
+func TestMiddlewareRejectsMissingToken(t *testing.T) {
+	verifier, _ := newTestVerifier(t)
+	recorder := doRequest(t, verifier, "")
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+	if got := recorder.Header().Get("WWW-Authenticate"); got == "" {
+		t.Fatal("WWW-Authenticate header is missing")
+	}
+}
+
+func TestMiddlewareRejectsWrongAudience(t *testing.T) {
+	verifier, issuer := newTestVerifier(t)
+	token := issuer.token(t, "urn:app:other", time.Now().Add(5*time.Minute))
+	if recorder := doRequest(t, verifier, "Bearer "+token); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+}
+
+func TestMiddlewareRejectsExpiredToken(t *testing.T) {
+	verifier, issuer := newTestVerifier(t)
+	token := issuer.token(t, testAudience, time.Now().Add(-5*time.Minute))
+	if recorder := doRequest(t, verifier, "Bearer "+token); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+}
+
+func TestBearerTokenIsCaseInsensitive(t *testing.T) {
+	verifier, issuer := newTestVerifier(t)
+	token := issuer.token(t, testAudience, time.Now().Add(5*time.Minute))
+	if recorder := doRequest(t, verifier, "bearer "+token); recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+}
+
+func writeJSON(t *testing.T, w http.ResponseWriter, value any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+}

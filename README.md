@@ -12,6 +12,8 @@
 
 Rust · Vue 3 · PostgreSQL · OpenID Connect · OAuth 2.0 · PKCE
 
+[![skills.sh](https://skills.sh/b/Bin-hy/yufu)](https://skills.sh/Bin-hy/yufu)
+
 </div>
 
 ---
@@ -136,6 +138,25 @@ cargo run --bin yufu --features webui -- \
 开发前端可运行 `pnpm dev:web`，Vite 会将 API 请求代理到本机身份服务。
 
 ## 接入你的应用
+
+### 用 AI Agent 接入（Skill）
+
+让编码 agent 在本机完成「部署 yufu → 注册应用 → 校验参数 → 生成接入代码」：
+
+```bash
+npx skills add Bin-hy/yufu@skill-v0.1.0 --skill yufu-onboarding
+```
+
+非交互安装（指定 agent、复制文件、跳过确认）：
+
+```bash
+npx skills add Bin-hy/yufu@skill-v0.1.0 --skill yufu-onboarding -a claude-code --copy -y
+```
+
+安装后对 agent 说一句「部署 yufu 并接入这个项目」，它只会追问一次接入形态
+（Web 登录 / 保护已有 API），随后执行固定版本的本地部署与注册，并输出 issuer、
+client id、secret 文件位置和下一步文档。该 Skill 面向本机联调，不涉及生产 TLS、
+域名或多机部署；client secret 只写入权限 600 的本地文件。
 
 1. **注册应用**：管理员授予开发者资格，开发者注册应用并配置环境、客户端类型、回调地址与 scope。
 2. **审批与分配**：生产配置经管理员审批，并为账户或用户组明确分配应用访问。

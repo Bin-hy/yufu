@@ -1,0 +1,33 @@
+{
+  "application": {
+    "app_key": "{{APP_KEY}}",
+    "name": "{{APP_NAME}}",
+    "description": "created by yufu-onboarding skill",
+    "third_party": false,
+    "development": {
+      "client_kind": "{{CLIENT_KIND}}",
+      "redirect_uris": {{REDIRECT_URIS}},
+      "post_logout_redirect_uris": ["{{POST_LOGOUT_URI}}"],
+      "browser_origins": {{BROWSER_ORIGINS}},
+      "access_audience": "{{AUDIENCE}}",
+      "identity_scopes": "{{SCOPES}}",
+      "consent_policy": "user_consent",
+      "logout_capability": "online",
+      "backchannel_logout_uri": null
+    },
+    "production": {
+      "client_kind": "{{CLIENT_KIND}}",
+      "redirect_uris": ["https://onboarding.invalid/callback", "https://onboarding.invalid/"],
+      "post_logout_redirect_uris": ["https://onboarding.invalid/"],
+      "browser_origins": {{PRODUCTION_BROWSER_ORIGINS}},
+      "access_audience": "urn:app:production",
+      "identity_scopes": "{{SCOPES}}",
+      "consent_policy": "user_consent",
+      "logout_capability": "online",
+      "backchannel_logout_uri": null
+    }
+  },
+  "owner_user_id": {{OWNER_USER_ID}},
+  "assignments": [],
+  "accept_logout_limitation": true
+}
