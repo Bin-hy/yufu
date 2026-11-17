@@ -299,7 +299,8 @@ grep -n 'versions.env' "$SKILL/references/go-resource-server.md"
 **文件：** `README.md`
 **依赖：** T11、T12
 **步骤：**
-1. 标题区增加 `[![skills.sh](https://skills.sh/b/Bin-hy/yufu)](https://skills.sh/Bin-hy/yufu)`。
+1. 标题区增加 `[![skills.sh](https://img.shields.io/badge/skills.sh-yufu--onboarding-000000)](https://skills.sh/Bin-hy/yufu/yufu-onboarding)`。
+   skills.sh 的动态 `/b/<owner>/<repo>` 徽章在无安装记录时返回 `resource not found`，先用静态徽章，待安装量可查后再考虑切回。
 2. 新增「用 AI Agent 接入（Skill）」小节，给出：
    ```bash
    npx skills add Bin-hy/yufu --skill yufu-onboarding
@@ -310,7 +311,8 @@ grep -n 'versions.env' "$SKILL/references/go-resource-server.md"
 **验证：**
 ```bash
 grep -n 'npx skills add Bin-hy/yufu --skill yufu-onboarding' README.md
-grep -n 'skills.sh/b/Bin-hy/yufu' README.md
+grep -n 'skills.sh-yufu--onboarding' README.md
+grep -n 'skills.sh/Bin-hy/yufu/yufu-onboarding' README.md
 ```
 期望：两条均命中，且安装命令不包含 `@tag`。
 

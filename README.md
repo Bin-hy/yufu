@@ -12,7 +12,7 @@
 
 Rust · Vue 3 · PostgreSQL · OpenID Connect · OAuth 2.0 · PKCE
 
-[![skills.sh](https://skills.sh/b/Bin-hy/yufu)](https://skills.sh/Bin-hy/yufu)
+[![skills.sh](https://img.shields.io/badge/skills.sh-yufu--onboarding-000000)](https://skills.sh/Bin-hy/yufu/yufu-onboarding)
 
 </div>
 
