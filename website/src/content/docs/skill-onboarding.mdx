@@ -1,0 +1,99 @@
+---
+title: Skill 快速接入
+description: 让编码 Agent 在本机完成 yufu 部署、应用注册与接入代码生成。
+---
+
+`yufu-onboarding` 是一个给编码 Agent 用的接入 Skill：把「部署 yufu → 注册应用 → 校验参数 →
+生成接入代码」串成一条可执行流程。适用于本机联调与新人上手，不涉及生产 TLS、域名或多机部署。
+
+:::note
+Skill 从本仓库的 `.agents/skills/yufu-onboarding/` 分发，固定 yufu 二进制与 Go SDK 版本。
+源码见 [yufu-onboarding](https://github.com/Bin-hy/yufu/tree/main/.agents/skills/yufu-onboarding)。
+:::
+
+## 适用形态
+
+安装后 Agent 只会追问一次接入形态：
+
+| 形态 | 说明 | 产出 |
+| --- | --- | --- |
+| Web 后端 | 用户通过 yufu 登录，服务端持有会话 | 授权码 + PKCE 的 Go 参考实现、服务端会话、退出联动 |
+| API 资源服务器 | 应用只校验 yufu 令牌 | Bearer 令牌校验与 401 / 200 行为测试 |
+
+当前提供 Go 参考实现；其他语言可按 `references/` 的相同结构扩展。
+
+## 前置条件
+
+- Docker Engine 与 Compose v2（运行本地 PostgreSQL）
+- `curl`、`python3`、`openssl`、`tar`
+- 出站 `UDP/123`（安全时钟校验；不可用时服务不就绪）
+- 联网下载固定版本的 yufu 二进制与 Go SDK；离线时可用 `YUFU_BIN` 指定已有二进制
+
+## 安装
+
+```bash
+npx skills add Bin-hy/yufu --skill yufu-onboarding
+```
+
+非交互安装（指定 Agent、复制文件、跳过确认）：
+
+```bash
+npx skills add Bin-hy/yufu --skill yufu-onboarding -a claude-code --copy -y
+```
+
+`skills-lock.json` 会记录安装时的提交与内容哈希；Skill 内的 `assets/versions.env` 固定 yufu
+二进制与 Go SDK 版本，不随默认分支浮动。
+
+## 让 Agent 开始
+
+安装后，在目标 Go 项目里对 Agent 说：
+
+```text
+部署 yufu 并接入这个项目
+```
+
+Agent 会先运行预检，再按回答选择路径：
+
+```text
+你的应用需要让用户通过 yufu 登录，还是只在自己的 API 上校验 yufu 令牌？
+1. 需要登录 → Web 后端
+2. 只校验令牌 → API 资源服务器
+```
+
+完成后会给出 issuer、client id、secret 文件位置与下一步文档。
+
+## 执行内容
+
+1. **探测**：检查依赖与已有部署；复用时不会重复建库、覆盖配置或重启已就绪的服务。
+2. **部署**：在本机回环地址启动 yufu（默认 `http://127.0.0.1:14000`），复用或启动 PostgreSQL
+   （宿主机端口 `55433`），创建数据库并生成签名私钥。
+3. **注册**：自动完成 CSRF、登录、创建应用与参数配对校验；需要自定义回调、audience 或 scopes
+   时使用脚本参数。
+4. **接入**：把对应语言的参考实现写入项目，只新增必要文件。
+5. **验收**：检查 Discovery、JWKS 与健康状态，并验证登录、令牌与退出行为。
+
+状态、配置与日志默认写入 `.yufu-onboarding/`，可用 `YUFU_WORKDIR` 覆盖；端口与数据库名可用
+`YUFU_PORT`、`YUFU_PG_PORT`、`YUFU_DB_NAME` 调整。
+
+## 安全边界
+
+- 只用于本机联调：issuer 是 loopback HTTP，不包含 TLS、域名与多机部署。
+- client secret 只写入 `.yufu-onboarding/client_secret`（权限 600），不进入前端、不提交仓库。
+- 将 `.yufu-onboarding/` 加入项目 `.gitignore`；该目录包含状态、日志与私钥。
+- 二进制只从 `assets/versions.env` 固定的 GitHub Release 地址下载并校验 SHA-256，不执行远程脚本。
+  校验和保证内容未被替换，但不构成对发布者身份的背书。
+- 不修改 yufu 服务端与 `yufu-sdk-go`；不在未确认时删除数据库卷、配置或既有应用。
+
+## 验收判据
+
+- Discovery 返回的 `issuer` 与配置逐字符一致，JWKS 至少包含一把密钥。
+- `/api/v1/health/ready` 返回 200 且 `security_clock_synchronized = true`。
+- 完成一次浏览器登录后能看到稳定的 `sub`；访问 `/logout` 后受保护页重新要求登录。
+- 生成的 `go test` 通过；无令牌返回 401，有效令牌返回 200。
+
+## 下一步
+
+- [OIDC 接入](/guides/oidc-integration/)
+- [机密 Web 应用](/guides/web-app/)
+- [Go SDK](/guides/go-sdk/)
+- [常见问题](/faq/)

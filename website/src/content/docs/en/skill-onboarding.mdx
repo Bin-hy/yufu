@@ -1,0 +1,107 @@
+---
+title: Agent quick start
+description: Let a coding agent deploy yufu locally, register an application, and generate integration code.
+---
+
+`yufu-onboarding` is an onboarding skill for coding agents. It turns "deploy yufu → register an
+application → verify the parameters → generate integration code" into one executable flow for local
+development and new team members. It does not cover production TLS, domains, or multi-host setups.
+
+:::note
+The skill ships from `.agents/skills/yufu-onboarding/` in this repository and pins the yufu binary
+and Go SDK versions. Source: [yufu-onboarding](https://github.com/Bin-hy/yufu/tree/main/.agents/skills/yufu-onboarding).
+:::
+
+## Supported shapes
+
+After installation the agent asks one question:
+
+| Shape | Description | Output |
+| --- | --- | --- |
+| Web backend | Users sign in through yufu; the server holds the session | Go reference for authorization code + PKCE, server-side sessions, logout linkage |
+| API resource server | The application only verifies yufu tokens | Bearer token verification and 401 / 200 behaviour tests |
+
+Go references are provided today; other languages can follow the same structure under `references/`.
+
+## Requirements
+
+- Docker Engine with Compose v2 (runs the local PostgreSQL)
+- `curl`, `python3`, `openssl`, `tar`
+- Outbound `UDP/123` for the security clock check; without it the service never becomes ready
+- Network access to download the pinned yufu binary and Go SDK; offline hosts can point `YUFU_BIN`
+  at an existing binary
+
+## Install
+
+```bash
+npx skills add Bin-hy/yufu --skill yufu-onboarding
+```
+
+Non-interactive install (pick an agent, copy files, skip confirmation):
+
+```bash
+npx skills add Bin-hy/yufu --skill yufu-onboarding -a claude-code --copy -y
+```
+
+`skills-lock.json` records the installed commit and content hash. `assets/versions.env` inside the
+skill pins the yufu binary and Go SDK versions, so they do not drift with the default branch.
+
+## Ask the agent to start
+
+In the target Go project, tell the agent:
+
+```text
+Deploy yufu and integrate it into this project
+```
+
+The agent runs the preflight checks, then asks which shape you need:
+
+```text
+Should users sign in through yufu, or does this API only verify yufu tokens?
+1. Sign-in required → web backend
+2. Verify tokens only → API resource server
+```
+
+When it finishes, it reports the issuer, client id, the secret file location, and the next documents.
+
+## What it does
+
+1. **Probe** — checks dependencies and any existing deployment. Reuse never recreates the database,
+   overwrites configuration, or restarts a service that is already ready.
+2. **Deploy** — starts yufu on a loopback address (`http://127.0.0.1:14000` by default), reuses or
+   starts PostgreSQL (host port `55433`), creates the database, and generates a signing key.
+3. **Register** — handles CSRF, sign-in, application creation, and parameter pairing; script flags
+   cover custom redirect URIs, audiences, and scopes.
+4. **Integrate** — writes the reference implementation for the chosen shape, adding only the
+   necessary files.
+5. **Verify** — checks discovery, JWKS, and readiness, then exercises sign-in, tokens, and logout.
+
+State, configuration, and logs go to `.yufu-onboarding/`; override the location with `YUFU_WORKDIR`.
+Ports and the database name are configurable through `YUFU_PORT`, `YUFU_PG_PORT`, and `YUFU_DB_NAME`.
+
+## Security boundaries
+
+- Local development only: the issuer is loopback HTTP, with no TLS, domains, or multi-host setup.
+- The client secret is written only to `.yufu-onboarding/client_secret` (mode 600); it never reaches
+  the frontend and is never committed.
+- Add `.yufu-onboarding/` to the project's `.gitignore`; it holds state, logs, and private keys.
+- Binaries come only from the GitHub Release URL pinned in `assets/versions.env` and are verified by
+  SHA-256 before use; no remote scripts are executed. Checksums prove the content was not replaced,
+  not who published it.
+- The skill does not modify the yufu server or `yufu-sdk-go`, and does not delete database volumes,
+  configuration, or existing applications without confirmation.
+
+## Acceptance checks
+
+- Discovery returns the configured `issuer` character for character, and JWKS contains at least one key.
+- `/api/v1/health/ready` returns 200 with `security_clock_synchronized = true`.
+- After signing in through a browser the application sees a stable `sub`; after `/logout`, protected
+  pages require a new sign-in.
+- The generated `go test` suite passes; requests without a token return 401 and valid tokens return 200.
+
+## Next steps
+
+- [OIDC integration](/en/guides/oidc-integration/)
+- [Confidential web application](/en/guides/web-app/)
+- [Go SDK](/en/guides/go-sdk/)
+- [FAQ](/en/faq/)

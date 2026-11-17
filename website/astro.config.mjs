@@ -30,7 +30,7 @@ export default defineConfig({
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/Bin-hy/yufu/edit/main/',
+        baseUrl: 'https://github.com/Bin-hy/yufu/edit/main/website/',
       },
       customCss: ['./src/styles/custom.css'],
       lastUpdated: true,
@@ -45,6 +45,11 @@ export default defineConfig({
               slug: 'getting-started',
             },
           ],
+        },
+        {
+          label: 'Skill 快速接入',
+          translations: { en: 'Agent quick start' },
+          slug: 'skill-onboarding',
         },
         {
           label: '接入指南',
