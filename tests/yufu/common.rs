@@ -1,4 +1,5 @@
 use auth::token_manager::IdTokenSigner;
+use testcontainers::core::wait::LogWaitStrategy;
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, ImageExt};
@@ -16,8 +17,12 @@ pub async fn get_postgres_container()
     let db_name = format!("test_db_{}", uuid::Uuid::new_v4());
     let image_postgres = GenericImage::new("postgres", "18-alpine")
         .with_exposed_port(5432.tcp())
-        .with_wait_for(WaitFor::message_on_stderr(
-            "database system is ready to accept connections",
+        // The entrypoint logs this twice: once from the temporary init server on
+        // stdout, then from the real server on stderr. Connecting after the first
+        // message hits a reset, so wait for both.
+        .with_wait_for(WaitFor::log(
+            LogWaitStrategy::stdout_or_stderr("database system is ready to accept connections")
+                .with_times(2),
         ))
         .with_env_var("POSTGRES_USER", "postgres")
         .with_env_var("POSTGRES_PASSWORD", "postgres")
