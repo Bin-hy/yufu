@@ -57,7 +57,7 @@ fn ico(bytes: &[u8]) -> Result<(u32, u32), IdentityError> {
     }
     let mut max = (0, 0);
     let mut seen = std::collections::HashSet::new();
-    for entry in bytes[6..6 + count * 16].chunks_exact(16) {
+    for entry in bytes[6..6 + count * 16].as_chunks::<16>().0 {
         let size = u32::from_le_bytes(
             entry[8..12]
                 .try_into()

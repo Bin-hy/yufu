@@ -35,11 +35,20 @@ class SkillDistributionTests(unittest.TestCase):
             self.skipTest('git is not available')
         version = read_versions()['YUFU_VERSION']
         result = subprocess.run(
-            ['git', 'tag', '--list', version],
+            ['git', 'tag', '--list'],
             cwd=ROOT, capture_output=True, text=True, check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), version)
+        tags = result.stdout.splitlines()
+        if version in tags:
+            return
+        shallow = subprocess.run(
+            ['git', 'rev-parse', '--is-shallow-repository'],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        if shallow.stdout.strip() == 'true' and not tags:
+            self.skipTest('shallow clones without fetched tags cannot verify the tag')
+        self.fail(f'versions.env pins {version}, but no such tag exists')
 
     def test_checksums_cover_every_supported_target(self):
         versions = read_versions()
