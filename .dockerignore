@@ -37,8 +37,9 @@ storage
 .DS_Store
 Thumbs.db
 
-# 本地品牌工作目录，不入镜像
-brand
+# 本地品牌工作目录，不入镜像；前端构建仍需要默认品牌文档。
+brand/*
+!brand/site-branding.defaults.json
 
 # Documentation and screenshots do not participate in the service image.
 # Retain the website manifest for pnpm's workspace/lockfile resolution.
