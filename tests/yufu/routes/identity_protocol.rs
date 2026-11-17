@@ -37,7 +37,7 @@ async fn identity_protocol_id_tokens_have_client_specific_audience_sid_and_scope
             URL_SAFE_NO_PAD
                 .encode(&Sha256::digest(set.access_token.expose_secret().as_bytes())[..16])
         );
-        for forbidden in ["email", "email_verified", "roles", "permissions", "bounds"] {
+        for forbidden in ["roles", "permissions", "bounds"] {
             assert!(
                 actual.get(forbidden).is_none(),
                 "unexpected claim: {forbidden}"
@@ -50,7 +50,11 @@ async fn identity_protocol_id_tokens_have_client_specific_audience_sid_and_scope
     assert_ne!(actuals[0]["sid"], actuals[1]["sid"]);
     assert!(actuals[0].get("name").is_none());
     assert!(actuals[0].get("preferred_username").is_none());
+    assert!(actuals[0].get("email").is_none());
     assert_eq!(actuals[1]["preferred_username"], "identity-admin");
+    // A synthesized address follows the requested email scope and is never verified.
+    assert_eq!(actuals[1]["email"], "identity-admin@binhy.email");
+    assert_eq!(actuals[1]["email_verified"], false);
     f.close().await;
 }
 

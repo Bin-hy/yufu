@@ -127,7 +127,8 @@ async fn identity_browser_http_password_login_restore_csrf_reauthentication_and_
     cookies.absorb(response.headers());
     let login = response.json::<serde_json::Value>().await.unwrap();
     assert!(login.get("access_token").is_none());
-    assert!(login.get("email").is_none());
+    assert_eq!(login["email"], "identity-admin@yufu.local");
+    assert_eq!(login["email_verified"], false);
     assert_eq!(login["username"], "identity-admin");
     let root_secret = cookies.0["yufu-dev-sso"].clone();
     let mut transaction = repository(&f).begin(&budget(&f)).await.unwrap();

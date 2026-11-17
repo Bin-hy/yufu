@@ -176,7 +176,11 @@ async fn identity_session_browser_restore_is_read_only_concurrent_and_epoch_boun
         assert_eq!(restored.root, root);
         assert_eq!(restored.actor.sso_session_id(), root.id);
         assert_eq!(restored.actor.principal().subject(), user_id.to_string());
-        assert!(restored.profile.email.is_none());
+        assert_eq!(
+            restored.profile.email.as_deref(),
+            Some("identity-admin@yufu.local")
+        );
+        assert_eq!(restored.profile.email_verified, Some(false));
     }
     assert_eq!(
         scalar(
