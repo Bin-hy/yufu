@@ -1,52 +1,52 @@
-# 故障定位
+# Troubleshooting
 
-按阶段定位，不猜。每条都给出可执行的校验命令。
+Locate the issue by stage; do not guess. Every entry includes a command you can run.
 
-## 部署
+## Deployment
 
-| 症状 | 常见原因 | 校验 |
+| Symptom | Likely cause | Check |
 | --- | --- | --- |
-| `preflight blocked: port 14000 is already in use` | 旧进程或其他服务占用 | `lsof -nP -iTCP:14000 -sTCP:LISTEN` |
-| `Postgres did not become ready` | 容器没起来或端口冲突 | `docker logs postgres_yufu` |
-| `postgres_yufu is bound to host port ...` | 旧容器端口与 `YUFU_PG_PORT` 不一致 | 停掉旧容器，或设 `YUFU_PG_PORT=<旧端口>` 后重跑 |
-| `download failed` | 网络受限或发布包不可达 | 设 `YUFU_BIN` 指向本地二进制；或用代理重跑 |
-| `checksum mismatch` | 归档被替换或版本文件过期 | 删除 `.yufu-onboarding/bin/` 后重试；核对 `assets/versions.env` |
-| `Migration file of version ... is missing` | 数据库已被更新版本迁移，固定的旧版二进制无法打开 | 用独立的 `YUFU_DB_NAME` 重建库，或改用与迁移匹配的版本 |
-| `unsupported platform` 或 `unsupported YUFU_TARGET` | 平台不在支持列表 | 使用 `aarch64-apple-darwin`、`x86_64-apple-darwin`、`x86_64-unknown-linux-gnu` 之一 |
-| yufu 启动即退出 | 缺少私钥、配置错误、端口占用 | `tail -50 .yufu-onboarding/yufu.log` |
-| `health ready but security clock is not synchronized` | 出站 UDP/123 被阻断 | `nc -zu time.cloudflare.com 123`；换内网时间源 |
-| discovery issuer 不一致 | 配置里的 issuer 与访问地址不同 | 重新执行 `deploy-local.sh`，不要手工改配置 |
+| `preflight blocked: port 14000 is already in use` | A stale process or another service owns the port | `lsof -nP -iTCP:14000 -sTCP:LISTEN` |
+| `Postgres did not become ready` | Container failed to start or port conflict | `docker logs postgres_yufu` |
+| `postgres_yufu is bound to host port ...` | Existing container port differs from `YUFU_PG_PORT` | Stop the old container, or set `YUFU_PG_PORT=<old port>` and rerun |
+| `download failed` | Restricted network or unreachable release | Point `YUFU_BIN` at a local binary, or use a proxy and rerun |
+| `checksum mismatch` | Archive replaced or the version file is stale | Delete `.yufu-onboarding/bin/` and retry; verify `assets/versions.env` |
+| `Migration file of version ... is missing` | The database was already migrated by a newer version, so the pinned old binary cannot open it | Rebuild with a separate `YUFU_DB_NAME`, or use a version that matches the migrations |
+| `unsupported platform` or `unsupported YUFU_TARGET` | Platform is not in the supported list | Use one of `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` |
+| yufu exits immediately after starting | Missing key, bad config, or port conflict | `tail -50 .yufu-onboarding/yufu.log` |
+| `health ready but security clock is not synchronized` | Outbound UDP/123 is blocked | `nc -zu time.cloudflare.com 123`; switch to an internal time source |
+| Discovery issuer mismatch | The configured issuer differs from the reachable address | Rerun `deploy-local.sh`; do not edit the config by hand |
 
-## 注册
+## Registration
 
-| 症状 | 常见原因 | 校验 |
+| Symptom | Likely cause | Check |
 | --- | --- | --- |
-| `login failed with HTTP 401` | 管理员账号不匹配 | 核对 `state.env` 的 `YUFU_ADMIN_USER` |
-| `registration returned HTTP 400 invalid_input` | `server_web` 填了 `browser_origins`；或 redirect 非法 | 用 `--mode api` 对比，或核对 `references/register-app.md` 的参数约束 |
-| `registration returned HTTP 409` | `app_key` 已存在但幂等键不同 | 复用原 `--app-key` |
-| `client ... was registered without a new secret` | 重放不返回 secret | 控制台重置 secret，或换 `--app-key` 重注册 |
+| `login failed with HTTP 401` | Admin account mismatch | Check `YUFU_ADMIN_USER` in `state.env` |
+| `registration returned HTTP 400 invalid_input` | `server_web` was given `browser_origins`, or the redirect is invalid | Compare with `--mode api`, or re-check the parameter constraints in `references/register-app.md` |
+| `registration returned HTTP 409` | `app_key` exists with a different idempotency key | Reuse the original `--app-key` |
+| `client ... was registered without a new secret` | Replays do not return secrets | Reset the secret in the console, or register again with a new `--app-key` |
 
-## 配对
+## Parameter pairing
 
-| 症状 | 常见原因 | 校验 |
+| Symptom | Likely cause | Check |
 | --- | --- | --- |
-| `redirect_uri mismatch: registered ..., current ...` | 环境变量覆盖了注册值 | 对齐 `YUFU_REDIRECT_URI` 与 `state.env` |
-| `authorization endpoint returned HTTP 4xx` | client 不存在或 redirect 不在白名单 | `bash "$SKILL_DIR/scripts/verify-app.sh"`，响应体会给出错误码 |
-| `authorization endpoint rejected the request` | scope 未授权或应用未分配访问 | 管理台确认该用户有访问分配 |
-| `end-session endpoint returned HTTP 400` | 登出地址未同时注册进 `redirect_uris`（旧版脚本注册的 client） | 用新 `--app-key` 重注册；`verify-app.sh` 会点名该字段 |
+| `redirect_uri mismatch: registered ..., current ...` | An environment variable overrode the registered value | Align `YUFU_REDIRECT_URI` with `state.env` |
+| `authorization endpoint returned HTTP 4xx` | Client does not exist or the redirect is not allowlisted | `bash "$SKILL_DIR/scripts/verify-app.sh"`; the response body names the error code |
+| `authorization endpoint rejected the request` | Scope not authorized or the app has no access assignment | Confirm in the console that the user has an access assignment |
+| `end-session endpoint returned HTTP 400` | The sign-out address was not also registered in `redirect_uris` (client registered by an older script) | Re-register with a new `--app-key`; `verify-app.sh` names the field |
 
-## 接入
+## Integration
 
-| 症状 | 常见原因 | 校验 |
+| Symptom | Likely cause | Check |
 | --- | --- | --- |
-| 登录后回调 400 `unknown or replayed state` | state 未持久化或跨实例 | 会话存储改为共享存储 |
-| 回调 401 `nonce does not match` | 校验时用了新的 nonce | 用发起授权时保存的 nonce |
-| API 恒 401 `audience does not match` | 校验用了 client id 而不是 access audience | 核对 `YUFU_AUDIENCE` |
-| API 偶发 401 | JWKS 轮换与缓存 | SDK 会按 `kid` 重新拉取；确认 `JWKSTTL` 不是 0 |
-| `go: module lookup disabled` | 离线且模块缓存缺失 | 先在联网环境 `go mod download` |
+| Callback returns 400 `unknown or replayed state` after sign-in | State was not persisted or the deployment spans multiple instances | Switch the session store to shared storage |
+| Callback returns 401 `nonce does not match` | Verification used a new nonce | Use the nonce saved when the authorization request was started |
+| API always returns 401 `audience does not match` | Verification used the client id instead of the access audience | Check `YUFU_AUDIENCE` |
+| API returns intermittent 401s | JWKS rotation and caching | The SDK refetches by `kid`; confirm `JWKSTTL` is not 0 |
+| `go: module lookup disabled` | Offline with an empty module cache | Run `go mod download` in a networked environment first |
 
-## 通用
+## General
 
-- 状态文件：`.yufu-onboarding/state.env`（权限 600，不要提交）。
-- 服务日志：`.yufu-onboarding/yufu.log`。
-- 任何一步失败，先跑 `bash "$SKILL_DIR/scripts/verify-issuer.sh"` 排除 issuer 层问题。
+- State file: `.yufu-onboarding/state.env` (mode 600; never commit it).
+- Service log: `.yufu-onboarding/yufu.log`.
+- When any step fails, run `bash "$SKILL_DIR/scripts/verify-issuer.sh"` first to rule out issuer-level problems.

@@ -1,119 +1,125 @@
-# 本机部署
+# Local Deployment
 
-目标：在开发机上得到一个可用的回环 issuer，供注册与接入使用。
-不涉及 TLS、域名、反向代理和多机部署。
+Goal: a working loopback issuer on the development machine for registration and integration.
+This does not cover TLS, DNS names, reverse proxies, or multi-machine deployments.
 
-## 前置
+## Prerequisites
 
-| 依赖 | 用途 | 缺失时 |
+| Dependency | Purpose | If missing |
 | --- | --- | --- |
-| `docker` + `docker compose` | 运行 PostgreSQL | 阻塞 |
-| `curl`、`python3`、`openssl`、`tar` | 校验、JSON、签名私钥、解包 | 阻塞 |
-| 网络或 `YUFU_BIN` | 获取 yufu 二进制 | 二选一 |
-| 出站 UDP/123 | 安全时钟校验 | 服务启动失败或 health 503 |
+| `docker` + `docker compose` | Run PostgreSQL | Blocked |
+| `curl`, `python3`, `openssl`, `tar` | Verification, JSON, signing key, extraction | Blocked |
+| Network access or `YUFU_BIN` | Obtain the yufu binary | One of the two |
+| Outbound UDP/123 | Secure clock check | Service fails to start or health returns 503 |
 
-先运行：
+Run:
 
 ```bash
 bash "$SKILL_DIR/scripts/preflight.sh"
 ```
 
-退出码 `0` 可继续，`2` 表示有阻塞项，输出会列出具体缺项。
+Exit code `0` means continue; `2` means blockers exist and the output lists the missing items.
 
-## 部署
+## Deploy
 
 ```bash
 bash "$SKILL_DIR/scripts/deploy-local.sh"
 bash "$SKILL_DIR/scripts/verify-issuer.sh"
 ```
 
-`deploy-local.sh` 的顺序：
+`deploy-local.sh` performs these steps:
 
-1. 若 `http://127.0.0.1:14000` 的 discovery 已返回同一 issuer，直接复用。
-2. 启动（或复用）`postgres_yufu`：仓库内用根 `compose.yaml`，安装副本用 Skill 自带的
-   `assets/compose.postgres.yaml`；宿主机端口 `55433`（被占用时自动改用空闲端口并写入 `state.env`）。
-3. 数据库不存在则创建 `yufu_onboarding`。
-4. 用 `assets/yufu.toml.tmpl` 渲染配置到 `.yufu-onboarding/yufu.toml`。
-5. 缺少签名私钥时用 `openssl genpkey` 生成 2048 位 PKCS#8 私钥。
-6. 选择二进制：`YUFU_BIN` → 检测到的源码产物（不存在时用本地 Rust 工具链构建）
-   → 本地缓存 → 按平台下载 `versions.env` 中的固定版本并校验 SHA-256。
-7. 后台启动并轮询 discovery，最多 60 秒。
+1. If discovery at `http://127.0.0.1:14000` already returns the same issuer, reuse it.
+2. Start (or reuse) `postgres_yufu`: inside the yufu repo it uses the root `compose.yaml`; installed copies use the skill's
+   `assets/compose.postgres.yaml`. Host port `55433` (when busy, a free port is chosen and recorded in `state.env`).
+3. Create the `yufu_onboarding` database if it does not exist.
+4. Render the configuration from `assets/yufu.toml.tmpl` to `.yufu-onboarding/yufu.toml`.
+5. Generate a 2048-bit PKCS#8 private key with `openssl genpkey` if no signing key exists.
+6. Choose a binary: `YUFU_BIN` → a detected source artifact (build with the local Rust toolchain if absent)
+   → local cache → download the pinned version for this platform from `versions.env` and verify its SHA-256.
+7. Start in the background and poll discovery for up to 60 seconds.
 
-## 来源与校验
+## Sources and integrity
 
-二进制和 Go 模块都固定版本，完整性由校验和保证：
+Binaries and Go modules are version-pinned, and checksums guarantee integrity:
 
-- 二进制来自固定地址
-  `https://github.com/Bin-hy/yufu/releases/download/<version>/yufu-<version>-<target>.tar.gz`；
-  版本与每个平台的 SHA-256 固定在 `assets/versions.env`。脚本只访问该 release 地址，
-  不会拉取或执行远程脚本。
-- 下载后先校验 SHA-256，不一致时不会写入 `bin/`、不会启动服务。
-- 仓库内检测到本地产物时优先使用，不触发下载。
-- Go SDK 版本固定在 `assets/versions.env`，脚手架写入生成的 `go.mod`，模块校验和记录在 `go.sum`。
-- 压缩包内的 `BUILD-INFO.json` 记录 tag、版本、commit 与目标平台；需要核对来源时，
-  把它记录的 commit 与 releases 页面上对应 tag 的提交比对。
+- Binaries come from the pinned URL
+  `https://github.com/Bin-hy/yufu/releases/download/<version>/yufu-<version>-<target>.tar.gz`;
+  the version and per-platform SHA-256 values are pinned in `assets/versions.env`. Scripts access only that
+  release URL and never fetch or execute remote scripts.
+- The SHA-256 is verified before anything is written to `bin/` or started.
+- A local artifact found in the repository takes precedence and triggers no download.
+- The Go SDK version is pinned in `assets/versions.env`; the scaffold writes it to the generated `go.mod`,
+  and the module checksum is recorded in `go.sum`.
+- `BUILD-INFO.json` inside the archive records the tag, version, commit, and target platform; to trace
+  provenance, compare its commit with the commit behind that tag on the releases page.
 
-当前发布者是个人 GitHub 账号（`Bin-hy`）。校验和能防止内容被替换，但不能替使用者确认发布者身份；
-在受监管环境中使用前，请按组织要求评估该来源。
+The current publisher is a personal GitHub account (`Bin-hy`). Checksums prevent content substitution but
+do not confirm the publisher's identity; regulated environments should evaluate this source against their
+own policy.
 
-## 可覆盖变量
+## Overridable variables
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `YUFU_PORT` | `14000` | yufu 监听端口 |
-| `YUFU_PG_PORT` | `55433` | Postgres 宿主机端口 |
-| `YUFU_DB_NAME` | `yufu_onboarding` | 数据库名 |
-| `YUFU_ADMIN_USERNAME` | `onboard-admin` | 引导管理员 |
-| `YUFU_ADMIN_PASSWORD` | `onboard-admin-password` | 仅限本机 |
-| `YUFU_BIN` | 空 | 指定已有二进制（离线可用） |
-| `YUFU_TARGET` | 按 `uname` 推导 | 覆盖平台；必须是支持列表之一 |
-| `YUFU_WORKDIR` | `./.yufu-onboarding` | 状态、配置、日志、二进制缓存 |
+| `YUFU_PORT` | `14000` | yufu listen port |
+| `YUFU_ISSUER` | derived from `YUFU_PORT` | issuer written to the config and state |
+| `YUFU_PG_PORT` | `55433` | Postgres host port |
+| `YUFU_DB_NAME` | `yufu_onboarding` | Database name |
+| `YUFU_ADMIN_USERNAME` | `onboard-admin` | Bootstrap admin user |
+| `YUFU_ADMIN_PASSWORD` | `onboard-admin-password` | Loopback only |
+| `YUFU_BIN` | empty | Use an existing binary (works offline) |
+| `YUFU_TARGET` | derived from `uname` | Override the platform; must be in the supported list |
+| `YUFU_ROOT` | auto-detected | Explicit yufu source checkout |
+| `YUFU_APP_PORT` | chosen by `register-app.sh` | Loopback port for the demo web app |
+| `YUFU_WORKDIR` | `./.yufu-onboarding` | State, config, logs, binary cache |
 
-未显式设置 `YUFU_PORT` / `YUFU_PG_PORT` 时，脚本会在默认端口被占用后自动递增，并把最终值写入
-`state.env`；显式设置时严格使用给定值，端口冲突直接报错。
+When `YUFU_PORT` / `YUFU_PG_PORT` are not set explicitly, the scripts increment past busy default ports and
+write the final values to `state.env`. Explicit values are used strictly; a port conflict fails immediately.
 
-## 端口冲突
+## Port conflicts
 
-脚本不会停止机器上已有的服务。默认端口被占用时：
+The scripts never stop services already running on the machine. When a default port is busy:
 
-- `YUFU_PORT`（默认 `14000`）被占用：改用下一个空闲端口，issuer 随之变化并写入 `state.env`。
-- `YUFU_PG_PORT`（默认 `55433`）被占用：优先复用已发布的 `postgres_yufu`，否则改用下一个空闲端口。
-- 显式设置 `YUFU_PORT` 或 `YUFU_PG_PORT` 时以设置为准；端口仍被占用则报错退出，不会自动改值。
+- `YUFU_PORT` (default `14000`) is busy: use the next free port; the issuer changes and is written to `state.env`.
+- `YUFU_PG_PORT` (default `55433`) is busy: reuse the published `postgres_yufu` when possible, otherwise use the next free port.
+- Explicit `YUFU_PORT` or `YUFU_PG_PORT` values take precedence; if the port is still busy the script fails instead of changing it.
 
-Web 示例应用的端口由 `register-app.sh` 从 `8080` 起选择空闲端口，并记录为 `YUFU_APP_PORT`；
-启动应用时用 `ADDR=127.0.0.1:$YUFU_APP_PORT`，且回调地址必须与注册值逐字符一致。
+`register-app.sh` chooses a free web demo app port starting at `8080` and records it as `YUFU_APP_PORT`.
+Start the app with `ADDR=127.0.0.1:$YUFU_APP_PORT`, and keep the callback address byte-for-byte identical to the registered value.
 
-### issuer 与数据库绑定
+### Issuer and database binding
 
-yufu 在 `identity_provider` 中固定首次启动时的 issuer。已被初始化过的数据库**不能**换端口或 issuer
-复用——服务会在启动阶段因 issuer 不匹配而退出。脚本会在启动前检查并直接报错，此时三种处理方式：
+yufu pins the issuer from its first startup in `identity_provider`. An initialized database **cannot** be
+reused on a different port or issuer — the service exits during startup because the issuer does not match.
+The script checks this before starting and fails immediately. Three options:
 
-- 用回原来的 `YUFU_PORT` / `YUFU_ISSUER`；
-- 换一个 `YUFU_DB_NAME`（全新库）；
-- 明确要丢弃旧库数据时，自行删除旧数据库后重建。
+- Reuse the original `YUFU_PORT` / `YUFU_ISSUER`.
+- Switch to a different `YUFU_DB_NAME` (a fresh database).
+- If the old data is explicitly expendable, delete the old database and recreate it.
 
-不要在报错后反复重启同一配置，日志里的 `identity initialization failed` 就是这个原因。
+Do not restart the same configuration repeatedly after this error; `identity initialization failed` in the log is the symptom.
 
-## 就绪判据
+## Readiness criteria
 
-三项同时成立才算完成：
+All three must hold:
 
-- discovery 返回的 `issuer` 与配置逐字符一致；
-- JWKS 中至少有一把密钥；
-- `/api/v1/health/ready` 返回 200，且 `security_clock_synchronized = true`。
+- The `issuer` from discovery matches the configured value byte for byte.
+- JWKS contains at least one key.
+- `/api/v1/health/ready` returns 200 with `security_clock_synchronized = true`.
 
-`verify-issuer.sh` 会逐项输出 `[ok]` / `[fail]`。
+`verify-issuer.sh` prints `[ok]` / `[fail]` for each item.
 
-## 停止与清理
+## Stop and clean up
 
 ```bash
 kill "$(sed -n 's/^YUFU_SERVER_PID=//p' .yufu-onboarding/state.env)"
 docker stop postgres_yufu
 ```
 
-数据库卷保留；需要彻底清理时再删除卷，这属于显式的破坏性操作，先确认。
+Database volumes are preserved. Deleting a volume is explicit destructive cleanup: confirm first.
 
-## 复用规则
+## Reuse rules
 
-重复执行 `deploy-local.sh` 不会重复建库、不会覆盖已有配置，也不会重启已就绪的服务。
-只有 discovery 不可用时才会重新启动进程。
+Running `deploy-local.sh` again does not recreate the database and does not restart an already-ready service.
+It rewrites the configuration only when it actually starts the process, and it starts the process only when discovery is unavailable.

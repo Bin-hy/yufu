@@ -1,36 +1,38 @@
-# Go 资源服务器接入
+# Go Resource Server Integration
 
-适用于：已有登录体系、只需要在自己的 API 上校验 yufu 签发访问令牌的服务。
+Use this when the application already has a sign-in system and only needs to verify yufu-issued access
+tokens on its own API.
 
-## 1. 先拿到三个值
+## 1. Get the three values first
 
-| 值 | 来源 |
+| Value | Source |
 | --- | --- |
-| `issuer` | `state.env` 的 `YUFU_ISSUER`，例如 `http://127.0.0.1:14000` |
-| `client_id` | `state.env` 的 `YUFU_CLIENT_ID`（只用于初始化 SDK） |
-| `audience` | `state.env` 的 `YUFU_AUDIENCE`，例如 `urn:app:development` |
+| `issuer` | `YUFU_ISSUER` in `state.env`, for example `http://127.0.0.1:14000` |
+| `client_id` | `YUFU_CLIENT_ID` in `state.env` (only used to initialize the SDK) |
+| `audience` | `YUFU_AUDIENCE` in `state.env`, for example `urn:app:development` |
 
-`audience` 是应用环境的 access audience，**不是** client id。
-令牌校验只依赖 issuer 与 JWKS；`client_id` 是 SDK 初始化要求，不参与签名校验。
+`audience` is the environment's access audience, **not** the client id. Token verification depends only on
+the issuer and JWKS; `client_id` is required by SDK initialization and does not participate in signature
+verification.
 
-## 2. 生成中间件
+## 2. Generate the middleware
 
 ```bash
 bash "$SKILL_DIR/scripts/scaffold-resource-server.sh" --dir ./internal/auth --pkg auth
 ```
 
-脚本会做三件事：渲染 `yufu_auth.go` 与 `yufu_auth_test.go`、把 SDK 固定到
-`assets/versions.env` 中的版本（可用 `YUFU_SDK_VERSION` 覆盖）、运行 `go test`。
-目录必须位于已初始化的 Go module 内。
+The script does three things: render `yufu_auth.go` and `yufu_auth_test.go`, pin the SDK to the version in
+`assets/versions.env` (override with `YUFU_SDK_VERSION`), and run `go test`. The target directory must be
+inside an initialized Go module.
 
-生成结果：
+Generated files:
 
-| 文件 | 内容 |
+| File | Contents |
 | --- | --- |
-| `yufu_auth.go` | `Verifier`、`NewVerifier`、`Middleware`、`ClaimsFromContext` |
-| `yufu_auth_test.go` | 有效令牌、无令牌、audience 不符、过期四种情况 |
+| `yufu_auth.go` | `Verifier`, `NewVerifier`, `Middleware`, `ClaimsFromContext` |
+| `yufu_auth_test.go` | Four cases: valid token, no token, audience mismatch, expired token |
 
-## 3. 接入
+## 3. Wire it in
 
 ```go
 client, err := yufu.New(yufu.Config{
@@ -50,7 +52,7 @@ if err != nil {
 mux.Handle("/api/", verifier.Middleware(apiHandler))
 ```
 
-在 handler 里取 claims：
+Read claims in the handler:
 
 ```go
 claims, ok := auth.ClaimsFromContext(r.Context())
@@ -58,28 +60,29 @@ if !ok {
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return
 }
-// claims.Subject 是稳定主体标识；用 iss + sub 作为本地用户键，不要用 email。
+// claims.Subject is the stable subject; key local users by iss + sub, not email.
 ```
 
-## 4. 错误约定
+## 4. Error contract
 
-| 情况 | 响应 |
+| Case | Response |
 | --- | --- |
-| 没有 `Authorization` 头 | `401` + `WWW-Authenticate: Bearer error="missing_token"` |
-| 签名 / issuer / audience / 过期任一不符 | `401` + `WWW-Authenticate: Bearer error="invalid_token"` |
+| No `Authorization` header | `401` + `WWW-Authenticate: Bearer error="missing_token"` |
+| Signature / issuer / audience / expiry mismatch | `401` + `WWW-Authenticate: Bearer error="invalid_token"` |
 
-不要在 401 响应里回显令牌或校验器的内部错误文本。
+Never echo the token or the verifier's internal error text in a 401 response.
 
-## 5. 什么时候需要 introspection
+## 5. When introspection is needed
 
-本地校验已经覆盖签名、issuer、audience、`typ` 与有效期，绝大多数请求不需要额外网络调用。
-只有在需要「令牌是否已被主动撤销」的即时语义时才调用 `Introspect`，并且：
+Local verification already covers signature, issuer, audience, `typ`, and expiry, so most requests need no
+extra network call. Call `Introspect` only when you need the immediate semantics of "has this token been
+revoked actively?", and then:
 
-- 注册一个 Reader 凭据，凭据只放在服务端；
-- 内省结果按 `sid` 与 `sub` 清理缓存；
-- 不要用内省替代本地校验。
+- Register a Reader credential and keep it server-side only.
+- Evict cache entries by `sid` and `sub`.
+- Never replace local verification with introspection.
 
-## 6. 与脚本的对应关系
+## 6. Relationship to the script
 
-`scaffold-resource-server.sh` 生成的文件就是本节描述的中间件；
-手工修改后重跑脚本会覆盖同名文件，请把项目私有逻辑放在调用方，而不是改生成文件。
+`scaffold-resource-server.sh` generates the middleware described in this section. Rerunning it overwrites
+files with the same names, so keep project-specific logic in the caller rather than editing the generated files.

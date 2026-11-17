@@ -3,152 +3,157 @@ name: yufu-onboarding
 description: |
   Deploy a local yufu identity provider and integrate it into an existing application.
   Use this skill whenever the user wants to:
-  - Deploy yufu and connect this project (部署 yufu 并接入这个项目)
-  - Add SSO login to a Go service (给项目加 SSO 登录)
-  - Protect an API with yufu bearer tokens (用 yufu 保护 API)
+  - Deploy yufu and connect this project
+  - Add SSO login to a Go service
+  - Protect an API with yufu bearer tokens
   - Register a yufu application and verify redirect/audience parameters
   - Diagnose why a yufu login or token verification fails
-  Triggers: yufu onboarding, 接入 yufu, 部署 yufu, go sdk 接入, OIDC 接入, SSO 登录, 令牌校验.
+  Triggers: yufu onboarding, deploy yufu, connect yufu, Go SDK integration, OIDC integration, SSO login, token verification.
   Do not use for production TLS/hosting setups, M2M client credentials, Python/Node SDK work,
   or changes to the yufu server or yufu-sdk-go themselves.
 ---
 
-# yufu 接入
+# yufu Onboarding
 
-一个入口，四个阶段：探测 → 部署 → 注册 → 接入 → 验收。
+One entry point, five stages: preflight → deploy → register → integrate → verify.
 
-先确定 Skill 目录，后续命令都用绝对路径调用，不依赖可执行位：
+Resolve the skill directory first, then call every script by absolute path; the scripts do not need the executable bit:
 
 ```bash
 SKILL_DIR="<directory containing this SKILL.md>"
 ```
 
-`SKILL.md` 保持语言无关；语言细节全部在 `references/`，按阶段加载。
+Keep `SKILL.md` language-agnostic. Language-specific details live in `references/`; load them per stage.
 
-## 快速路径（一句话触发）
+## Quick path (single request)
 
-听到「部署 yufu 并接入这个项目」时，不要先讲背景，直接执行。
+When the request is "deploy yufu and connect this project", skip the background and start executing.
 
-**只问一个问题**，不要重复询问：
+**Ask one question, exactly once:**
 
-> 你的应用需要让用户通过 yufu 登录，还是只在自己的 API 上校验 yufu 令牌？
-> 1. 需要登录 → Web 后端
-> 2. 只校验令牌 → API 资源服务器
+> Does your application need users to sign in through yufu, or only verify yufu tokens on its own API?
+> 1. Sign-in → web backend
+> 2. Token verification only → API resource server
 
-然后一条命令完成前置检查、部署、注册与参数校验：
+Then run one command that performs preflight, deployment, registration, and parameter verification:
 
 ```bash
+# Option 1: sign-in
 bash "$SKILL_DIR/scripts/onboard.sh" --mode web --project-dir "$PWD"
+
+# Option 2: token verification only
 bash "$SKILL_DIR/scripts/onboard.sh" --mode api --project-dir "$PWD"
 ```
 
-需要自定义回调、audience 或 scopes 时追加参数，语义见 `references/register-app.md`。
-成功后读取交接块，再加载阶段 3 对应的 reference 写接入代码。
+Append flags for a custom callback, audience, or scopes; see `references/register-app.md`.
+When it succeeds, read the handoff block, then load the stage 3 reference for the target language and write the integration code.
 
-## 阶段 0：探测
+## Stage 0: Preflight
 
 ```bash
 bash "$SKILL_DIR/scripts/preflight.sh"
 ```
 
-- 退出码 `0`：继续。
-- 退出码 `2`：列出阻塞项。修完再继续，不要绕过。
+- Exit code `0`: continue.
+- Exit code `2`: blockers are listed. Fix them before continuing; do not bypass them.
 
-然后读取状态文件（不存在则视为全新）：
+Then read the state file (a missing file means a fresh start):
 
 ```bash
 cat .yufu-onboarding/state.env 2>/dev/null || echo "no state"
 ```
 
-并运行：
+Run:
 
 ```bash
 bash "$SKILL_DIR/scripts/verify-issuer.sh"
 ```
 
-- 通过：记下 `YUFU_ISSUER`，跳到阶段 2。
-- 失败：进入阶段 1。
+- Pass: record `YUFU_ISSUER` and skip to stage 2.
+- Fail: go to stage 1.
 
-## 阶段 1：部署
+## Stage 1: Deploy
 
-加载 `references/deploy-local.md`，然后执行：
+Load `references/deploy-local.md`, then run:
 
 ```bash
 bash "$SKILL_DIR/scripts/deploy-local.sh"
 bash "$SKILL_DIR/scripts/verify-issuer.sh"
 ```
 
-两项都通过才算完成。`deploy-local.sh` 幂等：已就绪时只输出「复用」。
-没有源码 checkout 时会下载固定版本并校验，不要求 Rust 或 cargo；
-离线环境用 `YUFU_BIN` 指定本地二进制。
+Both must pass. `deploy-local.sh` is idempotent: when the issuer is already ready it only logs that it is reusing it.
+Without a source checkout it downloads the pinned version and verifies the checksum, so Rust and cargo are not required.
+For offline environments, point `YUFU_BIN` at a local binary.
 
-## 阶段 2：注册
+## Stage 2: Register
 
-**只问一个问题**，不要重复询问：
+If you entered at stage 0 and have not asked yet, ask this question once:
 
-> 你的应用需要让用户通过 yufu 登录，还是只在自己的 API 上校验 yufu 令牌？
-> 1. 需要登录 → Web 后端
-> 2. 只校验令牌 → API 资源服务器
+> Does your application need users to sign in through yufu, or only verify yufu tokens on its own API?
+> 1. Sign-in → web backend
+> 2. Token verification only → API resource server
 
-按回答执行其一：
+Then run one of:
 
 ```bash
 bash "$SKILL_DIR/scripts/register-app.sh" --mode web
 bash "$SKILL_DIR/scripts/register-app.sh" --mode api
 ```
 
-脚本会自动完成 csrf → 登录 → 创建应用 → 配对校验。
-需要自定义 redirect / audience / scopes 时，先读 `references/register-app.md`。
+The script handles csrf → login → app creation → parameter pairing check.
+For a custom redirect URI, audience, or scopes, read `references/register-app.md` first.
 
-## 阶段 3：接入
+## Stage 3: Integrate
 
-| 选择 | 加载 | 完成判据 |
+| Choice | Load | Done when |
 | --- | --- | --- |
-| Web 后端 | `references/go-web.md` | `go build ./...` 通过，登录后能读到 `sub` |
-| API 资源服务器 | `references/go-resource-server.md` | `go test ./...` 通过，401/200 行为正确 |
+| Web backend | `references/go-web.md` | `go build ./...` passes and a completed sign-in exposes `sub` |
+| API resource server | `references/go-resource-server.md` | `go test ./...` passes and the 401/200 behavior is correct |
 
-接入时只新增必要文件，并让使用方确认改动范围；
-不要重排既有目录，不要引入 Web 框架，不要修改 yufu 服务端或 SDK。
+Add only the files the integration needs and confirm the change scope with the application owner.
+Do not reorganize existing directories, introduce a web framework, or modify the yufu server or SDK.
 
-## 阶段 4：验收
+## Stage 4: Verify
 
-加载 `references/verification.md`，按三条行为取证：
+Load `references/verification.md` and collect evidence for all three behaviors:
 
-1. 登录：`verify-app.sh` 通过，且人工完成一次浏览器登录看到 `sub`。
-2. 令牌：生成的 `go test` 通过；无令牌 401、有效令牌 200。
-3. 退出：访问 `/logout` 后受保护页重新要求登录。
+1. Sign-in: `verify-app.sh` passes, and a human completes one browser sign-in and sees `sub`.
+2. Token: the generated `go test` passes; no token returns 401, a valid token returns 200.
+3. Sign-out: after visiting `/logout`, the protected page requires sign-in again.
 
-## 失败处理
+## Failure handling
 
-加载 `references/troubleshooting.md`，按「阶段 → 症状」定位。
-先跑 `verify-issuer.sh` 排除 issuer 层问题，再查应用层。
-每个脚本失败时输出阶段名与至少一条可执行排查命令。
+Load `references/troubleshooting.md` and locate the issue by stage → symptom.
+Run `verify-issuer.sh` first to rule out issuer-level problems, then inspect the application layer.
+Each script names the failing stage and prints at least one actionable diagnostic command.
 
-## 端口
+## Ports
 
-默认端口被占用时脚本会自动改用下一个空闲端口，并把最终端口写入 `state.env`；不会停止其他容器、隧道或服务。
-显式设置 `YUFU_PORT` / `YUFU_PG_PORT` 时以设置为准。Web 示例应用的端口由 `register-app.sh` 从 `8080` 起选择，
-记录为 `YUFU_APP_PORT`，启动时用 `ADDR` 对齐，`REDIRECT_URI` 必须与注册值一致。
+When a default port is in use, the scripts choose the next free port and record the final value in `state.env`; they never stop other containers, tunnels, or services.
+Explicit `YUFU_PORT` / `YUFU_PG_PORT` settings always win.
 
-数据库会记住首次启动时的 issuer，已初始化的库换端口会启动失败；`deploy-local.sh` 会提前报错。
-此时用回原端口，或换新的 `YUFU_DB_NAME`。
+`register-app.sh` chooses the web demo app port starting at `8080` and records it as `YUFU_APP_PORT`.
+Start the app with `ADDR` set to that address, and keep `REDIRECT_URI` byte-for-byte identical to the registered value.
 
-## 状态与文件
+The database pins the issuer from its first startup, so an initialized database fails to start on a different port; `deploy-local.sh` detects this and fails early.
+Reuse the original port, or switch to a new `YUFU_DB_NAME`.
 
-- 状态：`.yufu-onboarding/state.env`（权限 600，不要提交；把 `.yufu-onboarding/` 加入项目 `.gitignore`）。
-- 日志：`.yufu-onboarding/yufu.log`。
-- 覆盖目录用 `YUFU_WORKDIR`。
+## State and files
 
-## 禁止
+- State: `.yufu-onboarding/state.env` (mode 600; never commit it; add `.yufu-onboarding/` to the project `.gitignore`).
+- Logs: `.yufu-onboarding/yufu.log`.
+- Override the working directory with `YUFU_WORKDIR`.
 
-- 不打印、不提交 client secret；secret 只存在于 `.yufu-onboarding/client_secret` 或服务端环境。
-- 不使用 `@latest`；SDK 版本固定，来源是 `assets/versions.env`。
-- 二进制只从 `assets/versions.env` 固定的 GitHub Release 地址下载并校验 SHA-256，不执行远程脚本。
-- 不修改 `yufu/` 服务端代码与 `yufu-sdk-go` 仓库。
-- 不把本机回环配置当作生产配置使用。
-- 不在未征得同意时删除数据库卷、配置或既有应用。
+## Never
 
-## 扩展新语言
+- Never print or commit the client secret; it exists only in `.yufu-onboarding/client_secret` or the server environment.
+- Never use `@latest`; SDK versions are pinned in `assets/versions.env`.
+- Download binaries only from the GitHub Release URLs pinned in `assets/versions.env` and verify SHA-256; never execute remote scripts.
+- Never modify the `yufu/` server code or the `yufu-sdk-go` repository.
+- Never treat a loopback configuration as production configuration.
+- Never delete database volumes, configuration, or existing applications without consent.
 
-新增 `references/<lang>-web.md`、`references/<lang>-resource-server.md` 与必要的 `assets/<lang>/`，在本文件的阶段 3 表格加一行。
-不要改动阶段 0–2 与验收行为。
+## Adding a language
+
+Add `references/<lang>-web.md`, `references/<lang>-resource-server.md`, and any required `assets/<lang>/`, then add a row to the stage 3 table.
+Do not change stages 0–2 or the verification behavior.

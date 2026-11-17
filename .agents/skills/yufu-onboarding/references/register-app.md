@@ -1,19 +1,20 @@
-# 应用注册
+# Application Registration
 
-注册通过控制台管理接口完成，不需要浏览器操作。前提是本地部署写入的引导管理员账号。
+Registration goes through the console admin API; no browser interaction is needed. It relies on the
+bootstrap admin account written by the local deployment.
 
-## 两种模式
+## Modes
 
-| 模式 | `client_kind` | 是否有 secret | 适用 |
+| Mode | `client_kind` | Secret | Use for |
 | --- | --- | --- | --- |
-| `web` | `server_web` | 有 | 服务端持有会话的 Web 后端 |
-| `api` | `browser_spa` | 无 | 只校验 Bearer 的资源服务器 |
+| `web` | `server_web` | Yes | Web backends that keep the session on the server |
+| `api` | `browser_spa` | No | Resource servers that only verify Bearer tokens |
 
-`server_web` 不允许配置 `browser_origins`；`browser_spa` 的 `browser_origins` 必须与
-全部 redirect URI 的 origin 完全一致。脚本已按模式处理（登出地址同源时自动去重），
-不要手工混填。
+`server_web` must not set `browser_origins`; for `browser_spa`, `browser_origins` must exactly match the
+origins of all redirect URIs. The script handles this per mode (it deduplicates the sign-out URL when it
+shares an origin). Do not mix these values by hand.
 
-## 命令
+## Commands
 
 ```bash
 bash "$SKILL_DIR/scripts/register-app.sh" --mode web \
@@ -27,39 +28,42 @@ bash "$SKILL_DIR/scripts/register-app.sh" --mode web \
 bash "$SKILL_DIR/scripts/register-app.sh" --mode api --audience urn:app:development
 ```
 
-参数默认值见脚本；`--app-key` 默认由目标目录路径派生，同一项目重跑稳定。
+Defaults are defined in the script; `--app-key` is derived from the project path by default, so reruns in
+the same project stay stable.
 
-## 调用链
+## Call chain
 
-1. `GET /api/v1/identity/csrf`，携带 `Origin`，拿到 `csrf_token` 并保存 cookie。
-2. `POST /api/v1/identity/login`，携带 `Origin`、`x-csrf-token` 与用户名密码。
-3. `POST /api/v1/admin/apps`，携带 `Origin`、`x-csrf-token`、`idempotency-key`。
-4. 从响应读取 development 环境的 `client_id`；机密客户端同时读取一次性 `client_secret`。
-5. 写入 `state.env` 与 `client_secret`（权限 600）。
+1. `GET /api/v1/identity/csrf` with `Origin`; store the `csrf_token` and the cookies.
+2. `POST /api/v1/identity/login` with `Origin`, `x-csrf-token`, and the username/password.
+3. `POST /api/v1/admin/apps` with `Origin`, `x-csrf-token`, and `idempotency-key`.
+4. Read the development environment's `client_id` from the response; confidential clients also receive a one-time `client_secret`.
+5. Write `state.env` and `client_secret` (mode 600).
 
-## 幂等
+## Idempotency
 
-- 幂等键就是 `app_key`。同一项目重跑会命中同一条操作回执。
-- 令牌重放只返回应用与 client id，**不再返回 secret**。
-- `state.env` 已有 `YUFU_CLIENT_ID` 时，脚本直接进入配对校验，不会重复创建应用。
-- secret 文件丢失时脚本会明确失败：在控制台重置 secret，或换一个新的 `--app-key` 重新注册。
+- The idempotency key is `app_key`. Reruns in the same project hit the same operation receipt.
+- A replayed request returns only the application and client id; **it never returns the secret again**.
+- When `state.env` already has `YUFU_CLIENT_ID`, the script goes straight to the parameter check and does
+  not create a duplicate application.
+- If the secret file is missing, the script fails explicitly: reset the secret in the console, or register
+  again with a new `--app-key`.
 
-## 参数语义
+## Parameter semantics
 
-| 参数 | 约束 |
+| Parameter | Constraint |
 | --- | --- |
-| `redirect_uri` | 与授权请求逐字符一致，包括 scheme、host、port、path；不支持通配 |
-| `post_logout_redirect_uri` | 同上，用于 RP 发起退出；本机版本要求它同时出现在 `redirect_uris` 中，脚本会自动加入 |
-| `access_audience` | 资源服务器校验时使用的 audience，不是 client id |
-| `identity_scopes` | 空格分隔；`openid` 必填，常用 `openid profile email` |
-| `consent_policy` | 本项目统一 `user_consent` |
-| `logout_capability` | 统一 `online`；`backchannel_and_online` 必须同时给回调地址 |
+| `redirect_uri` | Byte-for-byte identical to the authorization request, including scheme, host, port, and path; no wildcards |
+| `post_logout_redirect_uri` | Same rules; the loopback build requires it to also appear in `redirect_uris`, and the script adds it automatically |
+| `access_audience` | Audience used by resource servers; not the client id |
+| `identity_scopes` | Space-separated; `openid` is required; commonly `openid profile email` |
+| `consent_policy` | Always `user_consent` in this project |
+| `logout_capability` | Always `online`; `backchannel_and_online` also requires the callback address |
 
-## 失败对照
+## Failure reference
 
-| HTTP | 含义 | 处理 |
+| HTTP | Meaning | Action |
 | --- | --- | --- |
-| `401` | 登录失败或 cookie 未生效 | 检查管理员账号与 `allow_insecure_loopback_cookies` |
-| `403` | 账号没有管理权限 | 用部署时的引导管理员 |
-| `400 invalid_input` | 参数组合不合法 | 按上文约束逐项核对；`server_web` 最常见原因是误填 `browser_origins` |
-| `409` | `app_key` 已存在且幂等键不同 | 复用原 `--app-key`，或换新 key |
+| `401` | Login failed or cookies did not take effect | Check the admin account and `allow_insecure_loopback_cookies` |
+| `403` | The account lacks admin permission | Use the bootstrap admin from deployment |
+| `400 invalid_input` | Invalid parameter combination | Re-check the constraints above; the most common `server_web` cause is a stray `browser_origins` |
+| `409` | `app_key` exists with a different idempotency key | Reuse the original `--app-key`, or use a new key |

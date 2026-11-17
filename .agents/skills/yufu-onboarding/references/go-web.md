@@ -1,24 +1,26 @@
-# Go Web 后端接入（授权码 + PKCE）
+# Go Web Backend Integration (Authorization Code + PKCE)
 
-适用于：需要让用户通过 yufu 登录、并在服务端持有会话的 Go Web 服务。
-注册时使用 `--mode web`（`client_kind = server_web`，有 client secret）。
+Use this for Go web services that need users to sign in through yufu and keep the session on the server.
+Register with `--mode web` (`client_kind = server_web`, with a client secret).
 
-## 1. 拿到配置
+## 1. Get the configuration
 
-| 环境变量 | 来源 |
+| Environment variable | Source |
 | --- | --- |
-| `ISSUER` | `state.env` 的 `YUFU_ISSUER` |
-| `CLIENT_ID` | `state.env` 的 `YUFU_CLIENT_ID` |
-| `CLIENT_SECRET` | `state.env` 的 `YUFU_CLIENT_SECRET_FILE` 文件内容 |
-| `REDIRECT_URI` | 注册时的 `YUFU_REDIRECT_URI`，必须逐字符一致 |
-| `AUDIENCE` | `state.env` 的 `YUFU_AUDIENCE` |
-| `SCOPES` | 默认 `openid profile email` |
-| `ADDR` | 可选；默认 `127.0.0.1:8080`，冲突时用 `state.env` 的 `YUFU_APP_PORT` |
+| `ISSUER` | `YUFU_ISSUER` in `state.env` |
+| `CLIENT_ID` | `YUFU_CLIENT_ID` in `state.env` |
+| `CLIENT_SECRET` | Contents of the file named by `YUFU_CLIENT_SECRET_FILE` |
+| `REDIRECT_URI` | `YUFU_REDIRECT_URI` from registration; must match byte for byte |
+| `AUDIENCE` | `YUFU_AUDIENCE` in `state.env` |
+| `SCOPES` | Default `openid profile email` |
+| `ADDR` | Optional; default `127.0.0.1:8080`; on conflict use `YUFU_APP_PORT` from `state.env` |
 
-secret 只从服务端环境读取，不进入前端、不写进仓库、不打印到日志。
+Read the secret only from the server environment. Never expose it to the frontend, commit it to the
+repository, or print it in logs.
 
-`register-app.sh` 在 `8080` 被占用时会从 `8080` 起选择空闲端口，并写入 `state.env` 的 `YUFU_APP_PORT`。
-启动应用时设置 `ADDR=127.0.0.1:$YUFU_APP_PORT`；`REDIRECT_URI` 必须与注册值逐字符一致。
+`register-app.sh` picks a free port starting at `8080` when `8080` is busy and records it as `YUFU_APP_PORT`
+in `state.env`. Start the app with `ADDR=127.0.0.1:$YUFU_APP_PORT`; `REDIRECT_URI` must match the registered
+value byte for byte.
 
 ## 2. `config.go`
 
@@ -206,9 +208,10 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 ```
 
-cookie 里只有不可猜测的随机 ID，用户资料保存在服务端 `sessionStore`，篡改 cookie 只能得到一个无效 ID。
-示例使用进程内 map 以便直接运行；多实例部署要换成共享存储（Redis 或数据库），补上过期时间与
-注销联动，并在 HTTPS 下追加 `Secure: true`。
+The cookie carries only an unguessable random ID; user data lives in the server-side `sessionStore`, so
+tampering with the cookie only yields an invalid ID. The example uses an in-process map so it can run
+directly; multi-instance deployments must use shared storage (Redis or a database), add expiry and
+sign-out propagation, and set `Secure: true` under HTTPS.
 
 ## 4. `login.go`
 
@@ -278,8 +281,8 @@ func (a *App) Callback(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-关键顺序不能调换：先兑换 code，再校验 ID Token（必须带 nonce），再校验 access token
-（必须带 audience），最后才建立本地会话。
+The order matters: exchange the code first, then verify the ID token (with the nonce), then verify the
+access token (with the audience), and only then create the local session.
 
 ## 5. `logout.go`
 
@@ -321,15 +324,17 @@ func Routes(a *App) http.Handler {
 }
 ```
 
-本机验收只要求本地会话失效：`/logout` 后访问 `/api/me` 必须重新返回 `401`。
+Local verification only requires the local session to be invalidated: after `/logout`, `/api/me` must
+return `401` again.
 
-yufu 的中心 SSO 会话由控制台退出（`POST /api/v1/identity/logout`）。本机版本的
-`/oidc/logout` 确认页仍按 legacy `refresh_token` cookie 校验，中心会话直接确认会得到
-`400 missing refresh token`，因此默认实现不把用户送去该页面。需要 RP 发起退出时，
-可以用 SDK 的 `EndSessionURL` 生成地址；注册脚本已把 `post_logout_redirect_uri`
-一并写入 `redirect_uris`，所以确认页本身可以正常打开。
+yufu's central SSO session is ended from the console (`POST /api/v1/identity/logout`). In the loopback
+build, the `/oidc/logout` confirmation page still validates the legacy `refresh_token` cookie; confirming
+a central session directly returns `400 missing refresh token`, so the default implementation does not send
+users to that page. If you need RP-initiated sign-out, generate the URL with the SDK's `EndSessionURL`.
+The registration script already writes `post_logout_redirect_uri` into `redirect_uris`, so the confirmation
+page itself opens correctly.
 
-## 6. 接线
+## 6. Wiring
 
 ```go
 package main
@@ -356,11 +361,14 @@ func main() {
 }
 ```
 
-## 7. 验证
+## 7. Verification
 
-1. `go build ./...` 通过。
-2. 启动后访问 `/login`（`ADDR` 指定的地址），应在 yufu 完成登录并回到 `/api/me`，看到稳定 `sub`。
-3. 访问 `/logout` 后，再访问 `/api/me` 应重新要求登录。
-4. 不要用 email 或 username 作为本地用户主键；`iss + sub` 才稳定。
+1. `go build ./...` passes.
+2. Start the app and visit `/login` at the `ADDR` address. After signing in at yufu, the browser returns to
+   `/api/me` and shows a stable `sub`.
+3. After visiting `/logout`, `/api/me` requires sign-in again.
+4. Do not use email or username as the local user key; `iss + sub` is stable.
 
-本节代码仅用于本机验收；生产部署必须替换为共享会话存储、补上会话过期与注销联动，并在 HTTPS 下启用 `Secure`。back-channel logout 的 `jti` 去重逻辑可在同一路由中按需补充。
+This code is for loopback verification only. Production deployments must replace the in-memory store with
+shared session storage, add session expiry and sign-out propagation, and enable `Secure` under HTTPS.
+Back-channel logout `jti` deduplication can be added to the same routes as needed.
