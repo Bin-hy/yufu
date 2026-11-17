@@ -32,6 +32,7 @@ permissions:
 env:
     CARGO_TERM_COLOR: always
     YUFU_READINESS_OUTPUT: docs/specs/product-readiness/evidence/ci
+    YUFU_TEST_THREADS: '4'
 
 jobs:
     check:
@@ -107,6 +108,8 @@ jobs:
               with:
                   components: rustfmt, clippy
             - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+              with:
+                  shared-key: rust-verify
             - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
               with:
                   node-version: '24'
@@ -128,6 +131,13 @@ jobs:
                   python scripts/readiness.py run web-tests
                   python scripts/readiness.py run web-check
                   python scripts/readiness.py run web-lint
+            - name: Cache Playwright browsers
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+              with:
+                  path: ~/.cache/ms-playwright
+                  key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+                  restore-keys: |
+                      playwright-${{ runner.os }}-
             # tests/yufu/routes/identity_browser_e2e.rs drives the Node runner,
             # which launches all three Playwright engines against real TLS fronts.
             - name: Install browser engines

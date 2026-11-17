@@ -19,6 +19,7 @@ env:
   CARGO_PROFILE_DEV_DEBUG: '0'
   CARGO_PROFILE_TEST_DEBUG: '0'
   PYTHONUTF8: '1'
+  YUFU_TEST_THREADS: '4'
 
 jobs:
   validate:
@@ -62,6 +63,9 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: rust-verify
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
@@ -78,15 +82,24 @@ jobs:
           python scripts/readiness.py run web-tests
           python scripts/readiness.py run web-check
           python scripts/readiness.py run web-lint
+      - name: Cargo format
+        run: python scripts/readiness.py run fmt
+      - name: Cargo clippy
+        run: python scripts/readiness.py run clippy
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
       - name: Install integration browser dependencies
         working-directory: web
         run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
-      - name: Rust quality checks
-        run: |
-          python scripts/readiness.py run fmt
-          python scripts/readiness.py run clippy
-          python scripts/readiness.py run rust-tests
-          python scripts/readiness.py run rust-doc
+      - name: Rust tests
+        run: python scripts/readiness.py run rust-tests
+      - name: Rust doc tests
+        run: python scripts/readiness.py run rust-doc
       - name: Dependency and security checks
         run: |
           cargo install cargo-machete --version 0.9.2 --locked

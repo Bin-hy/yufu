@@ -98,6 +98,16 @@ class ReadinessTests(unittest.TestCase):
             readiness.classify('test result: \x1b[32mok\x1b[0m. 7 passed; 0 failed;', 0, 'test'),
             ('pass', 7))
 
+    def test_test_threads_honours_bounded_parallelism(self):
+        # Fixtures isolate their own databases and ports, so parallelism is a
+        # deliberate knob; malformed or out-of-range values must stay bounded.
+        for value, expected in [('8', '8'), ('0', '1'), ('-3', '1'), ('64', '16'), ('few', '4')]:
+            with self.subTest(value=value), mock.patch.dict(readiness.os.environ, {'YUFU_TEST_THREADS': value}):
+                self.assertEqual(readiness.test_threads(), expected)
+        with mock.patch.dict(readiness.os.environ, {}, clear=True):
+            self.assertEqual(readiness.test_threads(), '4')
+        self.assertIn('--test-threads=', readiness.CHECKS['rust-tests'][0][-1])
+
     def test_launch_keeps_the_canonical_command(self):
         # Everywhere but Windows the recorded command is launched unchanged.
         with mock.patch.object(readiness.os, 'name', 'posix'):
@@ -168,6 +178,23 @@ class ReadinessTests(unittest.TestCase):
         data['test_count'] = 99
         path.write_text(json.dumps(data))
         with self.assertRaises(ValueError): readiness.verify_record(self.root, path)
+
+    def test_parallel_thread_choice_stays_verifiable(self):
+        # Evidence records the threads it ran with; verification must accept a
+        # bounded choice even when the verifier uses the default.
+        folder = self.root / 'docs/specs/product-readiness/evidence/runs/threads'
+        folder.mkdir(parents=True)
+        argv = readiness.CHECKS['unit'][0][:-1] + ['--test-threads=8']
+        path = readiness.write_record(self.root, folder, 'unit', argv, 'test',
+                                      'test result: ok. 3 passed; 0 failed;', 0,
+                                      '2026-11-13T00:00:00+00:00', '2026-11-13T00:00:01+00:00')
+        self.assertEqual(readiness.verify_record(self.root, path)['status'], 'pass')
+        for bogus in ('--test-threads=0', '--test-threads=99', '--test-threads=lots'):
+            data = json.loads(path.read_text())
+            data['argv'] = argv[:-1] + [bogus]
+            path.write_text(json.dumps(data))
+            with self.subTest(bogus=bogus), self.assertRaises(ValueError):
+                readiness.verify_record(self.root, path)
 
     def test_metadata_rejects_relabelled_commands(self):
         path = self.record()

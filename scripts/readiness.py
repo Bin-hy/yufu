@@ -18,13 +18,25 @@ import uuid
 MAX_OUTPUT = 4 * 1024 * 1024
 EVIDENCE = os.environ.get('YUFU_READINESS_OUTPUT', 'docs/specs/product-readiness/evidence/runs')
 STATUSES = {'verified_available', 'implemented_pending_validation', 'legacy_compatibility', 'unsupported'}
+
+
+def test_threads():
+    """Per-test parallelism; fixtures use isolated databases and ephemeral ports."""
+    try:
+        value = int(os.environ.get('YUFU_TEST_THREADS', '4'))
+    except ValueError:
+        value = 4
+    return str(min(max(value, 1), 16))
+
+
+THREADS = test_threads()
 CHECKS = {
     'tool-tests': ([sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-v'], 'test', '.'),
-    'unit': (['cargo', 'test', '-p', 'yufu', '--lib', '--', '--test-threads=1'], 'test', '.'),
+    'unit': (['cargo', 'test', '-p', 'yufu', '--lib', '--', f'--test-threads={THREADS}'], 'test', '.'),
     'auth-tests': (['cargo', 'test', '-p', 'auth'], 'test', '.'),
     'fmt': (['cargo', 'fmt', '--all', '--', '--check'], 'check', '.'),
     'clippy': (['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings'], 'check', '.'),
-    'rust-tests': (['cargo', 'test', '--locked', '--workspace', '--all-targets', '--all-features', '--', '--test-threads=1'], 'test', '.'),
+    'rust-tests': (['cargo', 'test', '--locked', '--workspace', '--all-targets', '--all-features', '--', f'--test-threads={THREADS}'], 'test', '.'),
     'rust-build': (['cargo', 'build', '--locked', '--workspace', '--all-targets', '--all-features', '--release', '--verbose'], 'check', '.'),
     'rust-doc': (['cargo', 'test', '--locked', '--workspace', '--doc', '--all-features'], 'test', '.'),
     'web-tests': (['pnpm', '--filter', '@yufu/web', 'test'], 'test', '.'),
@@ -216,7 +228,9 @@ def verify_record(root, path):
         valid_argv = (data['argv'][1:] == expected[0][1:] and
                       bool(re.fullmatch(r'python(?:\d+(?:\.\d+)?)?(?:\.exe)?', Path(data['argv'][0]).name)))
     else:
-        valid_argv = data['argv'] == expected[0]
+        valid_argv = data['argv'] == expected[0] or (
+            data['check'] in {'unit', 'rust-tests'} and data['argv'][:-1] == expected[0][:-1] and
+            bool(re.fullmatch(r'--test-threads=(?:[1-9]|1[0-6])', data['argv'][-1])))
     if not valid_argv:
         raise ValueError('Evidence command does not match its named check')
     try:
@@ -344,6 +358,10 @@ def main():
             record = verify_record(root, path)
             result = {'record': str(path.relative_to(root)), 'status': record['status'],
                       'test_count': record['test_count']}
+            if record['status'] == 'fail':
+                log = confined(path.parent, record['output']['path'])
+                excerpt = log.read_text(encoding='utf-8', errors='replace').splitlines()[-120:]
+                print('\n'.join(excerpt), file=sys.stderr)
         else:
             paths = [confined(root, args.record)] if args.record else sorted((confined(root, EVIDENCE)).glob('*/record.json'))
             if not paths:
