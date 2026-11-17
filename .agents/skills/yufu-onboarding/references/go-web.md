@@ -85,6 +85,8 @@ func NewSDK(cfg Config) (*yufu.Client, error) {
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -124,14 +126,51 @@ type session struct {
 	Name    string `json:"name,omitempty"`
 }
 
-func setSession(w http.ResponseWriter, value session) error {
-	payload, err := json.Marshal(value)
+// sessionStore keeps sessions on the server. The cookie carries only a random
+// identifier, so rewriting the cookie cannot change the subject. Development
+// only: share the store across instances and expire idle sessions in production.
+type sessionStore struct {
+	mu sync.Mutex
+	m  map[string]session
+}
+
+func newSessionStore() *sessionStore {
+	return &sessionStore{m: make(map[string]session)}
+}
+
+func (s *sessionStore) create(value session) (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	id := base64.RawURLEncoding.EncodeToString(raw[:])
+	s.mu.Lock()
+	s.m[id] = value
+	s.mu.Unlock()
+	return id, nil
+}
+
+func (s *sessionStore) get(id string) (session, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.m[id]
+	return value, ok
+}
+
+func (s *sessionStore) delete(id string) {
+	s.mu.Lock()
+	delete(s.m, id)
+	s.mu.Unlock()
+}
+
+func setSession(w http.ResponseWriter, store *sessionStore, value session) error {
+	id, err := store.create(value)
 	if err != nil {
 		return err
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
-		Value:    string(payload),
+		Value:    id,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -139,19 +178,18 @@ func setSession(w http.ResponseWriter, value session) error {
 	return nil
 }
 
-func currentSession(r *http.Request) (session, bool) {
+func currentSession(r *http.Request, store *sessionStore) (session, bool) {
 	cookie, err := r.Cookie(sessionCookie)
 	if err != nil {
 		return session{}, false
 	}
-	var value session
-	if json.Unmarshal([]byte(cookie.Value), &value) != nil {
-		return session{}, false
-	}
-	return value, value.Subject != ""
+	return store.get(cookie.Value)
 }
 
-func clearSession(w http.ResponseWriter) {
+func clearSession(w http.ResponseWriter, r *http.Request, store *sessionStore) {
+	if cookie, err := r.Cookie(sessionCookie); err == nil {
+		store.delete(cookie.Value)
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
 	})
@@ -164,8 +202,9 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 ```
 
-这里把会话直接序列化进 cookie 只是为了示例可运行。生产环境必须改为服务端会话存储，
-并接受 `sid`（退出联动）与 `sub` 两个维度的注销。
+cookie 里只有不可猜测的随机 ID，用户资料保存在服务端 `sessionStore`，篡改 cookie 只能得到一个无效 ID。
+示例使用进程内 map 以便直接运行；多实例部署要换成共享存储（Redis 或数据库），补上过期时间与
+注销联动，并在 HTTPS 下追加 `Secure: true`。
 
 ## 4. `login.go`
 
@@ -179,9 +218,10 @@ import (
 )
 
 type App struct {
-	cfg     Config
-	client  *yufu.Client
-	pending *pendingStore
+	cfg      Config
+	client   *yufu.Client
+	pending  *pendingStore
+	sessions *sessionStore
 }
 
 // Login starts the authorization code + PKCE flow.
@@ -226,7 +266,7 @@ func (a *App) Callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	if err := setSession(w, session{Subject: profile.Subject, Name: profile.Name}); err != nil {
+	if err := setSession(w, a.sessions, session{Subject: profile.Subject, Name: profile.Name}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -247,7 +287,7 @@ import (
 )
 
 func (a *App) Me(w http.ResponseWriter, r *http.Request) {
-	value, ok := currentSession(r)
+	value, ok := currentSession(r, a.sessions)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -256,14 +296,14 @@ func (a *App) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) Logout(w http.ResponseWriter, r *http.Request) {
-	clearSession(w)
+	clearSession(w, r, a.sessions)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func Routes(a *App) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := currentSession(r); ok {
+		if _, ok := currentSession(r, a.sessions); ok {
 			http.Redirect(w, r, "/api/me", http.StatusFound)
 			return
 		}
@@ -306,7 +346,7 @@ func main() {
 	}
 	defer client.Close()
 
-	app := &App{cfg: cfg, client: client, pending: newPendingStore()}
+	app := &App{cfg: cfg, client: client, pending: newPendingStore(), sessions: newSessionStore()}
 	log.Printf("listening on http://%s (issuer %s)", cfg.Addr, cfg.Issuer)
 	log.Fatal(http.ListenAndServe(cfg.Addr, Routes(app)))
 }

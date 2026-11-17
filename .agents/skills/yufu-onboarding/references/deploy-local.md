@@ -39,6 +39,23 @@ bash "$SKILL_DIR/scripts/verify-issuer.sh"
    → 本地缓存 → 按平台下载 `versions.env` 中的固定版本并校验 SHA-256。
 7. 后台启动并轮询 discovery，最多 60 秒。
 
+## 来源与校验
+
+二进制和 Go 模块都固定版本，完整性由校验和保证：
+
+- 二进制来自固定地址
+  `https://github.com/Bin-hy/yufu/releases/download/<version>/yufu-<version>-<target>.tar.gz`；
+  版本与每个平台的 SHA-256 固定在 `assets/versions.env`。脚本只访问该 release 地址，
+  不会拉取或执行远程脚本。
+- 下载后先校验 SHA-256，不一致时不会写入 `bin/`、不会启动服务。
+- 仓库内检测到本地产物时优先使用，不触发下载。
+- Go SDK 版本固定在 `assets/versions.env`，脚手架写入生成的 `go.mod`，模块校验和记录在 `go.sum`。
+- 压缩包内的 `BUILD-INFO.json` 记录 tag、版本、commit 与目标平台；需要核对来源时，
+  把它记录的 commit 与 releases 页面上对应 tag 的提交比对。
+
+当前发布者是个人 GitHub 账号（`Bin-hy`）。校验和能防止内容被替换，但不能替使用者确认发布者身份；
+在受监管环境中使用前，请按组织要求评估该来源。
+
 ## 可覆盖变量
 
 | 变量 | 默认值 | 说明 |

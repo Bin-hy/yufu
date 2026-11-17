@@ -134,6 +134,7 @@ bash "$SKILL_DIR/scripts/register-app.sh" --mode api
 
 - 不打印、不提交 client secret；secret 只存在于 `.yufu-onboarding/client_secret` 或服务端环境。
 - 不使用 `@latest`；SDK 版本固定，来源是 `assets/versions.env`。
+- 二进制只从 `assets/versions.env` 固定的 GitHub Release 地址下载并校验 SHA-256，不执行远程脚本。
 - 不修改 `yufu/` 服务端代码与 `yufu-sdk-go` 仓库。
 - 不把本机回环配置当作生产配置使用。
 - 不在未征得同意时删除数据库卷、配置或既有应用。
