@@ -1,0 +1,13 @@
+{
+  "branding": {
+    "site_name": "yufu",
+    "site_description": "企业统一身份认证",
+    "logo_asset_id": null,
+    "favicon_asset_id": null,
+    "cover_asset_id": null,
+    "welcome_title": "一个账户，进入每一个工作场景。",
+    "welcome_description": "统一管理企业账户、应用接入与授权边界。清晰的身份，是每一次安全协作的起点。",
+    "footer": { "copyright_text": "yufu · 身份与访问管理 · 受企业安全策略保护", "filing_number": "", "filing_url": null, "links": [] }
+  },
+  "oidc": { "cover_asset_id": null, "welcome_title": null, "welcome_description": null }
+}

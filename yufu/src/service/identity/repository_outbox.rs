@@ -239,6 +239,7 @@ impl PgSecurityTransaction {
 pub(crate) fn validate_summary(summary: &serde_json::Value) -> Result<(), IdentityError> {
     let map = summary.as_object().ok_or(IdentityError::InvalidInput)?;
     const KEYS: &[&str] = &[
+        "changed_fields",
         "application_id",
         "application_key",
         "environment_id",

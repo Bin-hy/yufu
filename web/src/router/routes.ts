@@ -9,6 +9,7 @@ const meta = (title: string, extra = {}) => ({
     ...extra,
 })
 export const workspaceRoutes: RouteRecordRaw[] = [
+    { path: '/admin/site-settings', name: 'admin-site-settings', component: () => import('@/pages/admin/views/site-settings.vue'), meta: meta('站点设置', { qualification: 'super_administrator' }) },
     { path: '/account', name: 'account-profile', component: () => import('@/pages/account/views/profile.vue'), meta: meta('账户中心') },
     { path: '/account/apps', name: 'account-apps', component: () => import('@/pages/account/views/apps.vue'), meta: meta('可访问应用') },
     { path: '/account/consents', name: 'account-consents', component: () => import('@/pages/account/views/consents.vue'), meta: meta('资料授权') },

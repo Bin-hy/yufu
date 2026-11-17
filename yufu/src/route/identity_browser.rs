@@ -43,6 +43,8 @@ pub fn get_routes(state: AppState) -> Router<AppState> {
         .merge(super::identity_migration::get_routes())
         .merge(super::identity_authorization::get_routes())
         .layer(axum::extract::DefaultBodyLimit::max(16_384))
+        .merge(super::site_branding::get_routes())
+        .merge(super::site_settings::get_routes())
         .layer(middleware::from_fn_with_state(state, request_context))
 }
 

@@ -2,6 +2,7 @@ import './style.css'
 import { createApp } from 'vue'
 import App from './app.vue'
 import { pinia } from '@/pinia'
+import { useBrandingStore } from '@/pinia/stores/branding'
 import { router } from '@/router'
 import { RegistryRouterGuard } from '@/router/guard'
 import { canEnter } from '@/router/guard'
@@ -15,6 +16,7 @@ initializeTheme()
 async function start() {
     const app = createApp(App)
     app.use(pinia)
+    void useBrandingStore(pinia).refresh()
     const user = useUserStore(pinia),
         tabs = useTabsStore(pinia)
     onSessionReset(() => tabs.reset())

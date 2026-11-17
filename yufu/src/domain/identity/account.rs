@@ -101,6 +101,7 @@ pub struct AccountSnapshot {
     pub person_kind: PersonKind,
     pub developer_enabled: bool,
     pub administrator: bool,
+    pub super_administrator: bool,
     pub auth_epoch: u64,
 }
 
@@ -281,6 +282,7 @@ mod tests {
             person_kind: PersonKind::Collaborator,
             developer_enabled: false,
             administrator: true,
+            super_administrator: true,
             auth_epoch: 2,
         }
     }

@@ -223,6 +223,55 @@ impl IdentityFixture {
         fixture
     }
 
+    /// Test-only access to this fixture's disposable container, never a user container.
+    pub fn container_id(&self) -> &str {
+        self.container
+            .as_ref()
+            .expect("fixture owns a disposable container")
+            .id()
+    }
+
+    pub async fn restart(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if let Some(server) = self.server.take() {
+            tokio::time::timeout(std::time::Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let listener = tokio::net::TcpListener::bind(self.config.http.listen)
+            .await
+            .unwrap();
+        let (shutdown, stopped) = tokio::sync::oneshot::channel();
+        self.server = Some(tokio::spawn(yufu::serve_with_security_clock(
+            self.config.clone(),
+            listener,
+            async {
+                let _ = stopped.await;
+            },
+            self.clock.clone(),
+        )));
+        self.shutdown = Some(shutdown);
+        for _ in 0..100 {
+            if self
+                .client
+                .get(format!(
+                    "{}/.well-known/openid-configuration",
+                    self.base_url
+                ))
+                .send()
+                .await
+                .is_ok_and(|r| r.status().is_success())
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("restarted isolated service failed readiness");
+    }
+
     pub async fn close(mut self) {
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());

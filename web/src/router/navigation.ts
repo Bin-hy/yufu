@@ -2,7 +2,7 @@ import { LayoutDashboard, Users, AppWindow, KeyRound, ScrollText, UserRound, Net
 import type { Component } from 'vue'
 import type { CenterSession } from '@/pages/account/api/type'
 export interface NavigationItem { name: string; title: string; icon: Component; children?: string[] }
-export interface NavigationGroup { title: string; qualification?: 'developer' | 'administrator'; items: NavigationItem[] }
+export interface NavigationGroup { title: string; qualification?: 'developer' | 'administrator' | 'super_administrator'; items: NavigationItem[] }
 export const navigationGroups: NavigationGroup[] = [
     { title: '账户中心', items: [
         { name: 'dashboard-home', title: '工作台', icon: LayoutDashboard },
@@ -14,6 +14,7 @@ export const navigationGroups: NavigationGroup[] = [
     { title: '开发者控制台', qualification: 'developer', items: [
         { name: 'developer-apps', title: '我的应用', icon: AppWindow },
     ] },
+    { title: '系统设置', qualification: 'super_administrator', items: [{ name: 'admin-site-settings', title: '站点设置', icon: ShieldCheck }] },
     { title: '企业管理', qualification: 'administrator', items: [
         { name: 'admin-overview', title: '管理总览', icon: LayoutDashboard },
         { name: 'admin-accounts', title: '账户与邀请', icon: Users },
@@ -24,9 +25,9 @@ export const navigationGroups: NavigationGroup[] = [
         { name: 'admin-deliveries', title: '退出通知', icon: Network },
     ] },
 ]
-export function navigationFor(identity: Pick<CenterSession, 'developer_enabled' | 'administrator'> | null) {
+export function navigationFor(identity: Pick<CenterSession, 'developer_enabled' | 'administrator' | 'super_administrator'> | null) {
     if (!identity) return []
-    return navigationGroups.filter(group => group.qualification === 'developer' ? identity.developer_enabled
+    return navigationGroups.filter(group => group.qualification === 'super_administrator' ? identity.super_administrator === true : group.qualification === 'developer' ? identity.developer_enabled
         : group.qualification === 'administrator' ? identity.administrator : true)
 }
 export const assignmentLinks: NavigationItem[] = []

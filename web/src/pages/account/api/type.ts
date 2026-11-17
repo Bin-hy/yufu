@@ -8,6 +8,7 @@ export interface CenterSession {
     person_kind: 'employee' | 'collaborator'
     developer_enabled: boolean
     administrator: boolean
+    super_administrator: boolean
     sso_session_id: string
     auth_time: number
     expires_at: number

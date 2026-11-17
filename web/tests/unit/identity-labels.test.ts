@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest'
 import {
+    auditActionName,
+    auditObjectName,
     auditResultLabel,
     auditResultTone,
     conflictDescription,
@@ -21,6 +23,9 @@ it('审计结果按语义归并为成功/拒绝/失败，未知值原样展示',
     expect(auditResultLabel('weird_state')).toBe('weird_state')
     expect(auditResultTone('denied')).toBe('status-danger')
     expect(auditResultTone('weird_state')).toBe('status-muted')
+    expect(auditActionName('site_settings.saved')).toBe('保存站点设置')
+    expect(auditActionName('site_settings.reset')).toBe('恢复默认站点设置')
+    expect(auditObjectName('site_settings')).toBe('站点设置')
 })
 it('投递状态集合封闭且全部有中文名、色调与可重试判定', () => {
     for (const status of deliveryStatuses) {

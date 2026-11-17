@@ -16,6 +16,7 @@ import setup, {
   signToken,
   startGeneratedExamples,
 } from './enterprise-sso-fixture.ts'
+import { runSiteBrandingScenario } from './enterprise-sso-site-branding.ts'
 import { runCrossSiteProtocolScenario } from './enterprise-sso-cross-site-protocol.ts'
 import { runProductionGovernanceScenario } from './enterprise-sso-production-governance.ts'
 
@@ -914,6 +915,7 @@ const teardown = await setup()
 let browser
 try {
   browser = await webkit.launch({ headless: true })
+  await runSiteBrandingScenario(browser, 'webkit-1.61')
   await assertAdmission(browser)
   await assertEnterpriseOnboarding(browser)
   await assertDeveloperOnboarding(browser)

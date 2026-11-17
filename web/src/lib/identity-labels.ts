@@ -117,3 +117,6 @@ export function conflictDescription(kind: string): ConflictDescription {
         }
     )
 }
+
+export const auditActionName = (action: string) => ({ 'site_settings.saved': '保存站点设置', 'site_settings.reset': '恢复默认站点设置' }[action] ?? action)
+export const auditObjectName = (kind: string) => kind === 'site_settings' ? '站点设置' : kind

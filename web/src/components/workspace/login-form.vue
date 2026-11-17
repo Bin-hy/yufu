@@ -108,6 +108,7 @@ async function submit() {
 </script>
 <template>
     <AuthLayout
+        :oidc="oidc"
         :title="restoreUnavailable ? '暂时无法验证登录状态' : oidc ? '登录以继续授权' : '欢迎回来'"
         :description="
             restoreUnavailable

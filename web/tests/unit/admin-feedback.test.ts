@@ -13,7 +13,7 @@ const account = { user_id: 21, username: 'administrator', nickname: '管理员�
 let wrappers: VueWrapper[] = []
 beforeEach(() => {
     resetSession(); vi.clearAllMocks()
-    useUserStore(pinia).setCenterSession({ user_id: 12, sub: '12', username: 'operator', nickname: '操作人', person_kind: 'employee', developer_enabled: true, administrator: true, sso_session_id: 'root', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' })
+    useUserStore(pinia).setCenterSession({ user_id: 12, sub: '12', username: 'operator', nickname: '操作人', person_kind: 'employee', developer_enabled: true, administrator: true, super_administrator: false, sso_session_id: 'root', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' })
     mocked.listAccounts.mockReset().mockResolvedValue({ items: [account], next: null })
     mocked.setAccount.mockReset()
 })

@@ -79,3 +79,6 @@ pub fn get_service_routes() -> Router<AppState> {
 pub fn get_no_prefix_routes() -> Router<AppState> {
     Router::new().merge(oidc::get_public_routes())
 }
+
+pub mod site_branding;
+pub mod site_settings;

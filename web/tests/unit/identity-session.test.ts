@@ -9,7 +9,7 @@ import { canEnter, RegistryRouterGuard } from '@/router/guard'
 import { createRouter, createMemoryHistory, isNavigationFailure } from 'vue-router'
 const mocked = vi.hoisted(() => ({ getCenterSession: vi.fn() }))
 vi.mock('@/pages/account/api', () => ({ getCenterSession: mocked.getCenterSession }))
-const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: false, sso_session_id: 'root-one', auth_time: 10, expires_at: 5000, csrf_token: 'center-proof' }
+const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: false, super_administrator: false, sso_session_id: 'root-one', auth_time: 10, expires_at: 5000, csrf_token: 'center-proof' }
 beforeEach(() => { resetSession(); mocked.getCenterSession.mockReset() })
 afterEach(() => vi.unstubAllEnvs())
 const response = (config: InternalAxiosRequestConfig, data: unknown) => ({ data, status: 200, statusText: 'OK', headers: {}, config })

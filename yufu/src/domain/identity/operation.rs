@@ -1,6 +1,12 @@
 //! Explicit, method-aware enterprise management operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IdentityOperation {
+    SiteSettingsRead,
+    SiteSettingsSave,
+    SiteSettingsReset,
+    SiteAssetUpload,
+    SiteAssetPreview,
+
     InvitationIssue,
     InvitationRevoke,
     PasswordResetIssue,
@@ -37,6 +43,11 @@ pub enum IdentityOperation {
 }
 impl IdentityOperation {
     pub const ALL: &[Self] = &[
+        Self::SiteSettingsRead,
+        Self::SiteSettingsSave,
+        Self::SiteSettingsReset,
+        Self::SiteAssetUpload,
+        Self::SiteAssetPreview,
         Self::InvitationIssue,
         Self::InvitationRevoke,
         Self::PasswordResetIssue,
@@ -73,6 +84,11 @@ impl IdentityOperation {
     ];
     pub fn registration(self) -> (&'static str, &'static str) {
         match self {
+            Self::SiteSettingsRead => ("GET", "/admin/site-settings"),
+            Self::SiteSettingsSave => ("PUT", "/admin/site-settings"),
+            Self::SiteSettingsReset => ("POST", "/admin/site-settings/reset"),
+            Self::SiteAssetUpload => ("POST", "/admin/site-assets"),
+            Self::SiteAssetPreview => ("GET", "/admin/site-assets/{id}"),
             Self::AuditRead => ("GET", "/admin/audit-events"),
             Self::DeliveryRead => ("GET", "/admin/logout-deliveries"),
             Self::DeliveryRetry => ("POST", "/admin/logout-deliveries/{id}/retry"),
@@ -124,6 +140,11 @@ impl IdentityOperation {
     /// Existing edited registrations and grants are left alone.
     pub fn legacy_registration(self) -> (&'static str, &'static str) {
         match self {
+            Self::SiteSettingsRead
+            | Self::SiteSettingsSave
+            | Self::SiteSettingsReset
+            | Self::SiteAssetUpload
+            | Self::SiteAssetPreview => self.registration(),
             Self::AuditRead | Self::DeliveryRead => ("GET", "/recordings"),
             Self::DeliveryRetry => ("PATCH", "/application"),
             Self::MigrationRead => ("GET", "/oidc/clients"),

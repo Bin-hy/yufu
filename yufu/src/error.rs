@@ -88,7 +88,7 @@ impl IntoResponse for AppError {
                     IdentityError::NotFound => StatusCode::NOT_FOUND,
                     IdentityError::Conflict | IdentityError::AlreadyConsumed | IdentityError::OwnerRequired | IdentityError::LastAdministrator | IdentityError::ApprovalObsolete => StatusCode::CONFLICT,
                     IdentityError::Expired => StatusCode::GONE,
-                    IdentityError::InvalidInput | IdentityError::InvalidScope => StatusCode::BAD_REQUEST,
+                    IdentityError::InvalidInput | IdentityError::InvalidScope | IdentityError::InvalidImageFormat | IdentityError::InvalidImageContent | IdentityError::ImageLimitExceeded | IdentityError::AnimatedImageNotAllowed => StatusCode::BAD_REQUEST,
                     IdentityError::DependencyUnavailable | IdentityError::DeadlineExceeded | IdentityError::CapacityExceeded | IdentityError::CommitUncertain => StatusCode::SERVICE_UNAVAILABLE,
                 };
                 tracing::warn!(%request_id, reason = reason.code(), "identity request rejected");

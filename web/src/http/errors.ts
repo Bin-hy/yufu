@@ -14,6 +14,13 @@ export interface BusinessFailure {
 export interface FailureContext { operation?: 'login' | 'read' | 'write' }
 type Description = [title: string, message: string, recovery: ErrorRecovery]
 const messages: Record<string, Description> = {
+    invalid_image_format: ['图片格式不支持', '请上传静态 PNG、JPEG、WebP；ICO 仅可用于浏览器图标。', 'correct-input'],
+    invalid_image_content: ['图片内容无效', '图片内容损坏或不完整，请重新导出图片后上传。', 'correct-input'],
+    image_limit_exceeded: ['图片解码超限', '图片宽高不能超过 8192 像素，请缩小图片后重试。', 'correct-input'],
+    animated_image_not_allowed: ['不支持动态图片', '请上传静态图片，不支持 APNG 或动态 WebP。', 'correct-input'],
+    image_too_large: ['图片文件过大', 'Logo 和图标不能超过 2 MiB，封面不能超过 10 MiB。', 'correct-input'],
+    upload_timeout: ['上传超时', '图片上传超时，请检查网络后重试。', 'try-later'],
+
     invalid_input: ['输入内容不符合要求', '输入内容不符合要求，请按表单提示检查后重试', 'correct-input'],
     invalid_scope: ['访问范围无效', '请求的访问范围不符合要求，请检查应用配置或联系应用管理员。', 'contact-admin'],
     unauthenticated: ['需要重新登录', '中心会话已失效，请重新登录。', 'sign-in'],

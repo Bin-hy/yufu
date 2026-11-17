@@ -52,6 +52,7 @@ watch(data, (value) => {
 <template>
     <LoginForm v-if="data?.interaction === 'login'" oidc :flow-id="flowId" />
     <AuthLayout
+        oidc
         v-else
         :title="data ? '授权 ' + data.application_name : '应用授权'"
         description="企业统一身份认证"

@@ -109,4 +109,8 @@ __pycache__/
 *.pyc
 
 # 品牌资产工作目录（仅本地保留，不入库）
-/brand/
+/brand/*
+!/brand/site-branding.defaults.json
+
+# yufu-onboarding skill 的本地状态与凭据
+.yufu-onboarding/

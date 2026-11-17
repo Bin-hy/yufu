@@ -17,7 +17,7 @@ vi.mock('@/pages/developer/api', () => ({
     listApps: vi.fn(), registerApp: vi.fn(), registerAdminApp: vi.fn(),
 }))
 vi.mock('@/pages/admin/api', () => ({ getAssignments: mocked.getAssignments, setAssignment: mocked.setAssignment, setTestUser: mocked.setTestUser }))
-const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: true, sso_session_id: 'root-one', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' }
+const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: true, super_administrator: false, sso_session_id: 'root-one', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' }
 const config = (audience: string, redirect: string): EnvironmentConfig => ({ client_kind: 'server_web', redirect_uris: [redirect], post_logout_redirect_uris: [], browser_origins: [], access_audience: audience, identity_scopes: 'openid profile', consent_policy: 'user_consent', logout_capability: 'online', backchannel_logout_uri: null })
 const active = config('urn:app:api', 'https://app.example/callback')
 const application = {

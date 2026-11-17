@@ -21,7 +21,7 @@ vi.mock('@/pages/account/api', () => ({ getCenterSession: mocked.session, center
 vi.mock('@/pages/developer/api', () => ({ listApps: mocked.apps, registerApp: mocked.register, registerAdminApp: mocked.registerAdmin }))
 vi.mock('@/pages/oidc-consent/api', () => ({ inspectFlow: mocked.inspect, completeFlow: mocked.complete }))
 vi.mock('@/pages/account/api/actions', async () => ({ ...await vi.importActual<object>('@/pages/account/api/actions'), exchangeAction: mocked.exchange, inspectAction: mocked.action, acceptInvitation: mocked.accept, completePasswordReset: mocked.reset }))
-const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: false, sso_session_id: 'root-one', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' }
+const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: false, super_administrator: false, sso_session_id: 'root-one', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' }
 let wrappers: VueWrapper[] = []
 beforeEach(() => { resetSession(); for (const fn of Object.values(mocked)) fn.mockReset(); mocked.session.mockResolvedValue(identity); mocked.apps.mockResolvedValue({ items: [], next: null }); useUserStore(pinia).setCenterSession(identity) })
 afterEach(() => { for (const wrapper of wrappers) wrapper.unmount(); wrappers = []; window.history.replaceState({}, '', '/') })
@@ -192,9 +192,9 @@ it('授权界面仅使用服务端 flow 摘要，拒绝时不透传 query 中的
     expect(mocked.complete).toHaveBeenCalledWith('flow-one', false); expect(wrapper.text()).toContain('已过期')
 })
 it('三个入口按当前资格显示，合作方无企业目录入口', () => {
-    expect(navigationFor({ developer_enabled: false, administrator: false }).map(group => group.title)).toEqual(['账户中心'])
-    expect(navigationFor({ developer_enabled: true, administrator: false }).map(group => group.title)).toEqual(['账户中心', '开发者控制台'])
-    expect(navigationFor({ developer_enabled: false, administrator: true }).map(group => group.title)).toEqual(['账户中心', '企业管理'])
+    expect(navigationFor({ developer_enabled: false, administrator: false, super_administrator: false }).map(group => group.title)).toEqual(['账户中心'])
+    expect(navigationFor({ developer_enabled: true, administrator: false, super_administrator: false }).map(group => group.title)).toEqual(['账户中心', '开发者控制台'])
+    expect(navigationFor({ developer_enabled: false, administrator: true, super_administrator: false }).map(group => group.title)).toEqual(['账户中心', '企业管理'])
 })
 
 it('只填名称与开发回调即可创建，自动标识和两环境 Audience 保持独立', async () => {

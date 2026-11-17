@@ -10,7 +10,7 @@ import { usePageContext } from '@/workspace/page-context'
 import { errorMessage } from '@/composables/use-async-mutation'
 import { emitToast } from '@/utils/toast'
 import { buildCsv, downloadFile } from '@/utils/csv'
-import { auditResultLabel, auditResultTone } from '@/lib/identity-labels'
+import { auditResultLabel, auditResultTone, auditActionName, auditObjectName } from '@/lib/identity-labels'
 import PageHeader from '@/components/workspace/page-header.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import RelativeTime from '@/components/workspace/relative-time.vue'
@@ -201,14 +201,14 @@ async function exportCsv() {
                         <div class="flex flex-wrap items-start justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <h2 class="text-[13px] font-semibold">{{ event.action }}</h2>
+                                    <h2 class="text-[13px] font-semibold">{{ auditActionName(event.action) }}</h2>
                                     <span class="status-badge" :class="auditResultTone(event.result)">{{ auditResultLabel(event.result) }}</span>
                                     <span v-if="event.reason_code" class="status-badge status-muted">{{ event.reason_code }}</span>
                                 </div>
                                 <p class="mt-1.5 text-[11px] text-muted-foreground">
                                     <RelativeTime :at="event.happened_at" />
                                     · 操作者 {{ event.actor_id ?? '匿名' }}
-                                    · {{ event.object_kind }} {{ event.object_id }}
+                                    · {{ auditObjectName(event.object_kind) }} {{ event.object_id }}
                                 </p>
                             </div>
                             <div class="flex items-center gap-1">

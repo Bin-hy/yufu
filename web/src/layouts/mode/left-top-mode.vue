@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import SiteFooter from '@/components/brand/site-footer.vue'
+import { useBrandingStore } from '@/pinia/stores/branding'
 import NavigationBar from '@/layouts/components/NavigationBar/index.vue'
 import Sidebar from '@/layouts/components/Sidebar/index.vue'
 import TagsView from '@/layouts/components/TagsView/index.vue'
@@ -6,6 +8,7 @@ import AppMain from '@/layouts/components/AppMain/index.vue'
 import Drawer from '@/components/ui/drawer/drawer.vue'
 import { useLayoutStore } from '@/pinia/stores/layout'
 const layout = useLayoutStore()
+const brand = useBrandingStore()
 </script>
 <template>
     <a class="skip-link" href="#workspace-content">跳到主内容</a>
@@ -17,7 +20,7 @@ const layout = useLayoutStore()
         >
             <Sidebar :collapsed="layout.sidebarCollapsed" />
         </aside>
-        <div class="workspace-column"><NavigationBar /><TagsView /><AppMain /></div>
+        <div class="workspace-column"><NavigationBar /><TagsView /><AppMain /><SiteFooter :config="brand.current.branding.footer" /></div>
     </div>
     <Drawer v-model:open="layout.mobileOpen" title="工作台导航"
         ><Sidebar mobile @navigate="layout.mobileOpen = false"

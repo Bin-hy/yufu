@@ -5,6 +5,10 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentityError {
     InvalidInput,
+    InvalidImageFormat,
+    InvalidImageContent,
+    ImageLimitExceeded,
+    AnimatedImageNotAllowed,
     InvalidScope,
     Unauthenticated,
     Forbidden,
@@ -30,6 +34,10 @@ impl IdentityError {
     pub const fn code(self) -> &'static str {
         match self {
             Self::InvalidInput => "invalid_input",
+            Self::InvalidImageFormat => "invalid_image_format",
+            Self::InvalidImageContent => "invalid_image_content",
+            Self::ImageLimitExceeded => "image_limit_exceeded",
+            Self::AnimatedImageNotAllowed => "animated_image_not_allowed",
             Self::InvalidScope => "invalid_scope",
             Self::Unauthenticated => "unauthenticated",
             Self::Forbidden => "forbidden",
@@ -89,9 +97,13 @@ impl From<IdentityError> for SecurityError {
             IdentityError::CapacityExceeded => Self::CapacityExceeded,
             IdentityError::CommitUncertain => Self::CommitUncertain,
             IdentityError::DependencyUnavailable => Self::DependencyUnavailable,
-            IdentityError::NotFound | IdentityError::InvalidInput | IdentityError::InvalidScope => {
-                Self::InvalidResource
-            }
+            IdentityError::NotFound
+            | IdentityError::InvalidInput
+            | IdentityError::InvalidScope
+            | IdentityError::InvalidImageFormat
+            | IdentityError::InvalidImageContent
+            | IdentityError::ImageLimitExceeded
+            | IdentityError::AnimatedImageNotAllowed => Self::InvalidResource,
             _ => Self::Forbidden,
         }
     }

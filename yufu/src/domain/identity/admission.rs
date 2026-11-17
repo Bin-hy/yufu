@@ -154,6 +154,7 @@ mod tests {
             person_kind: PersonKind::Employee,
             developer_enabled: true,
             administrator: true,
+            super_administrator: true,
             auth_epoch: 3,
         }
     }

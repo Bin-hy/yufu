@@ -117,6 +117,7 @@ pub(crate) fn session_response(
         "person_kind":authentication.actor.account().person_kind,
         "developer_enabled":authentication.actor.account().developer_enabled,
         "administrator":authentication.actor.account().administrator,
+        "super_administrator":authentication.actor.account().super_administrator,
         "sso_session_id":authentication.root.id,
         "auth_time":authentication.root.authenticated_at / 1000,
         "expires_at":authentication.root.expires_at / 1000,

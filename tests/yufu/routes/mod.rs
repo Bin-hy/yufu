@@ -42,3 +42,5 @@ mod security;
 mod sync_permissions;
 mod upgrade_drill;
 mod user;
+
+mod site_branding;

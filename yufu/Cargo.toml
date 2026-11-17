@@ -10,6 +10,7 @@ authors.workspace = true
 crate-type = ["lib"]
 
 [dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "ico"] }
 mime_guess = { workspace = true }
 futures = { workspace = true }
 auth = { workspace = true }

@@ -75,6 +75,12 @@ impl PgIdentityRepository {
         let stale_binding = at.saturating_sub(600_000);
         deleted += tx.identity_execute("WITH due AS (SELECT b.secret_digest FROM identity_browser_binding b WHERE b.touched_at<$1 AND NOT EXISTS (SELECT 1 FROM identity_action_flow f WHERE f.browser_binding_digest=b.secret_digest AND f.consumed_at IS NULL AND f.expires_at>$2) AND NOT EXISTS (SELECT 1 FROM identity_authorization_flow f WHERE f.browser_binding_digest=b.secret_digest AND f.completed_at IS NULL AND f.expires_at>$2) ORDER BY b.secret_digest FOR UPDATE OF b SKIP LOCKED LIMIT $3) DELETE FROM identity_browser_binding b USING due WHERE b.secret_digest=due.secret_digest",vec![stale_binding.into(),at.into(),i64::from(limit).into()]).await?;
         Box::new(tx).commit().await?;
+        // Branding uses a separate short transaction and its own retention policy.
+        let tx = self.security.begin_shared(budget).await?;
+        deleted += tx
+            .branding_cleanup(now(tx.clock.as_ref())?.saturating_sub(86_400_000), 100)
+            .await?;
+        Box::new(tx).commit().await?;
         Ok(deleted)
     }
 }

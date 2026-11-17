@@ -26,6 +26,30 @@ pub trait IdentityRepository: Send + Sync {
 #[async_trait::async_trait]
 #[allow(clippy::double_must_use)]
 pub trait IdentityTransaction: SecurityTransaction {
+    async fn site_settings(
+        &mut self,
+        for_update: bool,
+    ) -> Result<crate::domain::identity::site_branding::SiteSettings, IdentityError>;
+    async fn site_asset_metadata(
+        &mut self,
+        id: Uuid,
+    ) -> Result<Option<crate::domain::identity::site_branding::SiteAssetMetadata>, IdentityError>;
+    async fn site_asset_content(
+        &mut self,
+        id: Uuid,
+        published_only: bool,
+    ) -> Result<Option<crate::domain::identity::site_branding::StoredSiteAsset>, IdentityError>;
+    async fn insert_site_asset(
+        &mut self,
+        asset: &crate::domain::identity::site_branding::NewSiteAsset,
+    ) -> Result<(), IdentityError>;
+    async fn replace_site_settings(
+        &mut self,
+        input: &crate::domain::identity::site_branding::SaveSiteSettings,
+        actor_id: i32,
+    ) -> Result<crate::domain::identity::site_branding::SiteSettings, IdentityError>;
+    async fn cleanup_site_assets(&mut self, before: u64, limit: u32) -> Result<u64, IdentityError>;
+
     async fn audit_search(
         &mut self,
         filter: &crate::domain::identity::audit::AuditFilter,

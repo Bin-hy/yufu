@@ -31,7 +31,7 @@ const overview = {
 let wrappers: VueWrapper[] = []
 beforeEach(() => {
     resetSession(); vi.clearAllMocks()
-    useUserStore(pinia).setCenterSession({ user_id: 12, sub: '12', username: 'operator', nickname: '操作人', person_kind: 'employee', developer_enabled: true, administrator: true, sso_session_id: 'root', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' })
+    useUserStore(pinia).setCenterSession({ user_id: 12, sub: '12', username: 'operator', nickname: '操作人', person_kind: 'employee', developer_enabled: true, administrator: true, super_administrator: false, sso_session_id: 'root', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' })
     mocked.listAccounts.mockResolvedValue({ items: [], next: null })
     mocked.listGroups.mockResolvedValue({ items: [], next: null })
     mocked.searchAudit.mockResolvedValue({ items: [], next: null })

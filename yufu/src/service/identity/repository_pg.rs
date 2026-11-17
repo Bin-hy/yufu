@@ -39,6 +39,44 @@ impl IdentityRepository for PgIdentityRepository {
 
 #[async_trait::async_trait]
 impl IdentityTransaction for PgSecurityTransaction {
+    async fn site_settings(
+        &mut self,
+        lock: bool,
+    ) -> Result<crate::domain::identity::site_branding::SiteSettings, IdentityError> {
+        self.branding_settings(lock).await
+    }
+    async fn site_asset_metadata(
+        &mut self,
+        id: Uuid,
+    ) -> Result<Option<crate::domain::identity::site_branding::SiteAssetMetadata>, IdentityError>
+    {
+        self.branding_metadata(id).await
+    }
+    async fn site_asset_content(
+        &mut self,
+        id: Uuid,
+        published: bool,
+    ) -> Result<Option<crate::domain::identity::site_branding::StoredSiteAsset>, IdentityError>
+    {
+        self.branding_content(id, published).await
+    }
+    async fn insert_site_asset(
+        &mut self,
+        asset: &crate::domain::identity::site_branding::NewSiteAsset,
+    ) -> Result<(), IdentityError> {
+        self.branding_insert(asset).await
+    }
+    async fn replace_site_settings(
+        &mut self,
+        input: &crate::domain::identity::site_branding::SaveSiteSettings,
+        actor: i32,
+    ) -> Result<crate::domain::identity::site_branding::SiteSettings, IdentityError> {
+        self.branding_replace(input, actor).await
+    }
+    async fn cleanup_site_assets(&mut self, before: u64, limit: u32) -> Result<u64, IdentityError> {
+        self.branding_cleanup(before, limit).await
+    }
+
     async fn audit_search(
         &mut self,
         filter: &crate::domain::identity::audit::AuditFilter,
@@ -973,6 +1011,17 @@ impl PgSecurityTransaction {
             administrator: row
                 .try_get("", "administrator")
                 .map_err(|_| IdentityError::DependencyUnavailable)?,
+            super_administrator: self
+                .identity_rows(
+                    "SELECT 1 FROM role WHERE id=$1 AND name=$2",
+                    vec![
+                        user.role_id.into(),
+                        crate::entity::role::RoleEnum::Superadmin.get_name().into(),
+                    ],
+                )
+                .await?
+                .len()
+                == 1,
             auth_epoch: unsigned(user.auth_epoch)?,
         }))
     }

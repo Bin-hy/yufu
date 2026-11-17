@@ -1,14 +1,7 @@
 <script setup lang="ts">
-import YufuMark from '@/components/brand/yufu-mark.vue'
+import SiteLogo from '@/components/brand/site-logo.vue'
+import { useBrandingStore } from '@/pinia/stores/branding'
 defineProps<{ collapsed?: boolean }>()
+const brand = useBrandingStore()
 </script>
-<template>
-    <router-link
-        to="/dashboard"
-        class="brand"
-        :class="{ '!justify-center !px-0': collapsed }"
-        aria-label="yufu 工作台"
-        ><span class="brand-mark"><YufuMark :size="26" /></span
-        ><span v-if="!collapsed" class="tracking-[-0.045em]">yu<span class="text-primary">fu</span></span></router-link
-    >
-</template>
+<template><router-link to="/dashboard" class="brand" :class="{ '!justify-center !px-0': collapsed }" :aria-label="brand.current.branding.site_name + ' 工作台'"><SiteLogo :name="brand.current.branding.site_name" :url="brand.current.branding.logo_url" :collapsed="collapsed" /></router-link></template>

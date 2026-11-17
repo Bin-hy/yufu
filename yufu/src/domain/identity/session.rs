@@ -405,6 +405,7 @@ mod tests {
             person_kind: PersonKind::Employee,
             developer_enabled: true,
             administrator: false,
+            super_administrator: false,
             auth_epoch: 2,
         }
     }

@@ -1,4 +1,5 @@
 import type { Router } from 'vue-router'
+import { useBrandingStore } from '@/pinia/stores/branding'
 import { useUserStore } from '@/pinia/stores/user'
 import { pinia } from '@/pinia'
 import { useTabsStore } from '@/pinia/stores/tabs'
@@ -12,8 +13,9 @@ import { sessionEpoch, sessionOwner } from '@/workspace/session'
 import { confirmationBusy } from '@/utils/modal'
 import { emitToast } from '@/utils/toast'
 const registered = new WeakSet<Router>()
-export function canEnter(meta: { qualification?: 'developer' | 'administrator' }, identity: { developer_enabled: boolean; administrator: boolean } | null) {
+export function canEnter(meta: { qualification?: 'developer' | 'administrator' | 'super_administrator' }, identity: { developer_enabled: boolean; administrator: boolean; super_administrator?: boolean } | null) {
     if (!identity) return false
+    if (meta.qualification === 'super_administrator') return identity.super_administrator === true
     if (meta.qualification === 'administrator') return identity.administrator
     if (meta.qualification === 'developer') return identity.developer_enabled
     return true
@@ -51,7 +53,8 @@ export function RegistryRouterGuard(router: Router) {
             updatePageRoute(tabs.activeKey, to)
             saveWorkspace(router, sessionOwner.value, tabs.visited, tabs.activeKey)
         }
-        document.title = String(to.meta.title ?? '工作台') + ' · yufu'
+        useBrandingStore(pinia).setPageTitle(String(to.meta.title ?? '工作台'))
+        if ((to.path.startsWith('/oidc/') || to.path === '/login') && to.path !== _from.path) void useBrandingStore(pinia).refresh()
     })
     window.addEventListener('beforeunload', (event) => {
         if (hasUnsavedWork.value || confirmationBusy.value) {
