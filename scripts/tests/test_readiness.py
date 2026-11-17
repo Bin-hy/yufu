@@ -101,12 +101,14 @@ class ReadinessTests(unittest.TestCase):
     def test_test_threads_honours_bounded_parallelism(self):
         # Fixtures isolate their own databases and ports, so parallelism is a
         # deliberate knob; malformed or out-of-range values must stay bounded.
-        for value, expected in [('8', '8'), ('0', '1'), ('-3', '1'), ('64', '16'), ('few', '4')]:
+        for value, expected in [('8', '8'), ('0', '1'), ('-3', '1'), ('64', '16'), ('few', '1')]:
             with self.subTest(value=value), mock.patch.dict(readiness.os.environ, {'YUFU_TEST_THREADS': value}):
                 self.assertEqual(readiness.test_threads(), expected)
         with mock.patch.dict(readiness.os.environ, {}, clear=True):
-            self.assertEqual(readiness.test_threads(), '4')
-        self.assertIn('--test-threads=', readiness.CHECKS['rust-tests'][0][-1])
+            self.assertEqual(readiness.test_threads(), '1')
+        self.assertIn('--test-threads=', readiness.CHECKS['rust-tests'][0][-3])
+        self.assertIn('--skip', readiness.CHECKS['rust-tests'][0])
+        self.assertEqual(readiness.CHECKS['rust-browser'][1], 'browser')
 
     def test_launch_keeps_the_canonical_command(self):
         # Everywhere but Windows the recorded command is launched unchanged.

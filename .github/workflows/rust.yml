@@ -32,7 +32,7 @@ permissions:
 env:
     CARGO_TERM_COLOR: always
     YUFU_READINESS_OUTPUT: docs/specs/product-readiness/evidence/ci
-    YUFU_TEST_THREADS: '4'
+    YUFU_TEST_THREADS: '1'
 
 jobs:
     check:
@@ -95,8 +95,8 @@ jobs:
     verify:
         name: Tests (Ubuntu, disposable PostgreSQL)
         runs-on: ubuntu-latest
-        # Integration tests drive disposable PostgreSQL containers and a real
-        # browser, so a stuck fixture must fail fast instead of holding a runner.
+        # Integration tests drive disposable PostgreSQL containers, so a stuck
+        # fixture must fail fast instead of holding a runner.
         timeout-minutes: 90
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -131,18 +131,6 @@ jobs:
                   python scripts/readiness.py run web-tests
                   python scripts/readiness.py run web-check
                   python scripts/readiness.py run web-lint
-            - name: Cache Playwright browsers
-              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-              with:
-                  path: ~/.cache/ms-playwright
-                  key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-                  restore-keys: |
-                      playwright-${{ runner.os }}-
-            # tests/yufu/routes/identity_browser_e2e.rs drives the Node runner,
-            # which launches all three Playwright engines against real TLS fronts.
-            - name: Install browser engines
-              working-directory: web
-              run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
             - name: Verify Rust with disposable PostgreSQL
               run: |
                   python scripts/readiness.py run rust-tests
@@ -152,6 +140,53 @@ jobs:
               uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
               with:
                   name: readiness-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-tests-ubuntu
+                  path: docs/specs/product-readiness/evidence/ci/
+                  if-no-files-found: warn
+                  retention-days: 14
+
+    browser:
+        name: Browser SSO (Ubuntu)
+        runs-on: ubuntu-latest
+        # The acceptance test drives three engines against real TLS fronts; it
+        # runs alone so database fixture churn cannot reset its connections.
+        timeout-minutes: 60
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+              with:
+                  persist-credentials: false
+            - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+            - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+              with:
+                  shared-key: rust-verify
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+              with:
+                  node-version: '24'
+            - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+              with:
+                  python-version: '3.11'
+            - name: Install frontend dependencies
+              run: |
+                  npm install --global pnpm@12.10.1
+                  pnpm install --frozen-lockfile
+            - name: Build embedded console assets
+              run: python scripts/readiness.py run web-build
+            - name: Cache Playwright browsers
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+              with:
+                  path: ~/.cache/ms-playwright
+                  key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+                  restore-keys: |
+                      playwright-${{ runner.os }}-
+            - name: Install browser engines
+              working-directory: web
+              run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
+            - name: Verify browser SSO
+              run: python scripts/readiness.py run rust-browser
+            - name: Upload browser evidence
+              if: always()
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: readiness-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-browser-ubuntu
                   path: docs/specs/product-readiness/evidence/ci/
                   if-no-files-found: warn
                   retention-days: 14

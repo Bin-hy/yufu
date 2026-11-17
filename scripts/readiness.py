@@ -21,11 +21,11 @@ STATUSES = {'verified_available', 'implemented_pending_validation', 'legacy_comp
 
 
 def test_threads():
-    """Per-test parallelism; fixtures use isolated databases and ephemeral ports."""
+    """Per-test parallelism; security budgets assume a quiet machine, so default to one."""
     try:
-        value = int(os.environ.get('YUFU_TEST_THREADS', '4'))
+        value = int(os.environ.get('YUFU_TEST_THREADS', '1'))
     except ValueError:
-        value = 4
+        value = 1
     return str(min(max(value, 1), 16))
 
 
@@ -36,7 +36,15 @@ CHECKS = {
     'auth-tests': (['cargo', 'test', '-p', 'auth'], 'test', '.'),
     'fmt': (['cargo', 'fmt', '--all', '--', '--check'], 'check', '.'),
     'clippy': (['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings'], 'check', '.'),
-    'rust-tests': (['cargo', 'test', '--locked', '--workspace', '--all-targets', '--all-features', '--', f'--test-threads={THREADS}'], 'test', '.'),
+    'rust-tests': (['cargo', 'test', '--locked', '--workspace', '--all-targets', '--all-features', '--',
+                    f'--test-threads={THREADS}', '--skip', 'identity_browser_e2e'], 'test', '.'),
+    # The browser acceptance test drives real TLS fronts and serialises three
+    # engines; Docker network churn from concurrent database fixtures makes it
+    # fail with ERR_NETWORK_CHANGED, so it runs in its own job.
+    'rust-browser': (['cargo', 'test', '--locked', '-p', 'yufu-root', '--test', 'mod', '--all-features',
+                      'yufu::routes::identity_browser_e2e::'
+                      'identity_browser_cross_site_three_engines_login_sso_and_logout',
+                      '--', '--exact', '--test-threads=1'], 'browser', '.'),
     'rust-build': (['cargo', 'build', '--locked', '--workspace', '--all-targets', '--all-features', '--release', '--verbose'], 'check', '.'),
     'rust-doc': (['cargo', 'test', '--locked', '--workspace', '--doc', '--all-features'], 'test', '.'),
     'web-tests': (['pnpm', '--filter', '@yufu/web', 'test'], 'test', '.'),
@@ -228,9 +236,14 @@ def verify_record(root, path):
         valid_argv = (data['argv'][1:] == expected[0][1:] and
                       bool(re.fullmatch(r'python(?:\d+(?:\.\d+)?)?(?:\.exe)?', Path(data['argv'][0]).name)))
     else:
-        valid_argv = data['argv'] == expected[0] or (
-            data['check'] in {'unit', 'rust-tests'} and data['argv'][:-1] == expected[0][:-1] and
-            bool(re.fullmatch(r'--test-threads=(?:[1-9]|1[0-6])', data['argv'][-1])))
+        candidate = data['argv']
+        valid_argv = candidate == expected[0]
+        if not valid_argv and data['check'] in {'unit', 'rust-tests'}:
+            threads = [arg for arg in candidate if re.fullmatch(r'--test-threads=\d+', arg)]
+            in_range = len(threads) == 1 and 1 <= int(threads[0].split('=')[1]) <= 16
+            candidate = [f'--test-threads={THREADS}' if re.fullmatch(r'--test-threads=\d+', arg) else arg
+                         for arg in candidate]
+            valid_argv = in_range and candidate == expected[0]
     if not valid_argv:
         raise ValueError('Evidence command does not match its named check')
     try:

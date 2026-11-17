@@ -19,7 +19,7 @@ env:
   CARGO_PROFILE_DEV_DEBUG: '0'
   CARGO_PROFILE_TEST_DEBUG: '0'
   PYTHONUTF8: '1'
-  YUFU_TEST_THREADS: '4'
+  YUFU_TEST_THREADS: '1'
 
 jobs:
   validate:
@@ -86,16 +86,6 @@ jobs:
         run: python scripts/readiness.py run fmt
       - name: Cargo clippy
         run: python scripts/readiness.py run clippy
-      - name: Cache Playwright browsers
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-      - name: Install integration browser dependencies
-        working-directory: web
-        run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
       - name: Rust tests
         run: python scripts/readiness.py run rust-tests
       - name: Rust doc tests
@@ -116,9 +106,59 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # Runs beside the quality gate: the three-engine acceptance test needs a quiet
+  # host, and sharing a runner with database fixtures resets its connections.
+  browser:
+    name: Release browser SSO
+    needs: validate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: rust-verify
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - name: Install locked frontend dependencies
+        run: |
+          npm install --global pnpm@12.10.1
+          pnpm install --frozen-lockfile
+      - name: Build embedded console assets
+        run: python scripts/readiness.py run web-build
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+      - name: Install browser engines
+        working-directory: web
+        run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
+      - name: Verify browser SSO
+        run: python scripts/readiness.py run rust-browser
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: readiness-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}-release-browser
+          path: docs/specs/product-readiness/evidence/ci/
+          if-no-files-found: warn
+          retention-days: 14
+
   build:
     name: Package ${{ matrix.target }}
-    needs: [validate, verify]
+    needs: [validate, verify, browser]
     strategy:
       fail-fast: false
       matrix:
