@@ -302,17 +302,17 @@ grep -n 'versions.env' "$SKILL/references/go-resource-server.md"
 1. 标题区增加 `[![skills.sh](https://skills.sh/b/Bin-hy/yufu)](https://skills.sh/Bin-hy/yufu)`。
 2. 新增「用 AI Agent 接入（Skill）」小节，给出：
    ```bash
-   npx skills add Bin-hy/yufu@skill-v0.1.0 --skill yufu-onboarding
+   npx skills add Bin-hy/yufu --skill yufu-onboarding
    ```
 3. 给出非交互写法（`-a claude-code --copy -y`）与一句话示例。
-4. 不承诺生产部署，不写未发布的 tag。
+4. 不承诺生产部署，不引用未发布的 tag；说明版本由锁文件与 `versions.env` 固定。
 
 **验证：**
 ```bash
-grep -n 'npx skills add Bin-hy/yufu@skill-v0.1.0' README.md
+grep -n 'npx skills add Bin-hy/yufu --skill yufu-onboarding' README.md
 grep -n 'skills.sh/b/Bin-hy/yufu' README.md
 ```
-期望：两条均命中，且安装命令中的 tag 与 T23 创建的标签一致。
+期望：两条均命中，且安装命令不包含 `@tag`。
 
 ## T16: 一致性测试
 
@@ -454,10 +454,10 @@ grep -n '.yufu-onboarding/' "$REPO/.gitignore"
 **依赖：** T22
 **步骤：**
 1. 本地创建标签：`git tag -a skill-v0.1.0 -m "yufu-onboarding skill v0.1.0"`。
-2. **推送到远端前必须获得用户确认**（共享状态操作）。
-3. 推送后，在空目录执行标签安装：
+2. **推送标签与默认分支前必须获得用户确认**（共享状态操作）。
+3. 推送后，在空目录执行默认分支安装（实测 CLI 不支持 ref，`@tag` 会被当作 skill 名）：
    ```bash
-   npx skills add Bin-hy/yufu@skill-v0.1.0 --skill yufu-onboarding -a claude-code --copy -y
+   npx skills add Bin-hy/yufu --skill yufu-onboarding -a claude-code --copy -y
    ```
 4. 记录 skills.sh 页面状态；索引可能延迟，记录实际结果。
 5. 若 T18 证明 v0.1.1 不兼容，本任务改为先发布 `v0.1.2` 并更新 `versions.env`，同样需确认。
@@ -465,10 +465,10 @@ grep -n '.yufu-onboarding/' "$REPO/.gitignore"
 **验证：**
 ```bash
 git -C "$REPO" show skill-v0.1.0:.agents/skills/yufu-onboarding/SKILL.md | head -4
-cd /tmp/tag-install-check && npx skills add Bin-hy/yufu@skill-v0.1.0 --skill yufu-onboarding -a claude-code --copy -y
+cd /tmp/main-install-check && npx skills add Bin-hy/yufu --skill yufu-onboarding -a claude-code --copy -y
 npx skills list
 ```
-期望：标签内容包含新 Skill；公网安装成功；`skills list` 显示 `yufu-onboarding`。
+期望：标签内容包含新 Skill；默认分支安装成功；`skills list` 显示 `yufu-onboarding`。
 
 ## T24: 按 checklist 验收
 
@@ -506,5 +506,5 @@ T13/T14 与 T15 可并行；T19/T20 共用 T18 的环境，但需分别取证。
 | v0.1.1 缺少 Skill 依赖的接口 | T18 注册或校验失败 | 发布 `v0.1.2`，更新 `versions.env` 与校验和，重跑 T18 |
 | 下载被墙或受限 | T18 失败 | 文档与错误信息指向 `YUFU_BIN`；不改为源码构建 |
 | 安装器丢弃可执行位 | T17 运行失败 | 全链路已统一 `bash <path>`，应不受影响；若仍失败，检查调用方式 |
-| 标签推送或 skills.sh 索引延迟 | T23 | 标签安装不依赖索引；索引状态如实记录，不强求即时可见 |
+| 标签推送或 skills.sh 索引延迟 | T23 | 安装不依赖索引；索引状态如实记录，不强求即时可见 |
 | 旧容器端口不一致 | T8/T18 | 提示用 `YUFU_PG_PORT` 对齐；不自动重建 |

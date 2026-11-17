@@ -144,14 +144,17 @@ cargo run --bin yufu --features webui -- \
 让编码 agent 在本机完成「部署 yufu → 注册应用 → 校验参数 → 生成接入代码」：
 
 ```bash
-npx skills add Bin-hy/yufu@skill-v0.1.0 --skill yufu-onboarding
+npx skills add Bin-hy/yufu --skill yufu-onboarding
 ```
 
 非交互安装（指定 agent、复制文件、跳过确认）：
 
 ```bash
-npx skills add Bin-hy/yufu@skill-v0.1.0 --skill yufu-onboarding -a claude-code --copy -y
+npx skills add Bin-hy/yufu --skill yufu-onboarding -a claude-code --copy -y
 ```
+
+安装后 `skills-lock.json` 固定到具体提交；部署的 yufu 版本与 Go SDK 版本由 Skill 内的
+`assets/versions.env` 固定，不随默认分支浮动。
 
 安装后对 agent 说一句「部署 yufu 并接入这个项目」，它只会追问一次接入形态
 （Web 登录 / 保护已有 API），随后执行固定版本的本地部署与注册，并输出 issuer、
