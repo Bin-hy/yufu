@@ -111,8 +111,12 @@ jobs:
   browser:
     name: Release browser SSO
     needs: validate
-    runs-on: ubuntu-22.04
+    # Match the CI browser job: Playwright publishes per-image WebKit builds, so
+    # a cache keyed only by runner.os hands 22.04 binaries built for 24.04.
+    runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      PLAYWRIGHT_IMAGE: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -139,9 +143,9 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_IMAGE }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            playwright-${{ runner.os }}-
+            playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_IMAGE }}-
       - name: Install browser engines
         working-directory: web
         run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit

@@ -150,6 +150,10 @@ jobs:
         # The acceptance test drives three engines against real TLS fronts; it
         # runs alone so database fixture churn cannot reset its connections.
         timeout-minutes: 60
+        env:
+            # Playwright ships per-image WebKit builds; scope the browser cache
+            # to the runner image so another image cannot reuse it.
+            PLAYWRIGHT_IMAGE: ubuntu-latest
         steps:
             - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
               with:
@@ -174,9 +178,9 @@ jobs:
               uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
               with:
                   path: ~/.cache/ms-playwright
-                  key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+                  key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_IMAGE }}-${{ hashFiles('pnpm-lock.yaml') }}
                   restore-keys: |
-                      playwright-${{ runner.os }}-
+                      playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_IMAGE }}-
             - name: Install browser engines
               working-directory: web
               run: node node_modules/@playwright/test/cli.js install --with-deps chromium firefox webkit
