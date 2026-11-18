@@ -1,0 +1,199 @@
+---
+title: Python SDK
+description: Install yufu-sdk, run the code flow, verify tokens, introspect, revoke, and handle back-channel logout.
+---
+
+`yufu-sdk` is the Python implementation of the yufu runtime SDK. It provides a synchronous
+`Client` and an asyncio `AsyncClient`, and depends only on `httpx` and `cryptography`.
+
+:::note
+The SDK is maintained in the independent [yufu-sdk-python repository](https://github.com/Bin-hy/yufu-sdk-python),
+published on [PyPI](https://pypi.org/project/yufu-sdk/), and requires Python 3.10 or later.
+:::
+
+## Scope
+
+Included: discovery with issuer validation, authorization code + PKCE (S256), state and nonce
+generation, code exchange and refresh-token rotation with single-flight, UserInfo, JWKS caching and
+RS256 verification, access-token verification (`typ=at+jwt`, `iss`, `aud`, `exp`, `nbf`), ID Token
+verification, introspection, revocation, RP-initiated logout URLs, back-channel logout token
+verification, and typed OAuth/HTTP errors with `request_id` and `Retry-After`.
+
+Not included: M2M / `client_credentials`, permission synchronization, `/enforce`, legacy RBAC, and
+console APIs.
+
+## Install
+
+```bash
+pip install yufu-sdk
+```
+
+```python
+from yufu import AsyncClient, Client
+```
+
+## Quickstart
+
+```python
+import os
+
+from yufu import Client
+
+with Client(
+    issuer="https://id.example.com",
+    client_id="web",
+    client_secret=os.environ["OIDC_CLIENT_SECRET"],
+    redirect_uri="https://app.example.com/callback",
+    scopes=["openid", "profile", "email"],
+) as client:
+    auth = client.authorize_url()
+    # Store auth.state, auth.nonce, and auth.code_verifier in the user's session,
+    # then redirect the browser to auth.url.
+
+    tokens = client.exchange_code(
+        code,
+        auth.code_verifier,
+        redirect_uri=auth.redirect_uri,
+    )
+    id_claims = client.verify_id_token(tokens.id_token, nonce=auth.nonce)
+    access_claims = client.verify_access_token(
+        tokens.access_token,
+        audience="urn:app:production",
+    )
+    profile = client.userinfo(tokens.access_token)
+```
+
+The access-token audience is the application's registered access audience, not the OIDC client id.
+A resource server must pass the expected audience to `verify_access_token`.
+
+## Async client
+
+```python
+import os
+
+from yufu import AsyncClient
+
+async with AsyncClient(
+    issuer="https://id.example.com",
+    client_id="web",
+    client_secret=os.environ["OIDC_CLIENT_SECRET"],
+    redirect_uri="https://app.example.com/callback",
+) as client:
+    auth = await client.authorize_url()
+    tokens = await client.exchange_code(
+        code,
+        auth.code_verifier,
+        redirect_uri=auth.redirect_uri,
+    )
+    claims = await client.verify_access_token(
+        tokens.access_token,
+        audience="urn:app:production",
+    )
+```
+
+An `AsyncClient` is bound to the event loop that first uses it. Do not share one instance across
+loops.
+
+## Resource server
+
+```python
+import os
+
+from yufu import Client, YufuError
+
+reader = Client(
+    issuer="https://id.example.com",
+    client_id=os.environ["READER_CLIENT_ID"],
+    client_secret=os.environ["READER_CLIENT_SECRET"],
+)
+
+try:
+    claims = reader.verify_access_token(
+        bearer_token,
+        audience="urn:app:production",
+    )
+except YufuError as exc:
+    raise PermissionError(exc.code) from exc
+
+introspection = reader.introspect(bearer_token, hint="access_token")
+if not introspection.active or introspection.subject != claims.subject:
+    raise PermissionError("token is not active or subject changed")
+```
+
+The SDK verifies JWTs locally; introspection is an additional online check whose freshness policy
+belongs to the application.
+
+## Back-channel logout
+
+```python
+from yufu import YufuError
+
+try:
+    claims = client.verify_logout_token(logout_token)
+except YufuError as exc:
+    raise PermissionError(exc.code) from exc
+
+# Delete local sessions by claims.sid and claims.subject.
+# Persist claims.jti to make delivery idempotent.
+```
+
+`verify_logout_token` enforces `typ=logout+jwt`, `aud=client_id`, the back-channel event, `jti`,
+`sid` or `sub`, no `nonce`, and a lifetime of at most 120 seconds.
+
+## Configuration
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `issuer` | required | Absolute http(s) issuer URL without query or fragment |
+| `client_id` | required | OIDC client id |
+| `client_secret` | `""` | Optional for public clients |
+| `redirect_uri` | `""` | Required for `authorize_url` and `exchange_code` |
+| `scopes` | `("openid",)` | Scopes used by authorization requests |
+| `token_auth_method` | inferred | `client_secret_post`, `client_secret_basic`, or `none` |
+| `timeout` | `10.0` | Default HTTP timeout in seconds |
+| `discovery_ttl` | `300.0` | Discovery cache TTL in seconds |
+| `jwks_ttl` | `300.0` | JWKS cache TTL in seconds |
+| `leeway` | `60.0` | Clock-skew allowance for `exp`, `nbf`, and `iat` |
+| `now` | current UTC time | Injectable clock for deterministic tests |
+
+## Errors
+
+```python
+from yufu import YufuError, is_error_code
+
+try:
+    client.exchange_code(code, verifier)
+except YufuError as exc:
+    print(exc.code, exc.status_code, exc.request_id, exc.retry_after)
+    if is_error_code(exc, "invalid_grant"):
+        ...
+```
+
+`YufuError.reason` is the language-neutral rejection category used by the contract fixtures, for
+example `expired`, `bad_signature`, `unknown_kid`, `typ_mismatch`, `issuer_mismatch`,
+`audience_mismatch`, `missing_events`, `nonce_present`, or `lifetime_too_long`.
+
+## Security defaults
+
+- RS256 only; RSA keys smaller than 2048 bits are rejected.
+- `kid` is required, and JWKS is refreshed when an unknown `kid` appears.
+- Access tokens must use `typ=at+jwt`; ID tokens use `typ=JWT` or no `typ`; logout tokens use
+  `typ=logout+jwt`.
+- `iss` must match the configured issuer exactly.
+- The access-token `aud` is mandatory and must match the caller's expected value.
+- `exp`, `nbf`, and `iat` use a 60-second leeway by default.
+- HTTP responses are limited to 1 MiB and tokens to 16 KiB; redirects are not followed.
+
+## Contract tests
+
+The Python SDK shares the
+[`sdk/contract-fixtures`](https://github.com/Bin-hy/yufu/tree/main/sdk/contract-fixtures)
+corpus with the Go SDK. Set `YUFU_CONTRACT_FIXTURES`, or keep the yufu repository next to the
+Python SDK checkout, then run:
+
+```bash
+pytest
+```
+
+The contract tests start a loopback issuer on `http://127.0.0.1:18765`; do not run contract tests
+for multiple languages in parallel on the same host.

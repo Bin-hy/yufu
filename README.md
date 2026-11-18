@@ -63,7 +63,7 @@ yufu 是**鱼符**的拼音。唐代官员随身佩带鱼形的身份凭证，�
 | **账户与访问治理** | 企业邀请、账户资格、用户组及应用访问分配；访问须显式授予 |
 | **资料授权与会话管理** | 用户查看和撤回资料同意，管理中心及应用会话，支持刷新令牌轮换与撤销 |
 | **退出联动与审计** | RP 发起退出、按应用环境能力投递后通道退出通知，以及身份与授权变更审计 |
-| **应用集成** | 机密 Web 与公共 SPA 参考实现、Go Runtime SDK 与 MCP 访问令牌；公开 PDP 接口暂不可接入 |
+| **应用集成** | 机密 Web 与公共 SPA 参考实现、Go / Python Runtime SDK 与 MCP 访问令牌；公开 PDP 接口暂不可接入 |
 
 ### 三个工作入口
 
@@ -181,6 +181,7 @@ client id、secret 文件位置和下一步文档。该 Skill 面向本机联调
 | 机密 Web 应用 | [Web 接入指南](https://yufu-sso.pages.dev/guides/web-app/) | [examples/oidc-web](examples/oidc-web/README.md)，基于 `openid-client`，含独立保护 API |
 | 公共 SPA | [SPA 接入指南](https://yufu-sso.pages.dev/guides/spa/) | [examples/oidc-spa](examples/oidc-spa/README.md)，基于 `oidc-client-ts` |
 | Go 服务 | [Go SDK 指南](https://yufu-sso.pages.dev/guides/go-sdk/) | [yufu-sdk-go](https://github.com/Bin-hy/yufu-sdk-go) · [联调示例](examples/sdk/go/README.md) |
+| Python 服务 | [Python SDK 指南](https://yufu-sso.pages.dev/guides/python-sdk/) | [yufu-sdk-python](https://github.com/Bin-hy/yufu-sdk-python) · [PyPI](https://pypi.org/project/yufu-sdk/) |
 
 API 默认前缀为 `/api/v1`。应用权限同步使用 `/application/sync-permissions`，
 旧 `/enforce` 保留拒绝响应，不提供可直接接入的公开 PDP 决策 API；中心内部的授权判断不等于外部接口可用。
@@ -248,6 +249,11 @@ cargo build --bin yufu --features webui --release
 # 本仓库保留 Go 接入示例：离线契约测试与真实 issuer 联调
 (cd examples/sdk/go && go test ./... && go vet ./...)
 (cd examples/sdk/go && ./run-integration.sh)  # 需要 Docker
+
+# 独立 Python SDK 在 https://github.com/Bin-hy/yufu-sdk-python 维护
+# 契约测试读取本仓库的 sdk/contract-fixtures
+# 先在 Python SDK 仓库执行 uv pip install -e '.[dev]'
+(cd ../yufu-sdk-python && pytest)
 
 # 官网文档
 pnpm check:website

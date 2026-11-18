@@ -1,0 +1,193 @@
+---
+title: Python SDK
+description: 安装 yufu-sdk，完成授权码流程、令牌校验、内省、撤销与后通道退出。
+---
+
+`yufu-sdk` 是 yufu Runtime SDK 的 Python 实现，提供同步 `Client` 与异步 `AsyncClient`。
+它只依赖 `httpx` 与 `cryptography`，不依赖服务端代码。
+
+:::note
+SDK 在独立的 [yufu-sdk-python 仓库](https://github.com/Bin-hy/yufu-sdk-python)维护，
+发布在 [PyPI](https://pypi.org/project/yufu-sdk/)，要求 Python 3.10 或更新版本。
+:::
+
+## 范围
+
+包含：Discovery 与 issuer 校验、授权码 + PKCE（S256）、state / nonce 生成、code 兑换与
+refresh token 轮换（single-flight）、UserInfo、JWKS 缓存与 RS256 校验、access token 校验
+（`typ=at+jwt`、`iss`、`aud`、`exp`、`nbf`）、ID Token 校验、内省、撤销、RP 发起退出、
+后通道 logout token 校验，以及带 `request_id` 与 `Retry-After` 的类型化错误。
+
+不包含：M2M / `client_credentials`、权限同步、`/enforce`、旧 RBAC、管理控制台 API。
+
+## 安装
+
+```bash
+pip install yufu-sdk
+```
+
+```python
+from yufu import AsyncClient, Client
+```
+
+## 快速开始
+
+```python
+import os
+
+from yufu import Client
+
+with Client(
+    issuer="https://id.example.com",
+    client_id="web",
+    client_secret=os.environ["OIDC_CLIENT_SECRET"],
+    redirect_uri="https://app.example.com/callback",
+    scopes=["openid", "profile", "email"],
+) as client:
+    auth = client.authorize_url()
+    # 把 auth.state、auth.nonce、auth.code_verifier 存入用户会话，
+    # 然后让浏览器跳转到 auth.url。
+
+    tokens = client.exchange_code(
+        code,
+        auth.code_verifier,
+        redirect_uri=auth.redirect_uri,
+    )
+    id_claims = client.verify_id_token(tokens.id_token, nonce=auth.nonce)
+    access_claims = client.verify_access_token(
+        tokens.access_token,
+        audience="urn:app:production",
+    )
+    profile = client.userinfo(tokens.access_token)
+```
+
+Access Token 的 audience 是应用注册的 access audience，不是 OIDC client id。
+资源服务器必须把期望的 audience 传给 `verify_access_token`。
+
+## 异步客户端
+
+```python
+import os
+
+from yufu import AsyncClient
+
+async with AsyncClient(
+    issuer="https://id.example.com",
+    client_id="web",
+    client_secret=os.environ["OIDC_CLIENT_SECRET"],
+    redirect_uri="https://app.example.com/callback",
+) as client:
+    auth = await client.authorize_url()
+    tokens = await client.exchange_code(
+        code,
+        auth.code_verifier,
+        redirect_uri=auth.redirect_uri,
+    )
+    claims = await client.verify_access_token(
+        tokens.access_token,
+        audience="urn:app:production",
+    )
+```
+
+`AsyncClient` 绑定到首次使用它的 event loop，不要跨 loop 共享同一个实例。
+
+## 资源服务器
+
+```python
+import os
+
+from yufu import Client, YufuError
+
+reader = Client(
+    issuer="https://id.example.com",
+    client_id=os.environ["READER_CLIENT_ID"],
+    client_secret=os.environ["READER_CLIENT_SECRET"],
+)
+
+try:
+    claims = reader.verify_access_token(
+        bearer_token,
+        audience="urn:app:production",
+    )
+except YufuError as exc:
+    raise PermissionError(exc.code) from exc
+
+introspection = reader.introspect(bearer_token, hint="access_token")
+if not introspection.active or introspection.subject != claims.subject:
+    raise PermissionError("token is not active or subject changed")
+```
+
+SDK 在本地校验 JWT；内省是额外的在线检查，新鲜度策略由应用决定。
+
+## 后通道退出
+
+```python
+from yufu import YufuError
+
+try:
+    claims = client.verify_logout_token(logout_token)
+except YufuError as exc:
+    raise PermissionError(exc.code) from exc
+
+# 按 claims.sid 与 claims.subject 删除本地会话。
+# 持久化 claims.jti 以保证投递幂等。
+```
+
+`verify_logout_token` 强制校验 `typ=logout+jwt`、`aud=client_id`、后通道事件、`jti`、
+`sid` 或 `sub`、不含 `nonce`，且有效期不超过 120 秒。
+
+## 配置
+
+| 选项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `issuer` | 必填 | 绝对 http(s) issuer URL，不含 query 或 fragment |
+| `client_id` | 必填 | OIDC client id |
+| `client_secret` | `""` | 公共客户端可留空 |
+| `redirect_uri` | `""` | `authorize_url` 与 `exchange_code` 需要 |
+| `scopes` | `("openid",)` | 授权请求使用的 scope |
+| `token_auth_method` | 自动推断 | `client_secret_post`、`client_secret_basic` 或 `none` |
+| `timeout` | `10.0` | 默认 HTTP 超时（秒） |
+| `discovery_ttl` | `300.0` | Discovery 缓存时间（秒） |
+| `jwks_ttl` | `300.0` | JWKS 缓存时间（秒） |
+| `leeway` | `60.0` | `exp`、`nbf`、`iat` 的时钟偏移容忍 |
+| `now` | UTC 当前时间 | 可注入时钟，便于确定性测试 |
+
+## 错误
+
+```python
+from yufu import YufuError, is_error_code
+
+try:
+    client.exchange_code(code, verifier)
+except YufuError as exc:
+    print(exc.code, exc.status_code, exc.request_id, exc.retry_after)
+    if is_error_code(exc, "invalid_grant"):
+        ...
+```
+
+`YufuError.reason` 是契约测试使用的语言无关拒绝类别，例如 `expired`、`bad_signature`、
+`unknown_kid`、`typ_mismatch`、`issuer_mismatch`、`audience_mismatch`、`missing_events`、
+`nonce_present` 或 `lifetime_too_long`。
+
+## 安全默认值
+
+- 仅 RS256；小于 2048 位的 RSA 密钥被拒绝。
+- `kid` 必填；遇到未知 `kid` 时刷新 JWKS。
+- access token 必须 `typ=at+jwt`；ID token 必须 `typ=JWT` 或无 `typ`；
+  logout token 必须 `typ=logout+jwt`。
+- `iss` 必须与配置的 issuer 完全一致。
+- access token 的 `aud` 必填，且必须与调用方期望值一致。
+- `exp`、`nbf`、`iat` 默认使用 60 秒 leeway。
+- HTTP 响应限制 1 MiB，token 限制 16 KiB；默认不跟随重定向。
+
+## 契约测试
+
+Python SDK 与 Go SDK 共用本仓库的
+[`sdk/contract-fixtures`](https://github.com/Bin-hy/yufu/tree/main/sdk/contract-fixtures)
+语料。设置 `YUFU_CONTRACT_FIXTURES`，或把 yufu 仓库放在 Python SDK 同级目录后运行：
+
+```bash
+pytest
+```
+
+契约测试会启动 `http://127.0.0.1:18765` 的本地 issuer；不要在同一主机并行运行多个语言的契约测试。

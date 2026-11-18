@@ -80,6 +80,11 @@ export default defineConfig({
               translations: { en: 'Go SDK' },
               slug: 'guides/go-sdk',
             },
+            {
+              label: 'Python SDK',
+              translations: { en: 'Python SDK' },
+              slug: 'guides/python-sdk',
+            },
           ],
         },
         {
