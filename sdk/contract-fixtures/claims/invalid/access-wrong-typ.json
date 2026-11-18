@@ -1,0 +1,21 @@
+{
+  "id": "access-wrong-typ",
+  "key": "signing",
+  "header": {
+    "alg": "RS256",
+    "kid": "key-1",
+    "typ": "JWT"
+  },
+  "claims": {
+    "iss": "http://127.0.0.1:18765",
+    "sub": "42",
+    "aud": "urn:app:test",
+    "iat": 1793491140,
+    "exp": 1793491500,
+    "jti": "jti-wrong-typ",
+    "scope": "openid profile",
+    "token_use": "user_session",
+    "application": "urn:app:test",
+    "session_id": "session-1"
+  }
+}

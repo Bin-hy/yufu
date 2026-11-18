@@ -1,0 +1,107 @@
+{
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/oidc/token",
+      "cases": [
+        {
+          "id": "authorization-code-success",
+          "form_equals": {
+            "grant_type": "authorization_code",
+            "code": "code-1",
+            "code_verifier": "fixture-verifier-0123456789abcdefghijklmnopqrstuvwxyz"
+          },
+          "response": {
+            "status": 200,
+            "body_file": "responses/token-authorization-code.json"
+          }
+        },
+        {
+          "id": "authorization-code-wrong-pkce",
+          "form_equals": {
+            "grant_type": "authorization_code"
+          },
+          "response": {
+            "status": 400,
+            "json": {
+              "error": "invalid_grant"
+            }
+          }
+        },
+        {
+          "id": "refresh-success",
+          "form_equals": {
+            "grant_type": "refresh_token",
+            "refresh_token": "refresh-1"
+          },
+          "response": {
+            "status": 200,
+            "body_file": "responses/token-refresh.json"
+          }
+        }
+      ],
+      "default": {
+        "status": 400,
+        "json": {
+          "error": "unsupported_grant_type"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/oidc/userinfo",
+      "cases": [
+        {
+          "id": "userinfo-success",
+          "headers_match": {
+            "Authorization": "^Bearer [^ ]+$"
+          },
+          "response": {
+            "status": 200,
+            "body_file": "responses/userinfo.json"
+          }
+        }
+      ],
+      "default": {
+        "status": 401,
+        "json": {
+          "error": "invalid_token"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/oidc/introspect",
+      "cases": [
+        {
+          "id": "introspection-success",
+          "form_present": [
+            "token"
+          ],
+          "form_equals": {
+            "client_id": "reader",
+            "client_secret": "reader-secret"
+          },
+          "response": {
+            "status": 200,
+            "body_file": "responses/introspection.json"
+          }
+        }
+      ],
+      "default": {
+        "status": 401,
+        "json": {
+          "error": "invalid_client"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/oidc/revoke",
+      "cases": [],
+      "default": {
+        "status": 200
+      }
+    }
+  ]
+}

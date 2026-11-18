@@ -1,0 +1,40 @@
+{
+  "token-authorization-code": {
+    "access_token": {
+      "token": "access-token"
+    },
+    "id_token": {
+      "token": "id-token"
+    },
+    "refresh_token": "refresh-1",
+    "token_type": "Bearer",
+    "expires_in": 300,
+    "scope": "openid profile"
+  },
+  "token-refresh": {
+    "access_token": {
+      "token": "access-token-refreshed"
+    },
+    "refresh_token": "refresh-2",
+    "token_type": "Bearer",
+    "expires_in": 300
+  },
+  "userinfo": {
+    "sub": "42",
+    "preferred_username": "alice",
+    "name": "Alice",
+    "email": "alice@example.com"
+  },
+  "introspection": {
+    "active": true,
+    "scope": "openid profile",
+    "client_id": "web",
+    "username": "alice",
+    "token_type": "Bearer",
+    "exp": 1793491500,
+    "sub": "42",
+    "sid": "sid-1",
+    "aud": "urn:app:test",
+    "iss": "http://127.0.0.1:18765"
+  }
+}

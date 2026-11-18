@@ -1,0 +1,39 @@
+{
+  "version": "1",
+  "issuer": "http://127.0.0.1:18765",
+  "clock": 1793491200,
+  "signing_kid": "key-1",
+  "flow": {
+    "state": "state-1",
+    "nonce": "nonce-1",
+    "code": "code-1",
+    "code_verifier": "fixture-verifier-0123456789abcdefghijklmnopqrstuvwxyz",
+    "wrong_code_verifier": "fixture-verifier-WRONG-0123456789abcdefghijklmnopqrstu",
+    "client": {
+      "client_id": "web",
+      "client_secret": "secret"
+    },
+    "reader": {
+      "client_id": "reader",
+      "client_secret": "reader-secret"
+    },
+    "redirect_uri": "https://app.example/callback",
+    "post_logout_redirect_uri": "https://app.example/",
+    "audience": "urn:app:test",
+    "scopes": [
+      "openid",
+      "profile",
+      "email"
+    ]
+  },
+  "files": {
+    "discovery": "discovery.json",
+    "jwks": "jwks.json",
+    "endpoints": "endpoints.json",
+    "expectations": "expectations.json",
+    "keys": {
+      "signing": "keys/TEST-ONLY-signing-key.pem",
+      "rotated": "keys/TEST-ONLY-rotated-key.pem"
+    }
+  }
+}

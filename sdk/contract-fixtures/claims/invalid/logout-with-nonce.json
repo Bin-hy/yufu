@@ -1,0 +1,22 @@
+{
+  "id": "logout-with-nonce",
+  "key": "signing",
+  "header": {
+    "alg": "RS256",
+    "kid": "key-1",
+    "typ": "logout+jwt"
+  },
+  "claims": {
+    "iss": "http://127.0.0.1:18765",
+    "aud": "web",
+    "iat": 1793491140,
+    "exp": 1793491260,
+    "jti": "jti-with-nonce",
+    "sid": "sid-1",
+    "sub": "42",
+    "nonce": "nonce-1",
+    "events": {
+      "http://schemas.openid.net/event/backchannel-logout": {}
+    }
+  }
+}

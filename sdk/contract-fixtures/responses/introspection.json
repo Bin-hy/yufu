@@ -1,0 +1,12 @@
+{
+  "active": true,
+  "aud": "urn:app:test",
+  "client_id": "web",
+  "exp": 1793491500,
+  "iss": "http://127.0.0.1:18765",
+  "scope": "openid profile",
+  "sid": "sid-1",
+  "sub": "42",
+  "token_type": "Bearer",
+  "username": "alice"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "access-expired",
+  "key": "signing",
+  "header": {
+    "alg": "RS256",
+    "kid": "key-1",
+    "typ": "at+jwt"
+  },
+  "claims": {
+    "iss": "http://127.0.0.1:18765",
+    "sub": "42",
+    "aud": "urn:app:test",
+    "iat": 1793484000,
+    "exp": 1793487600,
+    "jti": "jti-expired",
+    "scope": "openid profile",
+    "token_use": "user_session",
+    "application": "urn:app:test",
+    "session_id": "session-1"
+  }
+}

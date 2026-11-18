@@ -1,0 +1,91 @@
+{
+  "access_token": [
+    {
+      "id": "access-token",
+      "token": "tokens/access-token.jwt",
+      "audience": "urn:app:test",
+      "expect": "accept"
+    },
+    {
+      "id": "access-expired",
+      "token": "tokens/invalid/access-expired.jwt",
+      "audience": "urn:app:test",
+      "expect": "reject",
+      "reason": "expired"
+    },
+    {
+      "id": "access-wrong-signature",
+      "token": "tokens/invalid/access-wrong-signature.jwt",
+      "audience": "urn:app:test",
+      "expect": "reject",
+      "reason": "bad_signature"
+    },
+    {
+      "id": "access-unknown-kid",
+      "token": "tokens/invalid/access-unknown-kid.jwt",
+      "audience": "urn:app:test",
+      "expect": "reject",
+      "reason": "unknown_kid"
+    },
+    {
+      "id": "access-wrong-typ",
+      "token": "tokens/invalid/access-wrong-typ.jwt",
+      "audience": "urn:app:test",
+      "expect": "reject",
+      "reason": "typ_mismatch"
+    },
+    {
+      "id": "access-wrong-issuer",
+      "token": "tokens/invalid/access-wrong-issuer.jwt",
+      "audience": "urn:app:test",
+      "expect": "reject",
+      "reason": "issuer_mismatch"
+    },
+    {
+      "id": "access-wrong-audience",
+      "token": "tokens/invalid/access-wrong-audience.jwt",
+      "audience": "urn:app:test",
+      "expect": "reject",
+      "reason": "audience_mismatch"
+    }
+  ],
+  "id_token": [
+    {
+      "id": "id-token",
+      "token": "tokens/id-token.jwt",
+      "nonce": "nonce-1",
+      "expect": "accept"
+    }
+  ],
+  "logout_token": [
+    {
+      "id": "logout-token",
+      "token": "tokens/logout-token.jwt",
+      "expect": "accept"
+    },
+    {
+      "id": "logout-missing-events",
+      "token": "tokens/invalid/logout-missing-events.jwt",
+      "expect": "reject",
+      "reason": "missing_events"
+    },
+    {
+      "id": "logout-with-nonce",
+      "token": "tokens/invalid/logout-with-nonce.jwt",
+      "expect": "reject",
+      "reason": "nonce_present"
+    },
+    {
+      "id": "logout-lifetime-too-long",
+      "token": "tokens/invalid/logout-lifetime-too-long.jwt",
+      "expect": "reject",
+      "reason": "lifetime_too_long"
+    },
+    {
+      "id": "logout-wrong-typ",
+      "token": "tokens/invalid/logout-wrong-typ.jwt",
+      "expect": "reject",
+      "reason": "typ_mismatch"
+    }
+  ]
+}

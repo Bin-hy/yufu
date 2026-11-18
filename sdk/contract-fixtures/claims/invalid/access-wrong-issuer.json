@@ -1,0 +1,21 @@
+{
+  "id": "access-wrong-issuer",
+  "key": "signing",
+  "header": {
+    "alg": "RS256",
+    "kid": "key-1",
+    "typ": "at+jwt"
+  },
+  "claims": {
+    "iss": "https://evil.example",
+    "sub": "42",
+    "aud": "urn:app:test",
+    "iat": 1793491140,
+    "exp": 1793491500,
+    "jti": "jti-wrong-issuer",
+    "scope": "openid profile",
+    "token_use": "user_session",
+    "application": "urn:app:test",
+    "session_id": "session-1"
+  }
+}

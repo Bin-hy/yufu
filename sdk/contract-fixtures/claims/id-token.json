@@ -1,0 +1,18 @@
+{
+  "id": "id-token",
+  "key": "signing",
+  "header": {
+    "alg": "RS256",
+    "kid": "key-1",
+    "typ": "JWT"
+  },
+  "claims": {
+    "iss": "http://127.0.0.1:18765",
+    "sub": "42",
+    "aud": "web",
+    "iat": 1793491140,
+    "exp": 1793491500,
+    "nonce": "nonce-1",
+    "sid": "sid-1"
+  }
+}

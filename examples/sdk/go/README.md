@@ -41,11 +41,22 @@ cd examples/sdk/go
 go test -count=1 ./...
 ```
 
-The test starts a fake issuer, runs the full authorization-code flow through
-the example handlers, and checks token verification, UserInfo, introspection,
-logout URL construction and back-channel logout.
+The tests load the shared, language-neutral fixture corpus in
+`sdk/contract-fixtures/` and start a fixture issuer on the address recorded in
+`manifest.json` (`http://127.0.0.1:18765`). They cover discovery, JWKS
+verification, authorization code + PKCE, refresh, UserInfo, introspection,
+revocation, back-channel logout, and the positive/negative token vectors. The
+SDK clock is pinned to the fixture's test clock.
 
-This test proves the SDK's protocol handling, **not** that it works against a
+- Override the corpus location with
+  `YUFU_CONTRACT_FIXTURES=/path/to/contract-fixtures`.
+- Do not run two fixture consumers on the same host: both bind port `18765`.
+- Nothing leaves loopback; the test never contacts a real `yufu`.
+- The interactive demo's nonce is generated per request, so the live
+  `/login` → `/callback` flow is covered by the integration test below, not by
+  the static corpus.
+
+This test proves the SDK's protocol contract, **not** that it works against a
 real `yufu` deployment. It is deliberately excluded from the live run:
 `go test ./...` never touches the network.
 

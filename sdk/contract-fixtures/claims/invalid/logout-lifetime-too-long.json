@@ -1,0 +1,21 @@
+{
+  "id": "logout-lifetime-too-long",
+  "key": "signing",
+  "header": {
+    "alg": "RS256",
+    "kid": "key-1",
+    "typ": "logout+jwt"
+  },
+  "claims": {
+    "iss": "http://127.0.0.1:18765",
+    "aud": "web",
+    "iat": 1793491140,
+    "exp": 1793491261,
+    "jti": "jti-lifetime-too-long",
+    "sid": "sid-1",
+    "sub": "42",
+    "events": {
+      "http://schemas.openid.net/event/backchannel-logout": {}
+    }
+  }
+}

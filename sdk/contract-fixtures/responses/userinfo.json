@@ -1,0 +1,6 @@
+{
+  "email": "alice@example.com",
+  "name": "Alice",
+  "preferred_username": "alice",
+  "sub": "42"
+}
