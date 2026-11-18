@@ -1,126 +1,119 @@
 <div align="center">
 
-<img src="website/src/assets/logo.svg" width="96" height="96" alt="yufu 鱼符">
+<img src="website/src/assets/logo.svg" width="88" height="88" alt="yufu 鱼符">
 
-# yufu
+# yufu · 鱼符
 
-**企业统一身份与 SSO 平台**
+**单企业自托管统一身份与 SSO**
 
-统一账户、应用接入与访问治理，让内部应用共享清晰、可控的身份边界。
+一个 Rust 二进制 + PostgreSQL，让内部应用共享同一个身份边界。
 
-[下载 Release](https://github.com/Bin-hy/yufu/releases) · [官网](https://yufu-sso.pages.dev/) · [快速开始](https://yufu-sso.pages.dev/getting-started/) · [控制台指南](https://yufu-sso.pages.dev/guides/console/) · [English Docs](https://yufu-sso.pages.dev/en/)
+[![CI](https://github.com/Bin-hy/yufu/actions/workflows/rust.yml/badge.svg)](https://github.com/Bin-hy/yufu/actions/workflows/rust.yml)
+[![Release](https://img.shields.io/github/v/release/Bin-hy/yufu?display_name=tag&sort=semver)](https://github.com/Bin-hy/yufu/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-yufu--sso.pages.dev-2ea44f)](https://yufu-sso.pages.dev/)
 
-Rust · Vue 3 · PostgreSQL · OpenID Connect · OAuth 2.0 · PKCE
+[**5 分钟试用**](#快速开始) · [完整文档](https://yufu-sso.pages.dev/getting-started/) · [控制台指南](https://yufu-sso.pages.dev/guides/console/) · [English](README.en.md)
 
-[![skills.sh](https://img.shields.io/badge/skills.sh-yufu--onboarding-000000)](https://skills.sh/Bin-hy/yufu/yufu-onboarding)
+`Rust 2024` · `OpenID Connect` · `OAuth 2.0` · `PKCE S256` · `Vue 3` · `PostgreSQL` · `Go / Python SDK`
 
 </div>
 
 ---
 
-yufu 面向**单企业、自托管**场景，为内部应用提供统一登录、受控接入、访问分配与身份审计。
-一个 Rust 服务同时承载账户中心、开发者控制台和企业管理控制台，应用通过标准 OIDC 协议接入。
-管理前端可嵌入单个二进制交付，持久化数据由 PostgreSQL 管理。
+yufu 面向**单企业、自托管**场景：为内部应用提供统一登录、受控接入、访问分配与身份审计。
+一个 Rust 服务同时承载账户中心、开发者控制台和企业管理控制台，应用通过标准 OIDC 接入；
+管理前端可嵌入单个二进制交付，数据由 PostgreSQL 管理。
 
-应用接入遵循企业邀约与审批流程：开发者维护应用配置，管理员审批生产接入并分配访问范围，
-成员在获准范围内登录和使用应用。开发者资格、应用访问分配与用户资料同意分别管理。
-
-## 为什么叫 yufu
-
-yufu 是**鱼符**的拼音。唐代官员随身佩带鱼形的身份凭证，剖分为二：一半留在内廷，一半带在身上，
-两半合上才算数。金、银、铜三品，对应不同的权级。
-
-这个器物就是认证这个动作本身——持有一半不算身份，两半对上才算。所以标志是一条被中缝劈开的鱼：
-**分开是凭证，合起来才是身份**。「三品」则提醒我们：认出你是谁还不够，还要知道你被允许走多远。
-
-四条原则贯穿实现：
-
-1. **一个身份，不是一堆账号。** 固定 issuer，一次登录进入所有被授权的应用，
-   不要求每个应用各自维护一套密码。
-2. **访问显式授予，默认拒绝。** 应用接入走企业邀约与审批，用户能进哪些应用必须被明确分配，
-   不存在「注册即可见」；不受支持的执行凭据配置直接 fail closed。
-3. **凭证可撤回，行为留痕。** 刷新令牌轮换、会话按中心或按应用分别终止、
-   退出按应用能力投递后通道通知；每一次授权与撤销都进入审计。
-4. **自托管，密钥在自己手里。** 单个 Rust 二进制加 PostgreSQL，管理前端可嵌入交付；
-   签名私钥、数据库与审计记录都由部署方掌握。
-
-边界同样写明白：不提供多租户、公开应用市场、外部 IdP 联邦、SAML / LDAP / SCIM 或 MFA。
-把边界写在文档里，比让使用者自己试出来更诚实。
+> 它解决的不是「做一个登录页」，而是「划清身份边界」：谁是谁、能进哪个应用、
+> 权限何时被撤销、每一次变更留下什么记录。
 
 ## 产品预览
 
 ![yufu 工作台：账户中心、开发者控制台与企业管理入口（演示数据）](website/src/assets/console-dashboard.png)
 
-> 当前 Vue 前端实截，使用隔离的演示数据；账户、应用、数量与会话状态均为虚构。
-> 更多界面与操作说明见[控制台使用指南](https://yufu-sso.pages.dev/guides/console/)。
+> Vue 控制台实截，使用隔离的演示数据；账户、应用、数量与会话状态均为虚构。
 
-## 核心能力
+<p align="center">
+  <img src="website/src/assets/console-consent.png" width="32%" alt="授权同意页">
+  <img src="website/src/assets/console-developer.png" width="32%" alt="开发者控制台">
+  <img src="website/src/assets/console-admin.png" width="32%" alt="企业管理">
+</p>
+<p align="center"><sub>授权同意 · 开发者控制台 · 企业管理</sub></p>
 
-| 能力 | 说明 |
+## 为什么值得一试
+
+- **一个 issuer，一次登录。** 固定 issuer，OIDC Discovery 自动发现端点；登录一次，
+  在授权范围内跨应用免登录，内部应用不必各自维护一套密码。
+- **访问显式授予，默认拒绝。** 应用接入走企业邀约与审批：开发与生产配置分离，
+  生产接入需管理员审批，用户能进哪些应用必须被明确分配，不存在「注册即可见」；
+  不受支持的执行凭据配置直接 fail closed。
+- **凭证可撤回，行为留痕。** 刷新令牌轮换与重放撤销、按中心或按应用终止会话、
+  RP 发起退出与后通道通知；授权、撤销与管理写入进入审计。
+- **单二进制，密钥在自己手里。** Rust 服务内嵌 Vue 控制台，部署只需一个二进制 + PostgreSQL；
+  签名私钥、数据库与审计记录都由部署方掌握。容器以非 root、只读根文件系统运行。
+- **品牌和登录页开箱可改。** 超级管理员在控制台修改网站名称、Logo、登录封面、欢迎文案与
+  页脚备案信息，保存后刷新即生效，不需要改代码、重新构建或重启服务。
+
+### 适合谁，不适合谁
+
+| 适合 | 不适合 |
 | --- | --- |
-| **统一身份与 SSO** | 固定 issuer，支持 OIDC Discovery、授权码流程、PKCE S256、UserInfo 与令牌内省 |
-| **受控应用接入** | 开发与生产环境独立配置，支持应用成员协作、配置版本与生产审批 |
-| **账户与访问治理** | 企业邀请、账户资格、用户组及应用访问分配；访问须显式授予 |
-| **资料授权与会话管理** | 用户查看和撤回资料同意，管理中心及应用会话，支持刷新令牌轮换与撤销 |
-| **退出联动与审计** | RP 发起退出、按应用环境能力投递后通道退出通知，以及身份与授权变更审计 |
-| **应用集成** | 机密 Web 与公共 SPA 参考实现、Go / Python Runtime SDK 与 MCP 访问令牌；公开 PDP 接口暂不可接入 |
+| 单企业、内部应用需要统一登录 | 需要多租户或对外 SaaS 身份服务 |
+| 希望自托管，密钥和数据自己掌握 | 需要 SAML / LDAP / SCIM 联邦 |
+| 需要应用接入审批与访问分配 | 需要 MFA / Passkey / 社交登录 |
+| 想用标准 OIDC，不想写私有认证 | 需要公开 PDP 决策 API 或通用 ReBAC |
+| 希望交付体积小、运维面小 | 需要开箱即用的应用市场 |
 
-### 三个工作入口
-
-| 入口 | 使用者 | 主要任务 |
-| --- | --- | --- |
-| **账户中心** · `/account` | 企业成员 | 维护个人资料、查看可访问应用、管理资料授权与登录会话 |
-| **开发者控制台** · `/developer/apps` | 具备开发者资格的成员 | 注册与维护应用，管理开发/生产配置，提交审批 |
-| **企业管理** · `/admin/*` | 企业管理员 | 邀请成员、管理账户与用户组、审批应用、分配访问、查看审计与退出通知 |
-
-导航按账户资格显示。登录后默认进入账户中心，工作台位于 `/dashboard`。
-
-## 下载与安装
-
-[GitHub Releases](https://github.com/Bin-hy/yufu/releases) 提供内嵌 WebUI 的二进制安装包，无需在部署机器上安装 Rust 或 Node.js。
-首次版本发布后可在该页面下载；运行服务仍需 PostgreSQL、部署配置和可信时钟来源。
-
-| 平台 | 安装包（`<tag>` 例如 `v1.2.3`） |
-| --- | --- |
-| Linux x86_64 · GNU/glibc | `yufu-<tag>-x86_64-unknown-linux-gnu.tar.gz` |
-| Windows x86_64 · MSVC | `yufu-<tag>-x86_64-pc-windows-msvc.zip` |
-| macOS Intel | `yufu-<tag>-x86_64-apple-darwin.tar.gz` |
-| macOS Apple Silicon | `yufu-<tag>-aarch64-apple-darwin.tar.gz` |
-
-下载同版本 `SHA256SUMS` 核对安装包摘要。解包、配置、平台要求及 systemd 安装见[二进制安装说明](docs/releases/installation.md)。
-从源码启动请按下面的快速开始操作。
+如果你只需要一个给内部应用用的、能自己掌控的身份中心，而不想引入一整套 IAM 平台，
+yufu 是一个更小的选择。
 
 ## 快速开始
 
-### 环境要求
+### Docker（推荐，约 5 分钟）
+
+不需要安装 Rust 或 Node.js，也不需要手写配置：镜像首次启动会从环境变量生成配置，
+并签发评估用签名密钥。
+
+```sh
+git clone https://github.com/Bin-hy/yufu.git
+cd yufu
+docker compose -f deploy/docker/compose.demo.yaml up -d
+```
+
+打开 <https://localhost:8443>，用 `admin` / `change-me-now` 登录。首次启动会自动建库并执行迁移。
+浏览器会提示 Caddy 本地 CA 的自签名证书，接受后继续。
+
+> 该 compose 只用于本机评估，密码与密钥都是公开的演示值。生产部署请使用
+> [`deploy/docker`](deploy/docker/README.md) 的参考栈，替换密码与 issuer，并挂载自己的签名私钥。
+
+> **NTP 前提**：服务启动时会校验可信时钟，容器需要能访问配置的 NTP 来源（UDP/123）。
+> 若日志出现 `NTP clock health could not be confirmed`，说明当前网络阻断了 NTP；
+> 请在 `[security_clock]` 中换成可达的来源，或用
+> `yufu --config <path> --check-security-clock` 单独诊断。
+
+### 从源码构建
+
+环境要求：
 
 - 支持 Rust 2024 edition 的 Rust 工具链
-- Node.js **≥ 22.23.4**、pnpm **10+**（包含官网构建要求）
+- Node.js **≥ 22.23.4**、pnpm **10+**
 - Docker 兼容容器运行时，用于启动 PostgreSQL
-
-### 1. 获取代码并构建前端
 
 ```sh
 git clone https://github.com/Bin-hy/yufu.git
 cd yufu
 pnpm install --frozen-lockfile
 pnpm build:web
-```
-
-### 2. 启动数据库并准备配置
-
-```sh
 docker compose up -d
 cp conf/yufu.example.toml conf/yufu.local.toml
 ```
 
+根目录 `compose.yaml` 只启动 PostgreSQL，默认本机端口为 `5433`；数据库默认凭据应按实际部署环境替换。
+
 编辑 `conf/yufu.local.toml`，配置数据库连接、`[auth.super_admin]` 管理员账户、
 `[oidc]` issuer 与签名密钥路径，以及 `[security_clock]` 可信时钟来源。
-完整字段和示例见[快速开始](https://yufu-sso.pages.dev/getting-started/)与[配置参考](https://yufu-sso.pages.dev/reference/configuration/)。
-
-`compose.yaml` 仅启动 PostgreSQL，默认本机端口为 `5433`；数据库默认凭据应按实际部署环境替换。
-
-### 3. 启动身份服务
+完整字段见[配置参考](https://yufu-sso.pages.dev/reference/configuration/)。
 
 ```sh
 cargo run --bin yufu --features webui -- \
@@ -128,18 +121,53 @@ cargo run --bin yufu --features webui -- \
   --allow-insecure-loopback-cookies
 ```
 
-打开 [http://127.0.0.1:4000](http://127.0.0.1:4000)，使用配置中的管理员账户登录。
-启动时自动执行版本化数据库迁移；`--features webui` 嵌入前一步生成的 `assets/web` 前端产物。
+打开 <http://127.0.0.1:4000>。启动时自动执行版本化数据库迁移；`--features webui`
+嵌入前一步生成的 `assets/web` 前端产物。`--allow-insecure-loopback-cookies`
+仅用于本机 HTTP，要求监听地址与 issuer 均为 loopback；生产使用 HTTPS 与默认 Secure Cookie。
 
-`--allow-insecure-loopback-cookies` 仅用于本机 HTTP，要求监听地址与 issuer 均为 loopback。
-生产部署使用 HTTPS 和默认 Secure Cookie。服务启动前检查认证时钟，运行期间可通过
-`/api/v1/health/ready` 检查就绪状态，或使用 `--check-security-clock` 单独诊断。
+开发前端可运行 `pnpm dev:web`，Vite 会把 API 请求代理到本机身份服务。
 
-开发前端可运行 `pnpm dev:web`，Vite 会将 API 请求代理到本机身份服务。
+## 核心能力
+
+| 能力 | 你能得到什么 |
+| --- | --- |
+| **统一身份与 SSO** | 固定 issuer；OIDC Discovery、授权码流程、PKCE S256、UserInfo 与令牌内省 |
+| **受控应用接入** | 开发与生产环境独立配置，应用成员协作、配置版本与生产审批 |
+| **账户与访问治理** | 企业邀请、账户资格、用户组及应用访问分配；访问须显式授予 |
+| **资料授权与会话** | 用户查看和撤回资料同意；按中心或按应用终止会话；刷新令牌轮换与撤销 |
+| **退出联动与审计** | RP 发起退出、按应用能力投递后通道退出通知，以及身份与授权变更审计 |
+| **站点品牌** | 网站名称、简介、Logo、浏览器图标、登录封面、欢迎文案、页脚备案与链接；OIDC 页面可独立覆盖 |
+| **应用集成** | 机密 Web 与公共 SPA 参考实现、Go / Python Runtime SDK、MCP 访问令牌 |
+
+### 三个工作入口
+
+| 入口 | 使用者 | 主要任务 |
+| --- | --- | --- |
+| **账户中心** · `/account` | 企业成员 | 维护个人资料、查看可访问应用、管理资料授权与登录会话 |
+| **开发者控制台** · `/developer/apps` | 具备开发者资格的成员 | 注册与维护应用，管理开发/生产配置，提交审批 |
+| **企业管理** · `/admin/*` | 企业管理员（站点品牌仅超级管理员） | 邀请成员、管理账户与用户组、审批应用、分配访问、查看审计与退出通知、配置站点品牌 |
+
+导航按账户资格显示。登录后默认进入账户中心，工作台位于 `/dashboard`。
+
+### 品牌与登录页，不用改代码
+
+超级管理员在「系统设置 → 站点设置」（`/admin/site-settings`）可以直接修改：
+
+| 可配置项 | 说明 |
+| --- | --- |
+| **全站品牌** | 网站名称、简介、Logo、浏览器图标 |
+| **普通登录页** | 认证封面、欢迎标题、欢迎说明 |
+| **OIDC 登录与授权页** | 独立封面与文字；可逐项继承全站配置，也可单独覆盖 |
+| **页脚信息** | 版权文字、备案号、备案链接，以及最多 10 个自定义链接 |
+
+保存后其他用户下次打开或刷新页面即可生效，不需要重新构建、重启服务或重新登录。
+配置和图片统一保存在 PostgreSQL，保存与恢复默认都会写入身份审计。
+普通企业管理员、开发者和成员没有该入口。完整限制与运维说明见
+[站点品牌与认证页面配置](docs/operations/site-branding.md)。
 
 ## 接入你的应用
 
-### 用 AI Agent 接入（Skill）
+### 让 AI Agent 帮你接入
 
 让编码 agent 在本机完成「部署 yufu → 注册应用 → 校验参数 → 生成接入代码」：
 
@@ -147,19 +175,21 @@ cargo run --bin yufu --features webui -- \
 npx skills add Bin-hy/yufu --skill yufu-onboarding
 ```
 
-非交互安装（指定 agent、复制文件、跳过确认）：
+安装后对 agent 说一句「部署 yufu 并接入这个项目」，它只会追问一次接入形态
+（Web 登录 / 保护已有 API），随后执行固定版本的本地部署与注册，并输出 issuer、
+client id、secret 文件位置和下一步文档。
+
+非交互安装：
 
 ```bash
 npx skills add Bin-hy/yufu --skill yufu-onboarding -a claude-code --copy -y
 ```
 
 安装后 `skills-lock.json` 固定到具体提交；部署的 yufu 版本与 Go SDK 版本由 Skill 内的
-`assets/versions.env` 固定，不随默认分支浮动。
-
-安装后对 agent 说一句「部署 yufu 并接入这个项目」，它只会追问一次接入形态
-（Web 登录 / 保护已有 API），随后执行固定版本的本地部署与注册，并输出 issuer、
-client id、secret 文件位置和下一步文档。该 Skill 面向本机联调，不涉及生产 TLS、
+`assets/versions.env` 固定，不随默认分支浮动。该 Skill 面向本机联调，不涉及生产 TLS、
 域名或多机部署；client secret 只写入权限 600 的本地文件。
+
+### 标准 OIDC 接入
 
 1. **注册应用**：管理员授予开发者资格，开发者注册应用并配置环境、客户端类型、回调地址与 scope。
 2. **审批与分配**：生产配置经管理员审批，并为账户或用户组明确分配应用访问。
@@ -175,6 +205,30 @@ client id、secret 文件位置和下一步文档。该 Skill 面向本机联调
 中心会在发送后通道通知前完成本地授权撤销。通知返回 `2xx` 表示接收方已接受，
 不代表应用内部的会话清理已经完成；接入方仍需实现对应处理。
 
+### 用 SDK 少写胶水代码
+
+Python：
+
+```python
+import os
+from yufu import Client
+
+client = Client(
+    issuer="https://id.example.com",
+    client_id="web",
+    client_secret=os.environ["OIDC_CLIENT_SECRET"],
+    redirect_uri="https://app.example.com/callback",
+    scopes=["openid", "profile", "email"],
+)
+
+auth = client.authorize_url()
+# 把 auth.state / auth.nonce / auth.code_verifier 存进用户会话
+tokens = client.exchange_code(code, auth.code_verifier, redirect_uri=auth.redirect_uri)
+claims = client.verify_id_token(tokens.id_token, nonce=auth.nonce)
+```
+
+Go 与 Python SDK 消费同一套语言无关的协议契约夹具，行为保持一致：
+
 | 接入方式 | 文档 | 仓库参考 |
 | --- | --- | --- |
 | OIDC 协议与令牌语义 | [OIDC 接入](https://yufu-sso.pages.dev/guides/oidc-integration/) | [端点与令牌](https://yufu-sso.pages.dev/reference/endpoints/) |
@@ -183,23 +237,53 @@ client id、secret 文件位置和下一步文档。该 Skill 面向本机联调
 | Go 服务 | [Go SDK 指南](https://yufu-sso.pages.dev/guides/go-sdk/) | [yufu-sdk-go](https://github.com/Bin-hy/yufu-sdk-go) · [联调示例](examples/sdk/go/README.md) |
 | Python 服务 | [Python SDK 指南](https://yufu-sso.pages.dev/guides/python-sdk/) | [yufu-sdk-python](https://github.com/Bin-hy/yufu-sdk-python) · [PyPI](https://pypi.org/project/yufu-sdk/) |
 
-API 默认前缀为 `/api/v1`。应用权限同步使用 `/application/sync-permissions`，
-旧 `/enforce` 保留拒绝响应，不提供可直接接入的公开 PDP 决策 API；中心内部的授权判断不等于外部接口可用。
+API 默认前缀为 `/api/v1`。应用权限同步使用 `/application/sync-permissions`；
+旧 `/enforce` 保留拒绝响应，不提供可直接接入的公开 PDP 决策 API。
 MCP 令牌必须指定已注册应用的 `aud`，调用者还需具有相应 `mcp:access` 权限。
+
+## 架构
+
+```mermaid
+flowchart LR
+    user([员工浏览器]) -->|HTTPS| edge[Caddy / 反向代理]
+    edge --> yufu[yufu 身份服务<br/>Rust + 内嵌 Vue 控制台]
+    yufu --> db[(PostgreSQL)]
+    app1[内部应用 A] -->|OIDC 授权码 + PKCE| yufu
+    app2[内部应用 B] -->|OIDC 授权码 + PKCE| yufu
+    sdk[Go / Python 服务] -->|Runtime SDK| yufu
+    yufu -.->|后通道退出通知| app1
+```
+
+## 安装包与镜像
+
+| 交付方式 | 获取方式 |
+| --- | --- |
+| 二进制（内嵌 WebUI） | [GitHub Releases](https://github.com/Bin-hy/yufu/releases)，附 `SHA256SUMS` |
+| 容器镜像 | `ghcr.io/bin-hy/yufu`（`linux/amd64` / `linux/arm64`） |
+| 源码构建 | 见上方「从源码构建」 |
+
+Release 安装包覆盖 Linux x86_64（GNU/glibc）、Windows x86_64（MSVC）、macOS Intel 与
+macOS Apple Silicon。解包、配置、平台要求及 systemd 安装见
+[二进制安装说明](docs/releases/installation.md)。
 
 ## 部署与运维
 
 - **服务交付**：单个 `yufu` 二进制，可嵌入 WebUI；[systemd 模板](conf/yufu.service)用于独立服务部署。
-- **容器交付**：镜像发布在 `ghcr.io/bin-hy/yufu`（`linux/amd64` / `linux/arm64`）。不挂载配置时
-  镜像会按环境变量生成配置并签发密钥，`docker run` 即可评估；生产环境挂载自己的
-  `/etc/yufu/yufu.toml` 与私钥，镜像照用不再生成。参考栈见 [`deploy/docker`](deploy/docker/README.md)。
+- **容器交付**：镜像发布在 `ghcr.io/bin-hy/yufu`。不挂载配置时按环境变量生成配置并签发密钥，
+  `docker run` 即可评估；生产环境挂载自己的 `/etc/yufu/yufu.toml` 与私钥。
+  参考栈见 [`deploy/docker`](deploy/docker/README.md)。
 - **持久化**：PostgreSQL 保存账户、应用、授权、会话与审计数据，启动时执行数据库迁移。
 - **备份恢复**：数据库、签名私钥、部署配置及应用凭据应一并纳入恢复计划，升级前执行备份与演练。
-- **升级兼容**：历史业务数据和既有客户端不会自动删除；旧 RBAC 页面重定向到新控制台，后端旧管理接口为既有客户端保留兼容。
+- **升级兼容**：历史业务数据和既有客户端不会自动删除；旧 RBAC 页面重定向到新控制台，
+  后端旧管理接口为既有客户端保留兼容。
+- **健康检查**：`/api/v1/health/ready` 返回 200 且 `security_clock_synchronized=true`
+  才应接入流量；认证时钟未同步时返回 503，这是设计行为。
 
 部署步骤见[生产部署](https://yufu-sso.pages.dev/operations/deployment/)、
-[容器部署](https://yufu-sso.pages.dev/operations/docker/)和[安全与备份](https://yufu-sso.pages.dev/operations/security/)。
-已有部署的升级、恢复与容量评估见[企业身份升级运维指南](docs/operations/enterprise-identity-upgrade.md)。
+[容器部署](https://yufu-sso.pages.dev/operations/docker/)和
+[安全与备份](https://yufu-sso.pages.dev/operations/security/)。
+已有部署的升级、恢复与容量评估见
+[企业身份升级运维指南](docs/operations/enterprise-identity-upgrade.md)。
 
 ## 项目结构
 
@@ -210,6 +294,7 @@ yufu/
 ├── libs/auth/                # 共享认证与安全能力
 ├── web/                      # Vue 3 控制台
 ├── examples/                 # Web、SPA 与 Go 接入参考
+├── sdk/                      # 语言无关的协议契约夹具
 ├── website/                  # Astro + Starlight 中英双语官网
 ├── deploy/docker/            # 容器部署：Dockerfile、Compose 与 Caddy 入口
 ├── conf/                     # 配置与部署模板
@@ -219,7 +304,6 @@ yufu/
 
 ## 开发与验证
 
-以下为开发检查命令；具体执行结果与验收状态请查阅对应记录。
 Rust 集成测试通过 testcontainers 创建隔离 PostgreSQL，需要可用的 Docker 兼容运行时，串行执行。
 
 <details>
@@ -260,62 +344,35 @@ pnpm check:website
 pnpm build:website
 ```
 
-Go 的 `go test ./...` 执行离线契约测试；真实 issuer 联调由独立脚本执行，缺少配置会失败而不会跳过。
-官网本地预览使用 `pnpm dev:website`，构建输出为 `website/dist`，维护与部署说明见 [website/README.md](website/README.md)。
-
 </details>
 
-## Tag 打包发版
+官网本地预览使用 `pnpm dev:website`，构建输出为 `website/dist`，维护与部署说明见
+[website/README.md](website/README.md)。发版流程、版本预检与多平台打包见
+[打包与发版操作手册](docs/releases/packaging.md)。
 
-[Release workflow](.github/workflows/release.yml) 在推送版本 tag 后运行：版本预检 → 质量门禁 → 四平台构建与归档 → 校验附件 → 公开 GitHub Release。
-每个包包含二进制、配置模板、安装说明及构建元数据；Linux 另附 systemd 模板。
+## 设计边界与当前状态
 
-### 准备版本
+**明确不做**：多租户、公开应用市场、外部 IdP 联邦、SAML / LDAP / SCIM、MFA、
+以及可直接接入的公开 PDP 决策 API。企业开发者通过邀约获得资格，不开放公开自助注册。
 
-1. 将根 `Cargo.toml` 的 `[workspace.package].version` 改为本次版本，例如 `1.2.3` 或 `1.2.3-rc.1`。
-2. 运行 `cargo check --workspace` 刷新 `Cargo.lock` 中三个 workspace 包的版本，检查锁文件 diff；不要只改 tag 或安装包名称。
-3. 运行项目检查和下面的发布工具检查，提交版本变更及工作流，然后推送提交。
+**当前状态**：v0.1.3 已发布二进制安装包与多架构容器镜像。部分能力仍标记为
+「已实现待验收」，逐项状态与限制见 [capabilities.json](docs/product/capabilities.json)
+和[产品可用性验收记录](docs/specs/product-readiness/verification.md)。
+README 不把「已实现」表述为「已验收」；部署前请结合自身场景评估。
 
-```sh
-# 发布工具要求 Python 3.11+
-python3 -m unittest discover -s scripts/tests -v
-python3 scripts/release.py validate --tag v1.2.3
+## 关于名字
 
-# 完成检查并提交后，创建附注 tag，只推送本次 tag
-git tag -a v1.2.3 -m "Release v1.2.3"
-git push origin v1.2.3
-```
+yufu 是**鱼符**的拼音。唐代官员随身佩带鱼形的身份凭证，剖分为二：一半留在内廷，
+一半带在身上，两半合上才算数；金、银、铜三品，对应不同的权级。
 
-当前 workspace 版本为 `0.0.0`；示例 `v1.2.3` 需先完成对应版本变更，不能直接对当前版本打该 tag。
-预发布示例使用 `1.2.3-rc.1` 与 `v1.2.3-rc.1`，也支持 `alpha.N` 和 `beta.N`；版本数字不允许多余前导零。
+这个器物就是认证这个动作本身——持有一半不算身份，两半对上才算。标志因此是一条被中缝劈开的鱼：
+**分开是凭证，合起来才是身份**。「三品」则提醒我们：认出你是谁还不够，还要知道你被允许走多远。
 
-### 发布结果与重试
+## 参与贡献
 
-- 所有检查及四平台构建成功后，才创建或复用当前提交的 Release 草稿。
-- 上传四个包和 `SHA256SUMS`，下载附件并校验完整性，通过后公开；预发布 tag 自动标记 prerelease。
-- 失败时从 Actions 重新运行原 tag 工作流。同一提交的本流程草稿可重试，已公开版本不可覆盖；不要移动 tag 修复公开版本，使用新版本发布。
-- 默认使用 `GITHUB_TOKEN`，仅最终发布 job 具有仓库内容写权限；不需要额外 PAT。若仓库策略限制写权限，须由维护者调整对应 Actions 策略。
-
-发布通过后，同一个 tag 会接着触发容器镜像构建：`linux/amd64` 与 `linux/arm64` 多架构镜像推送到
-`ghcr.io/bin-hy/yufu`，正式版同时移动 `1.2` 与 `latest` 标签，预发布只保留精确版本号。
-Release 失败或被放弃时不会留下镜像。
-
-本流程不部署官网，也不为安装包签名或公证。
-容器部署可直接使用上面推送的镜像，或由仓库内 [`deploy/docker`](deploy/docker/README.md) 自行构建，
-见[容器部署](https://yufu-sso.pages.dev/operations/docker/)。
-
-手工构建、打包、校验与发版的完整步骤见[打包与发版操作手册](docs/releases/packaging.md)。
-
-## 能力边界与项目进展
-
-上面的能力说明不等于当前候选版本已经完成发布验收。当前状态按四类区分：已验证可用、已实现待验收、兼容保留、暂不支持。
-版本化能力清单见 [capabilities.json](docs/product/capabilities.json)，本轮实际结果见[产品可用性验收记录](docs/specs/product-readiness/verification.md)。
-关键拒绝/退出矩阵、公开文档复现与远端三平台结果未全部取得前，不宣称完整发布验收通过。
-
-当前聚焦单企业、固定 issuer 的身份与应用接入，不提供多租户、公开应用市场、外部 IdP 联邦、
-SAML、LDAP、SCIM 或 MFA。企业开发者通过邀约获得资格，不开放公开自助注册。
-
-部署前请结合自身场景评估，不以功能列表代替验收结论。
+- 问题与建议：欢迎提交 GitHub Issue。
+- 安全问题：请不要公开提交 issue，通过仓库的 Security 页面私下报告。
+- 提交前请确保 `cargo fmt`、`cargo clippy` 与相关测试通过；开发命令见上方「开发与验证」。
 
 ## 开源协议
 

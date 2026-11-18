@@ -17,6 +17,7 @@
 | --- | --- |
 | `Dockerfile` | 两阶段构建：Node 构建控制台 → Rust 构建并嵌入 → Debian 运行层 |
 | `compose.yaml` | 完整栈：`postgres`、`yufu`、`caddy`，内部网络隔离 |
+| `compose.demo.yaml` | 本机评估栈：环境变量驱动，无需编辑配置，一条命令启动 |
 | `Caddyfile` | 反向代理与自动 HTTPS；`localhost` 自动使用 Caddy 本地 CA |
 | `yufu.toml.example` | 容器内的服务配置模板，挂载到 `/etc/yufu/yufu.toml` |
 | `env.example` | 复制为 `.env`，提供域名、数据库凭据、`AUTH_SECRET` 等变量 |
@@ -95,6 +96,18 @@ cp yufu.toml.example yufu.toml
    认证时钟未同步时返回 503，这是设计行为。
 
 ## 本地试用
+
+最快的方式是使用 `compose.demo.yaml`，它使用公开的演示凭据，不需要准备 `.env` 或签名私钥：
+
+```sh
+docker compose -f compose.demo.yaml up -d
+```
+
+打开 `https://localhost:8443`，用 `admin` / `change-me-now` 登录。该栈只用于本机评估；
+生产部署请继续使用下面的参考栈，替换全部凭据并挂载自己的签名私钥。
+
+该栈要求容器能访问 NTP 来源（UDP/123）以通过启动时的可信时钟校验；受限网络请先在
+`[security_clock]` 中配置可达来源，否则服务会按设计拒绝启动。
 
 不准备域名时可以把入口换成 `localhost`（Caddy 自动签发本地证书，浏览器会提示自签名）：
 

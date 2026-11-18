@@ -1,0 +1,82 @@
+# Local evaluation stack for yufu: PostgreSQL + identity service + Caddy TLS.
+#
+#   docker compose -f deploy/docker/compose.demo.yaml up -d
+#
+# Then open https://localhost:8443 and sign in with admin / change-me-now.
+# The image renders its configuration and generates an evaluation signing key
+# on first start, so no files need to be edited.
+#
+# The service also validates a trusted clock at startup, so the container must
+# reach the configured NTP sources over UDP/123. If the network blocks NTP, the
+# service refuses to start by design; see README.md for the workaround.
+#
+# This file is for local evaluation only. Every credential below is public.
+# For production, use compose.yaml in this directory and mount your own
+# configuration and signing key.
+
+name: yufu-demo
+
+services:
+    postgres:
+        image: postgres:18-alpine
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: yufu
+            POSTGRES_PASSWORD: yufu-demo-password
+            POSTGRES_DB: yufu
+        volumes:
+            - postgres-data:/var/lib/postgresql
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready --username yufu --dbname yufu"]
+            interval: 5s
+            timeout: 5s
+            retries: 12
+        security_opt:
+            - no-new-privileges:true
+
+    yufu:
+        image: ghcr.io/bin-hy/yufu:latest
+        restart: unless-stopped
+        depends_on:
+            postgres:
+                condition: service_healthy
+        environment:
+            # Must equal the browser-facing origin, including the port.
+            YUFU_ISSUER: https://localhost:8443
+            YUFU_ADMIN_USERNAME: admin
+            YUFU_ADMIN_PASSWORD: change-me-now
+            # Evaluation only; replace with `openssl rand -base64 48` in production.
+            AUTH_SECRET: 6f1c9a2e4b7d8f30a1c2e3b4d5f60718
+            DATABASE_URL: postgres://yufu:yufu-demo-password@postgres:5432/yufu
+            LOG_LEVEL: info
+        volumes:
+            # Holds the generated configuration and signing key.
+            - yufu-state:/var/lib/yufu
+        read_only: true
+        tmpfs:
+            - /tmp
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
+        stop_grace_period: 30s
+
+    caddy:
+        image: caddy:2-alpine
+        restart: unless-stopped
+        depends_on:
+            - yufu
+        ports:
+            - "8443:8443"
+        command: caddy reverse-proxy --from https://localhost:8443 --to http://yufu:4000
+        volumes:
+            - caddy-data:/data
+            - caddy-config:/config
+        security_opt:
+            - no-new-privileges:true
+
+volumes:
+    postgres-data:
+    yufu-state:
+    caddy-data:
+    caddy-config:
