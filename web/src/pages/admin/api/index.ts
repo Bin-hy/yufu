@@ -1,12 +1,14 @@
 import { identityRequest } from '@/http/identity'
 import type { Page } from '@/pages/account/api/type'
-import type { EnterpriseAccount, Group, Audit, AuditSearchFilter, Delivery, IssuedAction, LegacyClient, Adoption, AdminOverview } from './type'
+import type { EnterpriseAccount, Group, Audit, AuditSearchFilter, Delivery, IssuedAction, LegacyClient, Adoption, AdminOverview, InvitationRecord } from './type'
 import type { ChangeReceipt, Assignment, AssignmentSummary, RegistrationReceipt } from '@/pages/developer/api/type'
 const options = { errorPresentation: 'local' as const }
 export const listAccounts = (after?: number, signal?: AbortSignal, q?: string, enabled?: boolean) => identityRequest<Page<EnterpriseAccount, number>>({ ...options, url: 'admin/accounts', params: { after, q, enabled, limit: 25 }, signal })
 export const searchAccounts = (q: string, signal?: AbortSignal, limit = 20) => identityRequest<Page<EnterpriseAccount, number>>({ ...options, url: 'admin/accounts', params: { q, limit }, signal })
 export const setAccount = (id: number, field: 'enabled' | 'developer', value: boolean, revision: number) => identityRequest<EnterpriseAccount>({ ...options, url: `admin/accounts/${id}/${field}`, method: 'PATCH', data: { [field === 'developer' ? 'developer_enabled' : 'enabled']: value, expected_revision: revision } })
 export const issueInvitation = (data: { purpose: 'onboarding' | 'qualification'; target_user_id: number | null; person_kind: 'employee' | 'collaborator'; developer_grant: boolean }) => identityRequest<IssuedAction>({ ...options, url: 'admin/invitations', method: 'POST', data })
+export const listInvitations = (after?: string, signal?: AbortSignal, filter: { status?: string; purpose?: string; person_kind?: string; q?: string } = {}) => identityRequest<Page<InvitationRecord, string>>({ ...options, url: 'admin/invitations', params: { after, limit: 25, ...filter }, signal })
+export const reissueInvitation = (id: string) => identityRequest<IssuedAction>({ ...options, url: `admin/invitations/${encodeURIComponent(id)}/reissue`, method: 'POST' })
 export const issueReset = (user_id: number) => identityRequest<IssuedAction>({ ...options, url: 'admin/password-resets', method: 'POST', data: { user_id } })
 export const revokeAction = (id: string, reset: boolean) => identityRequest<{ revoked: boolean }>({ ...options, url: `admin/${reset ? 'password-resets' : 'invitations'}/${encodeURIComponent(id)}/revoke`, method: 'POST' })
 export const listGroups = (after?: string, signal?: AbortSignal, q?: string) => identityRequest<Page<Group>>({ ...options, url: 'admin/groups', params: { after, q, limit: 25 }, signal })

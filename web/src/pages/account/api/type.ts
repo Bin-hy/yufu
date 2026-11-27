@@ -17,7 +17,7 @@ export interface CenterSession {
 export interface RevocationResult {
     revoked: boolean
 }
-export interface PasswordChangeResult { requires_login: boolean; user_id: number; oidc_flow_id: string | null }
+export interface PasswordChangeResult { requires_login: boolean; user_id: number; oidc_flow_id: string | null; bind_provider?: string }
 export interface Page<T, C = string> { items: T[]; next: C | null }
 export interface PersonalApplication { environment_id: string; application_id: number; name: string; environment: string; client_id: string; launchable?: boolean; launch_description?: string | null; sources?: { kind: 'direct' | 'group' | 'maintainer' | 'test_user'; source_id: string; label: string }[] }
 export interface PersonalConsent { id: number; application_id: number; name: string; environment_id: string; environment: string; version_id: string; scopes: string[]; current_version: boolean }

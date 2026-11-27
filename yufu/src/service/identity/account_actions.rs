@@ -12,11 +12,12 @@ use crate::{
     domain::identity::{
         account::{
             AccountPassword, AccountSnapshot, InvitationPurpose, IssuedSecret, PersonKind,
-            SecretDigest,
+            SecretDigest, stable_principal,
         },
         error::IdentityError,
+        external::ExternalProviderKey,
         operation::IdentityOperation,
-        session::{ActionFlowSnapshot, ActionTarget, FlowPurpose},
+        session::{ActionFlowSnapshot, ActionTarget, BrowserSessionSnapshot, FlowPurpose},
     },
 };
 use auth::{
@@ -62,14 +63,25 @@ pub enum InvitationAcceptance<'a> {
         username: &'a str,
         password: &'a AccountPassword,
         nickname: &'a str,
+        bind_provider: Option<ExternalProviderKey>,
     },
     ExistingAccount,
+}
+pub struct IssuedBrowserSession {
+    pub secret: IssuedSecret,
+    pub expires_at: u64,
+}
+pub struct AcceptedInvitation {
+    pub continuation: AccountContinuation,
+    pub session: Option<IssuedBrowserSession>,
 }
 #[derive(serde::Serialize)]
 pub struct AccountContinuation {
     pub user_id: i32,
     pub oidc_flow_id: Option<Uuid>,
     pub requires_login: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bind_provider: Option<ExternalProviderKey>,
 }
 #[derive(serde::Serialize)]
 pub struct AccountActionView {
@@ -219,23 +231,27 @@ impl AccountService {
         acceptance: InvitationAcceptance<'_>,
         request_id: Uuid,
         budget: &SecurityBudget,
-    ) -> Result<AccountContinuation, IdentityError> {
+    ) -> Result<AcceptedInvitation, IdentityError> {
         crate::service::identity::sso::validate_opaque(action.proof.expose_secret())?;
-        let new_account = match acceptance {
+        let (new_account, bind_provider) = match acceptance {
             InvitationAcceptance::NewAccount {
                 username,
                 password,
                 nickname,
+                bind_provider,
             } => {
                 validate_username(username)?;
                 validate_profile(nickname, None)?;
-                Some((
-                    username.to_owned(),
-                    hash_password(password).await?,
-                    nickname.to_owned(),
-                ))
+                (
+                    Some((
+                        username.to_owned(),
+                        hash_password(password).await?,
+                        nickname.to_owned(),
+                    )),
+                    bind_provider,
+                )
             }
-            InvitationAcceptance::ExistingAccount => None,
+            InvitationAcceptance::ExistingAccount => (None, None),
         };
         // Password hashing is local CPU work; the write keeps a fresh
         // two-second database deadline even when hashing was slow.
@@ -249,6 +265,7 @@ impl AccountService {
                 action_id: action.action_id,
                 proof: secret_digest(action.proof),
                 new_account,
+                bind_provider,
                 request_id,
             },
         )
@@ -751,11 +768,12 @@ struct AcceptInvitation<'a> {
     action_id: Uuid,
     proof: SecretDigest,
     new_account: Option<(String, SecretToken, String)>,
+    bind_provider: Option<ExternalProviderKey>,
     request_id: Uuid,
 }
 #[async_trait::async_trait]
 impl IdentityUnitOfWork for AcceptInvitation<'_> {
-    type Output = AccountContinuation;
+    type Output = AcceptedInvitation;
     async fn apply(
         &self,
         transaction: &mut dyn IdentityTransaction,
@@ -765,6 +783,9 @@ impl IdentityUnitOfWork for AcceptInvitation<'_> {
         let ActionTarget::Invitation(invitation_id) = flow.target else {
             return Err(IdentityError::Forbidden);
         };
+        if self.new_account.is_none() && self.bind_provider.is_some() {
+            return Err(IdentityError::InvalidInput);
+        }
         let initial = transaction
             .load_invitation(invitation_id)
             .await?
@@ -844,11 +865,72 @@ impl IdentityUnitOfWork for AcceptInvitation<'_> {
                 browser_proof_digest: self.proof.clone(),
             })
             .await?;
-        audit(transaction, existing.as_ref().map(|actor| actor.account().user_id), self.request_id, "account.invitation.accept", "account", account.user_id.to_string(), serde_json::json!({"created":self.new_account.is_some(),"developer_grant":invitation.developer_grant})).await?;
-        Ok(AccountContinuation {
-            user_id: account.user_id,
-            oidc_flow_id: continuation(&flow)?,
-            requires_login: self.new_account.is_some(),
+        let oidc_flow_id = continuation(&flow)?;
+        let session = if self.new_account.is_some() {
+            let secret = IssuedSecret::from_entropy(rand::random());
+            let expires_at = at
+                .checked_add(self.service.config.identity.sso_session_ttl_seconds * 1000)
+                .ok_or(IdentityError::CapacityExceeded)?;
+            let root = BrowserSessionSnapshot {
+                id: Uuid::new_v4(),
+                principal: stable_principal(&self.service.config.issuer(), account.user_id)?,
+                user_id: account.user_id,
+                secret_digest: secret.digest(),
+                auth_epoch: account.auth_epoch,
+                authenticated_at: at,
+                expires_at,
+                revoked_at: None,
+            };
+            if let Some(flow_id) = oidc_flow_id {
+                let current = transaction
+                    .load_authorization_flow(flow_id)
+                    .await?
+                    .ok_or(IdentityError::NotFound)?;
+                if current.browser_binding_digest != self.evidence.browser_binding_digest
+                    || current.bound_sso_session_id.is_some()
+                    || current.handle.completed_at.is_some()
+                    || current.reauth_completed_at.is_some()
+                {
+                    return Err(IdentityError::AlreadyConsumed);
+                }
+                transaction
+                    .apply(IdentityWrite::CreateCenter(root.clone()))
+                    .await?;
+                transaction
+                    .apply(IdentityWrite::BindFlow {
+                        flow_id,
+                        sso_session_id: root.id,
+                        reauthenticated: true,
+                    })
+                    .await?;
+            } else {
+                transaction
+                    .apply(IdentityWrite::CreateCenter(root.clone()))
+                    .await?;
+            }
+            audit(
+                transaction,
+                Some(account.user_id),
+                self.request_id,
+                "session.login",
+                "session",
+                root.id.to_string(),
+                serde_json::json!({"user_id":account.user_id}),
+            )
+            .await?;
+            Some(IssuedBrowserSession { secret, expires_at })
+        } else {
+            None
+        };
+        audit(transaction, existing.as_ref().map(|actor| actor.account().user_id), self.request_id, "account.invitation.accept", "account", account.user_id.to_string(), serde_json::json!({"created":self.new_account.is_some(),"developer_grant":invitation.developer_grant,"provider":self.bind_provider.map(ExternalProviderKey::as_str)})).await?;
+        Ok(AcceptedInvitation {
+            continuation: AccountContinuation {
+                user_id: account.user_id,
+                oidc_flow_id,
+                requires_login: false,
+                bind_provider: self.bind_provider,
+            },
+            session,
         })
     }
 }

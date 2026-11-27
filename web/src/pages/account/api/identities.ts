@@ -29,10 +29,11 @@ export const startExternalLogin = (key: string, flow_id?: string) =>
         errorPresentation: 'local',
     })
 
-export const startExternalBind = (key: string) =>
+export const startExternalBind = (key: string, flow_id?: string) =>
     identityRequest<{ authorize_url: string }>({
         url: `identity/external/${encodeURIComponent(key)}/bind/start`,
         method: 'POST',
+        data: { flow_id },
         errorPresentation: 'local',
     })
 

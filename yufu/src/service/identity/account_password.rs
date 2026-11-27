@@ -241,6 +241,7 @@ impl IdentityUnitOfWork for PasswordMutation<'_> {
             user_id,
             oidc_flow_id,
             requires_login: true,
+            bind_provider: None,
         })
     }
 }

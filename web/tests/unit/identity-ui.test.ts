@@ -16,19 +16,22 @@ import AccountAction from '@/pages/account/views/action.vue'
 const mocked = vi.hoisted(() => ({
     session: vi.fn(), login: vi.fn(), profile: vi.fn(), password: vi.fn(), centers: vi.fn(), rps: vi.fn(), revokeCenter: vi.fn(), revokeRp: vi.fn(), logout: vi.fn(),
     apps: vi.fn(), register: vi.fn(), registerAdmin: vi.fn(), inspect: vi.fn(), complete: vi.fn(), exchange: vi.fn(), action: vi.fn(), accept: vi.fn(), reset: vi.fn(),
+    providers: vi.fn(), bind: vi.fn(),
 }))
 vi.mock('@/pages/account/api', () => ({ getCenterSession: mocked.session, centerLogin: mocked.login, updateProfile: mocked.profile, changePassword: mocked.password, getCenters: mocked.centers, getRps: mocked.rps, revokeCenter: mocked.revokeCenter, revokeRp: mocked.revokeRp, centerLogout: mocked.logout }))
 vi.mock('@/pages/developer/api', () => ({ listApps: mocked.apps, registerApp: mocked.register, registerAdminApp: mocked.registerAdmin }))
 vi.mock('@/pages/oidc-consent/api', () => ({ inspectFlow: mocked.inspect, completeFlow: mocked.complete }))
 vi.mock('@/pages/account/api/actions', async () => ({ ...await vi.importActual<object>('@/pages/account/api/actions'), exchangeAction: mocked.exchange, inspectAction: mocked.action, acceptInvitation: mocked.accept, completePasswordReset: mocked.reset }))
+vi.mock('@/pages/account/api/identities', () => ({ getExternalProviders: mocked.providers, startExternalBind: mocked.bind }))
 const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: false, super_administrator: false, sso_session_id: 'root-one', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' }
 let wrappers: VueWrapper[] = []
-beforeEach(() => { resetSession(); for (const fn of Object.values(mocked)) fn.mockReset(); mocked.session.mockResolvedValue(identity); mocked.apps.mockResolvedValue({ items: [], next: null }); useUserStore(pinia).setCenterSession(identity) })
+beforeEach(() => { resetSession(); for (const fn of Object.values(mocked)) fn.mockReset(); mocked.session.mockResolvedValue(identity); mocked.apps.mockResolvedValue({ items: [], next: null }); mocked.providers.mockResolvedValue([]); useUserStore(pinia).setCenterSession(identity) })
 afterEach(() => { for (const wrapper of wrappers) wrapper.unmount(); wrappers = []; window.history.replaceState({}, '', '/') })
 async function render(component: Component, path = '/account') {
     const router = createRouter({ history: createMemoryHistory(), routes: [
         { path: '/account', name: 'account-profile', component: {} }, { path: '/login', name: 'login', component: {} },
         { path: '/account/action', name: 'account-action', component: {} }, { path: '/register', name: 'register', component: {} },
+        { path: '/account/identities', name: 'account-identities', component: {} },
         { path: '/account/sessions', name: 'account-sessions', component: {} },
         { path: '/developer/apps', name: 'developer-apps', component: {} }, { path: '/developer/apps/:id', name: 'developer-app', component: {} },
         { path: '/admin/apps', name: 'admin-apps', component: {} }, { path: '/admin/apps/:id', name: 'admin-app', component: {} }, { path: '/oidc/consent', name: 'oidc-consent', component: {} },
@@ -194,6 +197,34 @@ it('粘贴 43 位邀请码后兑换并进入接受邀请页面', async () => {
     expect(mocked.action).toHaveBeenCalledWith('action-one', expect.any(AbortSignal))
     expect(wrapper.text()).toContain('接受企业邀请')
     expect(wrapper.find('#invitation-username').exists()).toBe(true)
+})
+it('注册页展示 OAuth Provider，选择后携带并自动开始绑定', async () => {
+    useUserStore(pinia).logout()
+    mocked.exchange.mockResolvedValue({ action_id: 'action-one', expires_at: 9999999999, oidc_flow_id: null })
+    mocked.action.mockResolvedValue({ action_id: 'action-one', kind: 'invitation', expires_at: 9999999999, person_kind: 'employee', developer_grant: false, requires_existing_account: false, oidc_flow_id: null, csrf_token: 'proof' })
+    mocked.providers.mockResolvedValue([
+        { key: 'github', family: 'github', label: 'GitHub', mode: 'oauth', enabled: true },
+        { key: 'wechat_mini', family: 'wechat', label: '微信小程序', mode: 'native', enabled: true },
+    ])
+    mocked.accept.mockResolvedValue({ requires_login: false, user_id: 12, oidc_flow_id: null, bind_provider: 'github' })
+    mocked.bind.mockRejectedValue(new Error('network down'))
+    const { wrapper, router } = await render(AccountAction, '/register')
+    await wrapper.find('#invitation-code').setValue('A'.repeat(43))
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(wrapper.text()).toContain('GitHub')
+    expect(wrapper.text()).not.toContain('微信小程序')
+    const github = wrapper.findAll('button').find(button => button.text().includes('GitHub'))!
+    await github.trigger('click')
+    await wrapper.find('#invitation-username').setValue('github-user')
+    await wrapper.find('#invitation-nickname').setValue('GitHub User')
+    await wrapper.find('#action-password').setValue('github-password')
+    await wrapper.find('#action-confirm').setValue('github-password')
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(mocked.accept.mock.calls.at(-1)![0]).toMatchObject({ bind_provider: 'github' })
+    expect(mocked.bind).toHaveBeenCalledWith('github', undefined)
+    expect(router.currentRoute.value.path).toBe('/account/identities')
+    expect(router.currentRoute.value.query.error).toBe('external_start_failed')
+    expect(wrapper.text()).toContain('账户已创建，但第三方绑定未开始')
 })
 it('授权界面仅使用服务端 flow 摘要，拒绝时不透传 query 中的回调和权限', async () => {
     mocked.inspect.mockResolvedValue({ flow_id: 'flow-one', application_name: 'Trusted A', scopes: 'openid profile', interaction: 'consent', expires_at: 9999999999, username: 'employee', csrf_token: 'proof' })

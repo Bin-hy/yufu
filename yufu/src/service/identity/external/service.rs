@@ -55,11 +55,19 @@ pub enum ExternalCompletion {
     },
     Bind {
         provider_key: ExternalProviderKey,
+        oidc_flow_id: Option<Uuid>,
     },
     Rejected {
         purpose: ExternalPurpose,
         code: &'static str,
+        oidc_flow_id: Option<Uuid>,
     },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExternalCallbackContext {
+    pub purpose: ExternalPurpose,
+    pub oidc_flow_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -121,6 +129,7 @@ impl ExternalIdentityService {
     pub async fn start_bind(
         &self,
         provider_key: ExternalProviderKey,
+        flow_id: Option<Uuid>,
         user_secret: &str,
         browser: &SecretDigest,
         request_id: Uuid,
@@ -130,7 +139,7 @@ impl ExternalIdentityService {
         self.start(
             ExternalPurpose::Bind,
             provider_key,
-            None,
+            flow_id,
             Some(user_secret.to_owned()),
             browser,
             request_id,
@@ -267,20 +276,37 @@ impl IdentityUnitOfWork for StartExternalFlow<'_> {
         transaction: &mut dyn IdentityTransaction,
     ) -> Result<Self::Output, IdentityError> {
         let at = now(self.service.clock.as_ref())?;
-        let user_id = match &self.user_secret {
+        let actor = match &self.user_secret {
             Some(secret) => {
                 validate_opaque(secret)?;
-                let actor = authenticate_current_actor(
-                    transaction,
-                    &SecretDigest::of(secret),
-                    at,
-                    &IdentityLockScope::new(Vec::new())?,
+                Some(
+                    authenticate_current_actor(
+                        transaction,
+                        &SecretDigest::of(secret),
+                        at,
+                        &IdentityLockScope::new(Vec::new())?,
+                    )
+                    .await?,
                 )
-                .await?;
-                Some(actor.account().user_id)
             }
             None => None,
         };
+        let user_id = actor.as_ref().map(|actor| actor.account().user_id);
+        if let (ExternalPurpose::Bind, Some(flow_id)) = (self.purpose, self.oidc_flow_id) {
+            let actor = actor.as_ref().ok_or(IdentityError::Unauthenticated)?;
+            let current = transaction
+                .load_authorization_flow(flow_id)
+                .await?
+                .ok_or(IdentityError::NotFound)?;
+            if current.browser_binding_digest != self.browser
+                || current.handle.completed_at.is_some()
+                || current
+                    .bound_sso_session_id
+                    .is_some_and(|id| id != actor.sso_session_id())
+            {
+                return Err(IdentityError::Forbidden);
+            }
+        }
         let flow = ExternalFlowWrite {
             id: self.flow_write_id,
             provider_key: self.provider_key,
@@ -474,6 +500,37 @@ impl ExternalIdentityService {
         }
     }
 
+    /// Read-only callback context for error or denied redirects. The external
+    /// flow stays usable; no state is consumed by this lookup.
+    pub async fn peek_flow_context(
+        &self,
+        provider_key: ExternalProviderKey,
+        state: &str,
+        browser: &SecretDigest,
+        budget: &SecurityBudget,
+    ) -> Result<Option<ExternalCallbackContext>, IdentityError> {
+        if state.is_empty() {
+            return Ok(None);
+        }
+        let digest = SecretDigest::of(state);
+        let mut transaction = self.repository.begin(budget).await?;
+        let result = transaction.external_flow_by_state_digest(&digest).await;
+        transaction.rollback().await?;
+        let Some(flow) = result? else {
+            return Ok(None);
+        };
+        if flow.provider_key != provider_key
+            || &flow.browser_binding_digest != browser
+            || flow.consumed_at.is_some()
+        {
+            return Ok(None);
+        }
+        Ok(Some(ExternalCallbackContext {
+            purpose: flow.purpose,
+            oidc_flow_id: flow.oidc_flow_id,
+        }))
+    }
+
     pub async fn list_identities(
         &self,
         user_secret: &str,
@@ -644,6 +701,28 @@ impl CompleteExternal<'_> {
         if actor.account().user_id != expected_user {
             return Err(IdentityError::Forbidden);
         }
+        let oidc_flow_id = match flow.oidc_flow_id {
+            Some(flow_id) => {
+                let current = transaction
+                    .load_authorization_flow(flow_id)
+                    .await?
+                    .ok_or(IdentityError::NotFound)?;
+                if current.browser_binding_digest != self.browser
+                    || current.handle.completed_at.is_some()
+                    || current
+                        .bound_sso_session_id
+                        .is_some_and(|id| id != actor.sso_session_id())
+                {
+                    return Ok(ExternalCompletion::Rejected {
+                        purpose: ExternalPurpose::Bind,
+                        code: "invalid_oidc_flow",
+                        oidc_flow_id: None,
+                    });
+                }
+                Some(flow_id)
+            }
+            None => None,
+        };
         let existing = transaction
             .external_identity_by_subject(self.provider_key, &self.identity.subject)
             .await?;
@@ -664,6 +743,7 @@ impl CompleteExternal<'_> {
                 return Ok(ExternalCompletion::Rejected {
                     purpose: ExternalPurpose::Bind,
                     code: "conflict",
+                    oidc_flow_id,
                 });
             }
             append_audit(
@@ -680,6 +760,7 @@ impl CompleteExternal<'_> {
             .await?;
             return Ok(ExternalCompletion::Bind {
                 provider_key: self.provider_key,
+                oidc_flow_id,
             });
         }
         let bound = transaction
@@ -704,6 +785,7 @@ impl CompleteExternal<'_> {
             return Ok(ExternalCompletion::Rejected {
                 purpose: ExternalPurpose::Bind,
                 code: "conflict",
+                oidc_flow_id,
             });
         }
         let id = Uuid::new_v4();
@@ -737,6 +819,7 @@ impl CompleteExternal<'_> {
         .await?;
         Ok(ExternalCompletion::Bind {
             provider_key: self.provider_key,
+            oidc_flow_id,
         })
     }
 
@@ -780,6 +863,7 @@ impl CompleteExternal<'_> {
                     return Ok(ExternalCompletion::Rejected {
                         purpose: ExternalPurpose::Login,
                         code: "external_identity_not_linked",
+                        oidc_flow_id: None,
                     });
                 }
                 RegistrationPolicy::Open => {

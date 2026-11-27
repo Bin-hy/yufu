@@ -2,16 +2,18 @@ use super::identity_browser::IdentityRequest;
 use crate::{
     AppState,
     domain::identity::{
+        account::SecretDigest,
         error::IdentityError,
         external::{ExternalProviderKey, ExternalPurpose},
     },
     error::AppError,
     service::identity::{
         browser,
-        external::{ExternalCompletion, ExternalIdentityService},
+        external::{ExternalCallbackContext, ExternalCompletion, ExternalIdentityService},
         repository::PgIdentityRepository,
     },
 };
+use auth::security::budget::SecurityBudget;
 use axum::{
     Extension, Json, Router,
     extract::{
@@ -98,11 +100,18 @@ async fn start(
     result.map_err(|reason| AppError::identity(reason, context.id))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BindStartRequest {
+    flow_id: Option<Uuid>,
+}
+
 async fn bind_start(
     State(state): State<AppState>,
     Extension(context): Extension<IdentityRequest>,
     Path(provider): Path<String>,
     headers: HeaderMap,
+    payload: Option<Json<BindStartRequest>>,
 ) -> Result<(HeaderMap, Json<serde_json::Value>), AppError> {
     let result = async {
         let provider = provider
@@ -120,6 +129,7 @@ async fn bind_start(
         let started = service(&state)?
             .start_bind(
                 provider,
+                payload.and_then(|Json(payload)| payload.flow_id),
                 &secret,
                 &evidence.browser_binding_digest,
                 context.id,
@@ -153,36 +163,48 @@ async fn callback(
     Query(query): Query<CallbackQuery>,
     headers: HeaderMap,
 ) -> Response {
-    let result = async {
-        let provider = provider
-            .parse::<ExternalProviderKey>()
-            .map_err(|_| IdentityError::InvalidInput)?;
-        if query.error.is_some() {
-            return Ok::<_, IdentityError>(redirect_response(
-                "/login?error=external_authorization_denied",
-                browser::protected_headers(),
-            ));
+    let provider = match provider.parse::<ExternalProviderKey>() {
+        Ok(provider) => provider,
+        Err(_) => {
+            return redirect_response("/login?error=invalid_request", browser::protected_headers());
         }
-        let code = query.code.ok_or(IdentityError::InvalidInput)?;
-        let state_value = query.state.ok_or(IdentityError::InvalidInput)?;
-        let binding = browser::read_browser_binding(&state.config, &headers)?;
-        let cookies = crate::service::security::browser::cookies(&headers)?;
-        let center = cookies
-            .get(browser::sso_cookie_name(&state.config))
-            .map(String::as_str);
+    };
+    let binding = browser::read_browser_binding(&state.config, &headers).ok();
+    let center = crate::service::security::browser::cookies(&headers)
+        .ok()
+        .and_then(|cookies| {
+            cookies
+                .get(browser::sso_cookie_name(&state.config))
+                .cloned()
+        });
+    if let Some(error) = query.error.as_deref() {
+        return external_error_redirect(
+            &state,
+            provider,
+            query.state.as_deref(),
+            binding.as_ref(),
+            center.is_some(),
+            error,
+        )
+        .await;
+    }
+    let result = async {
+        let code = query.code.as_deref().ok_or(IdentityError::InvalidInput)?;
+        let state_value = query.state.as_deref().ok_or(IdentityError::InvalidInput)?;
+        let binding = binding.as_ref().ok_or(IdentityError::Forbidden)?;
         let completion = service(&state)?
             .complete(
                 provider,
-                &code,
-                &state_value,
-                &binding,
-                center,
+                code,
+                state_value,
+                binding,
+                center.as_deref(),
                 context.id,
                 &context.budget,
             )
             .await?;
         let clock = state.security_clock()?;
-        match completion {
+        Ok::<_, IdentityError>(match completion {
             ExternalCompletion::Login {
                 cookie_secret,
                 expires_at,
@@ -198,31 +220,88 @@ async fn callback(
                 let location = oidc_flow_id
                     .map(|id| format!("/oidc/consent?flow_id={id}"))
                     .unwrap_or_else(|| "/account".to_owned());
-                Ok(redirect_response(&location, challenge.headers))
+                redirect_response(&location, challenge.headers)
             }
-            ExternalCompletion::Bind { provider_key } => Ok(redirect_response(
-                &format!("/account/identities?bound={provider_key}"),
-                browser::protected_headers(),
-            )),
-            ExternalCompletion::Rejected { purpose, code } => {
+            ExternalCompletion::Bind {
+                provider_key,
+                oidc_flow_id,
+            } => {
+                let location = oidc_flow_id
+                    .map(|id| format!("/oidc/consent?flow_id={id}"))
+                    .unwrap_or_else(|| format!("/account/identities?bound={provider_key}"));
+                redirect_response(&location, browser::protected_headers())
+            }
+            ExternalCompletion::Rejected {
+                purpose,
+                code,
+                oidc_flow_id,
+            } => {
                 let location = match purpose {
                     ExternalPurpose::Login => format!("/login?error={code}"),
-                    ExternalPurpose::Bind => {
-                        format!("/account/identities?error={code}")
-                    }
+                    ExternalPurpose::Bind => oidc_flow_id
+                        .map(|id| format!("/oidc/consent?flow_id={id}"))
+                        .unwrap_or_else(|| {
+                            format!("/account/identities?error={code}&bind={provider}")
+                        }),
                 };
-                Ok(redirect_response(&location, browser::protected_headers()))
+                redirect_response(&location, browser::protected_headers())
             }
-        }
+        })
     }
     .await;
     match result {
         Ok(response) => response,
-        Err(reason) => redirect_response(
-            &format!("/login?error={}", reason.code()),
-            browser::protected_headers(),
-        ),
+        Err(reason) => {
+            external_error_redirect(
+                &state,
+                provider,
+                query.state.as_deref(),
+                binding.as_ref(),
+                center.is_some(),
+                reason.code(),
+            )
+            .await
+        }
     }
+}
+
+async fn external_error_redirect(
+    state: &AppState,
+    provider: ExternalProviderKey,
+    callback_state: Option<&str>,
+    binding: Option<&SecretDigest>,
+    center: bool,
+    code: &str,
+) -> Response {
+    let context = async {
+        let clock = state.security_clock()?;
+        let budget = SecurityBudget::new(clock)?;
+        let binding = binding.ok_or(IdentityError::Forbidden)?;
+        let callback_state = callback_state.ok_or(IdentityError::Forbidden)?;
+        service(state)?
+            .peek_flow_context(provider, callback_state, binding, &budget)
+            .await
+    }
+    .await
+    .ok()
+    .flatten();
+    let location = match context {
+        Some(ExternalCallbackContext {
+            purpose: ExternalPurpose::Bind,
+            oidc_flow_id: Some(id),
+        }) => format!("/oidc/consent?flow_id={id}"),
+        Some(ExternalCallbackContext {
+            purpose: ExternalPurpose::Bind,
+            oidc_flow_id: None,
+        }) => format!("/account/identities?error={code}&bind={provider}"),
+        Some(ExternalCallbackContext {
+            purpose: ExternalPurpose::Login,
+            ..
+        }) => format!("/login?error={code}"),
+        None if center => format!("/account/identities?error={code}&bind={provider}"),
+        None => format!("/login?error={code}"),
+    };
+    redirect_response(&location, browser::protected_headers())
 }
 
 fn redirect_response(location: &str, headers: HeaderMap) -> Response {

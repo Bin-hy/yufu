@@ -1,6 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'AccountIdentities' })
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { KeyRound, Link2, ShieldCheck, Unlink } from '@lucide/vue'
 import ExternalProviderIcon from '@/components/brand/external-provider-icon.vue'
 import InfoHint from '@/components/workspace/info-hint.vue'
@@ -23,6 +24,7 @@ const loading = ref(true)
 const error = ref('')
 const pending = ref('')
 const controller = new AbortController()
+const route = useRoute()
 
 const bindable = computed(() =>
     providers.value.filter(provider => provider.mode === 'oauth' && !identities.value.some(identity => identity.provider_key === provider.key)),
@@ -46,8 +48,27 @@ async function load() {
     }
 }
 
-onMounted(load)
+onMounted(async () => {
+    await load()
+    applyQueryFeedback()
+})
 onScopeDispose(() => controller.abort())
+
+function providerLabel(key: string) {
+    return providers.value.find(provider => provider.key === key)?.label ?? key
+}
+function applyQueryFeedback() {
+    const bound = typeof route.query.bound === 'string' ? route.query.bound : ''
+    if (bound) emitToast({ type: 'success', message: `${providerLabel(bound)} 已绑定` })
+    const failure = typeof route.query.error === 'string' ? route.query.error : ''
+    if (!failure) return
+    const provider = typeof route.query.bind === 'string' ? route.query.bind : ''
+    const prefix = provider ? `${providerLabel(provider)} ` : ''
+    error.value =
+        failure === 'external_start_failed'
+            ? `${prefix}绑定未开始，账户已创建，请稍后重试`
+            : `${prefix}绑定未完成，账户仍可正常使用`
+}
 
 async function bind(provider: ExternalProvider) {
     if (pending.value) return

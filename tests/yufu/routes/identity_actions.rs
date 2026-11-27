@@ -186,15 +186,28 @@ async fn identity_actions_http_exchange_inspect_and_accept_bind_proof_to_browser
         .json(&json!({"action_id":id,"existing_account":false,"username":"invited-http","password":" a password with spaces ","nickname":"Invited"}))
         .send().await.unwrap();
     assert_eq!(response.status(), 200);
-    assert!(
-        response.headers()[SET_COOKIE]
-            .to_str()
-            .unwrap()
-            .contains("Max-Age=0")
-    );
+    let set_cookies = response
+        .headers()
+        .get_all(SET_COOKIE)
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(set_cookies.contains("Max-Age=0"), "{set_cookies}");
+    assert!(set_cookies.contains("yufu-dev-sso="), "{set_cookies}");
+    guest.absorb(response.headers());
     let result: Value = response.json().await.unwrap();
-    assert_eq!(result["requires_login"], true);
+    assert_eq!(result["requires_login"], false);
     assert!(result.get("access_token").is_none());
+    assert!(result.get("bind_provider").is_none());
+    let response = f
+        .client
+        .get(format!("{}/api/v1/account/session", f.base_url))
+        .header("cookie", guest.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
     assert_eq!(
         scalar(
             &f,
@@ -428,6 +441,126 @@ async fn identity_actions_http_account_governance_requires_revision_and_exact_au
             )
         )
         .await,
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn invitation_acceptance_session_failure_rolls_back_account_and_invitation() {
+    let f = IdentityFixture::start().await;
+    let mut admin = BrowserCookies::default();
+    let admin_csrf = http_login(&f, &mut admin).await;
+    let issued = invitation(&f, &admin, &admin_csrf).await;
+    let mut guest = BrowserCookies::default();
+    let csrf = http_csrf(&f, &mut guest).await;
+    let response = write(&f, &guest, &csrf, "/identity/actions/exchange")
+        .json(&json!({"kind":"invitation","secret":issued["secret"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    guest.absorb(response.headers());
+    let exchanged: Value = response.json().await.unwrap();
+    let action_id = exchanged["action_id"].as_str().unwrap();
+    f.db.execute_unprepared(
+        "CREATE FUNCTION fail_invitation_session() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture session failure'; END $$; CREATE TRIGGER fail_invitation_session BEFORE INSERT ON identity_sso_session FOR EACH ROW EXECUTE FUNCTION fail_invitation_session();",
+    )
+    .await
+    .unwrap();
+    let response = write(&f, &guest, &csrf, "/identity/invitations/accept")
+        .json(&json!({"action_id":action_id,"existing_account":false,"username":"atomic-invited","password":"atomic invitation password","nickname":"Atomic"}))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_server_error());
+    assert_eq!(
+        scalar(
+            &f,
+            "SELECT COUNT(*)::bigint AS value FROM \"user\" WHERE username='atomic-invited'"
+        )
+        .await,
+        0
+    );
+    assert_eq!(
+        scalar(&f, "SELECT COUNT(*)::bigint AS value FROM identity_invitation WHERE consumed_at IS NOT NULL").await,
+        0
+    );
+    f.db.execute_unprepared(
+        "DROP TRIGGER fail_invitation_session ON identity_sso_session; DROP FUNCTION fail_invitation_session();",
+    )
+    .await
+    .unwrap();
+    let response = write(&f, &guest, &csrf, "/identity/invitations/accept")
+        .json(&json!({"action_id":action_id,"existing_account":false,"username":"atomic-invited","password":"atomic invitation password","nickname":"Atomic"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    guest.absorb(response.headers());
+    assert_eq!(
+        scalar(&f, "SELECT COUNT(*)::bigint AS value FROM identity_invitation WHERE consumed_at IS NOT NULL").await,
+        1
+    );
+    let response = f
+        .client
+        .get(format!("{}/api/v1/account/session", f.base_url))
+        .header("cookie", guest.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn invitation_acceptance_is_single_use_under_concurrency() {
+    let f = IdentityFixture::start().await;
+    let mut admin = BrowserCookies::default();
+    let admin_csrf = http_login(&f, &mut admin).await;
+    let issued = invitation(&f, &admin, &admin_csrf).await;
+    let mut guest = BrowserCookies::default();
+    let csrf = http_csrf(&f, &mut guest).await;
+    let response = write(&f, &guest, &csrf, "/identity/actions/exchange")
+        .json(&json!({"kind":"invitation","secret":issued["secret"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    guest.absorb(response.headers());
+    let exchanged: Value = response.json().await.unwrap();
+    let action_id = exchanged["action_id"].as_str().unwrap().to_owned();
+    let body = json!({"action_id":action_id,"existing_account":false,"username":"concurrent-invited","password":"concurrent invitation password","nickname":"Concurrent"});
+    let first = write(&f, &guest, &csrf, "/identity/invitations/accept")
+        .json(&body)
+        .send();
+    let second = write(&f, &guest, &csrf, "/identity/invitations/accept")
+        .json(&body)
+        .send();
+    let (first, second) = tokio::join!(first, second);
+    let responses = [first.unwrap(), second.unwrap()];
+    assert_eq!(
+        responses
+            .iter()
+            .filter(|response| response.status() == 200)
+            .count(),
+        1
+    );
+    assert!(
+        responses
+            .iter()
+            .any(|response| response.status().is_client_error())
+    );
+    assert_eq!(
+        scalar(
+            &f,
+            "SELECT COUNT(*)::bigint AS value FROM \"user\" WHERE username='concurrent-invited'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(
+        scalar(&f, "SELECT COUNT(*)::bigint AS value FROM identity_invitation WHERE consumed_at IS NOT NULL").await,
         1
     );
     f.close().await;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineOptions({ name: 'AccountAction' })
-import { computed, onScopeDispose, reactive, ref } from 'vue'
+import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Check, KeyRound, MailCheck, ShieldCheck } from '@lucide/vue'
 import {
@@ -10,6 +10,8 @@ import {
     acceptInvitation,
     completePasswordReset,
 } from '../api/actions'
+import { getExternalProviders, startExternalBind, type ExternalProvider } from '../api/identities'
+import ExternalProviderIcon from '@/components/brand/external-provider-icon.vue'
 import { useUserStore } from '@/pinia/stores/user'
 import { useAsyncQuery } from '@/composables/use-async-query'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
@@ -37,7 +39,21 @@ const manualError = ref(fragmentError)
 const exchanging = ref(false)
 const form = reactive({ username: '', nickname: '', password: '', confirm: '' }),
     validation = ref(''),
+    bindError = ref(''),
+    providers = ref<ExternalProvider[]>([]),
+    selectedProvider = ref(''),
+    providerController = new AbortController(),
     done = ref(false)
+const bindableProviders = computed(() =>
+    providers.value.filter((provider) => provider.mode === 'oauth'),
+)
+async function loadProviders() {
+    try {
+        providers.value = await getExternalProviders(providerController.signal)
+    } catch {
+        providers.value = []
+    }
+}
 const state = useAsyncQuery({
     key: () => actionId.value,
     active: () => !manualMode.value,
@@ -78,6 +94,19 @@ const clear = () => {
 }
 onScopeDispose(onSessionReset(clear))
 onScopeDispose(clear)
+onScopeDispose(() => providerController.abort())
+watch(
+    data,
+    (value) => {
+        if (value?.kind === 'invitation' && !existing.value && !providers.value.length) {
+            void loadProviders()
+        }
+    },
+    { immediate: true },
+)
+watch(existing, (value) => {
+    if (value) selectedProvider.value = ''
+})
 
 function parseManualAction(raw: string) {
     const value = raw.trim()
@@ -126,6 +155,7 @@ async function exchangeManual() {
 
 async function submit() {
     validation.value = ''
+    bindError.value = ''
     if (!data.value || done.value) return
     if (
         (isReset.value || !existing.value) &&
@@ -150,13 +180,34 @@ async function submit() {
                                 username: form.username.trim(),
                                 nickname: form.nickname.trim(),
                                 password: form.password,
+                                bind_provider: selectedProvider.value || undefined,
                             },
                   ),
         async (result) => {
             done.value = true
             clear()
             if (result.requires_login) user.logout()
+            if (!isReset.value) await user.ensureSession()
             const flow = result.oidc_flow_id
+            if (result.bind_provider) {
+                try {
+                    const bind = await startExternalBind(result.bind_provider, flow ?? undefined)
+                    window.location.assign(bind.authorize_url)
+                } catch (error) {
+                    bindError.value =
+                        '账户已创建，但第三方绑定未开始：' +
+                        (error instanceof Error ? error.message : '请稍后重试')
+                    await router.replace(
+                        flow
+                            ? { name: 'oidc-consent', query: { flow_id: flow } }
+                            : {
+                                  name: 'account-identities',
+                                  query: { error: 'external_start_failed', bind: result.bind_provider },
+                              },
+                    )
+                }
+                return
+            }
             await router.replace(
                 flow
                     ? { name: 'oidc-consent', query: { flow_id: flow } }
@@ -281,8 +332,42 @@ async function submit() {
                         </p>
                     </UiFormField>
                 </template>
-                <p v-if="validation || writeError" class="form-alert" role="alert">
-                    {{ validation || writeError }}
+                <div
+                    v-if="data?.kind === 'invitation' && !existing && bindableProviders.length"
+                    class="space-y-2"
+                >
+                    <p class="text-[11px] font-semibold text-muted-foreground">同步绑定第三方身份（可选）</p>
+                    <div class="grid grid-cols-2 gap-2" role="group" aria-label="选择要同步绑定的第三方身份">
+                        <button
+                            v-for="provider in bindableProviders"
+                            :key="provider.key"
+                            type="button"
+                            class="flex items-center gap-2 rounded-lg border p-2.5 text-left transition-colors disabled:opacity-60"
+                            :class="
+                                selectedProvider === provider.key
+                                    ? 'border-primary bg-primary/5'
+                                    : 'border-border bg-card hover:bg-accent/30'
+                            "
+                            :aria-pressed="selectedProvider === provider.key"
+                            :disabled="pending"
+                            @click="selectedProvider = selectedProvider === provider.key ? '' : provider.key"
+                        >
+                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+                                <ExternalProviderIcon :provider="provider.key" :size="17" />
+                            </span>
+                            <span class="min-w-0 flex-1 text-xs font-semibold">{{ provider.label }}</span>
+                            <Check
+                                v-if="selectedProvider === provider.key"
+                                :size="14"
+                                class="shrink-0 text-primary"
+                                aria-hidden="true"
+                            />
+                        </button>
+                    </div>
+                    <p class="form-help">不选择则仅创建账户，之后仍可在账户中心绑定。</p>
+                </div>
+                <p v-if="validation || writeError || bindError" class="form-alert" role="alert">
+                    {{ validation || writeError || bindError }}
                 </p>
                 <UiButton type="submit" size="lg" block :disabled="pending || done" :loading="pending">
                     <KeyRound v-if="!pending" :size="15" aria-hidden="true" />

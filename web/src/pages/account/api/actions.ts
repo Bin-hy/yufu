@@ -3,7 +3,7 @@ import type { PasswordChangeResult } from './type'
 export interface ActionView { action_id: string; kind: 'invitation' | 'password_reset'; expires_at: number; person_kind: 'employee' | 'collaborator' | null; developer_grant: boolean; requires_existing_account: boolean; oidc_flow_id: string | null; csrf_token: string }
 export const exchangeAction = (data: { kind: string; secret: string; flow_id?: string }) => identityRequest<{ action_id: string; expires_at: number; oidc_flow_id: string | null }>({ url: 'identity/actions/exchange', method: 'POST', data, errorPresentation: 'local' })
 export const inspectAction = (id: string, signal?: AbortSignal) => identityRequest<ActionView>({ url: `identity/actions/${encodeURIComponent(id)}`, signal, errorPresentation: 'local' })
-export const acceptInvitation = (data: { action_id: string; existing_account: boolean; username?: string; password?: string; nickname?: string }) => identityRequest<PasswordChangeResult>({ url: 'identity/invitations/accept', method: 'POST', data, errorPresentation: 'local' })
+export const acceptInvitation = (data: { action_id: string; existing_account: boolean; username?: string; password?: string; nickname?: string; bind_provider?: string }) => identityRequest<PasswordChangeResult>({ url: 'identity/invitations/accept', method: 'POST', data, errorPresentation: 'local' })
 export const completePasswordReset = (action_id: string, new_password: string) => identityRequest<PasswordChangeResult>({ url: 'identity/password-resets/complete', method: 'POST', data: { action_id, new_password }, errorPresentation: 'local' })
 
 export function consumeSecretFragment(location: Pick<Location, 'hash' | 'pathname' | 'search'>, history: Pick<History, 'replaceState' | 'state'>) {

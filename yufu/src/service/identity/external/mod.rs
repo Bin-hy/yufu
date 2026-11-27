@@ -22,5 +22,7 @@ pub use qq::QqAdapter;
 pub use rate_limit::ExternalRateLimiter;
 pub use registry::{ExternalIdentityRegistry, PublicProvider, StoredProvider};
 pub use secret::SecretCipher;
-pub use service::{ExternalCompletion, ExternalIdentityService, ExternalIdentityView};
+pub use service::{
+    ExternalCallbackContext, ExternalCompletion, ExternalIdentityService, ExternalIdentityView,
+};
 pub use wechat_qr::WechatQrAdapter;

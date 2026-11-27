@@ -15,5 +15,26 @@ export interface AdminOverview {
 }
 export interface Delivery { id: string; event_id: string; application_id: number; name: string; environment: string; status: string; attempt_count: number; next_attempt_at: number; last_error_code: string | null; created_at: number; delivered_at: number | null }
 export interface IssuedAction { id: string; secret: string; expires_at: number }
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired'
+export interface InvitationRecord {
+    id: string
+    purpose: 'onboarding' | 'qualification'
+    person_kind: 'employee' | 'collaborator'
+    developer_grant: boolean
+    target_user_id: number | null
+    target_username: string | null
+    target_nickname: string | null
+    created_by: number
+    creator_username: string
+    creator_nickname: string
+    created_at: number
+    expires_at: number
+    status: InvitationStatus
+    accepted_user_id: number | null
+    accepted_username: string | null
+    accepted_nickname: string | null
+    accepted_at: number | null
+    revoked_at: number | null
+}
 export interface LegacyClient { oauth_client_id: number; client_id: string; name: string; candidate_owner_id: number; public_client: boolean; management_state: string; candidate_application_ids: number[]; conflict_kinds: string[]; snapshot: string }
 export interface Adoption { oauth_client_id: number; expected_snapshot: string; existing_application_id: number | null; retained_environment: 'development' | 'production'; registration: { application: Registration; owner_user_id: number; assignments: Assignment[]; accept_logout_limitation: boolean } }
