@@ -1,5 +1,6 @@
 //! Fixed deployment identity and bounded browser/protocol lifetimes.
 use crate::config::{Config, is_loopback_host};
+use crate::domain::identity::external::RegistrationPolicy;
 use auth::token_manager::IdTokenSigner;
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +45,29 @@ impl Default for Identity {
             legacy_governance_max_users: 1_000,
             audit_retention_seconds: 90 * 86_400,
             operation_retention_seconds: 86_400,
+        }
+    }
+}
+
+/// External login is disabled unless an operator enables a fully configured provider.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ExternalIdentity {
+    pub enabled: bool,
+    pub registration: RegistrationPolicy,
+    pub flow_ttl_seconds: u64,
+    pub http_timeout_millis: u64,
+    pub upstream_concurrency: usize,
+}
+
+impl Default for ExternalIdentity {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            registration: RegistrationPolicy::Disabled,
+            flow_ttl_seconds: 600,
+            http_timeout_millis: 10_000,
+            upstream_concurrency: 32,
         }
     }
 }
@@ -164,6 +188,19 @@ impl Config {
         anyhow::ensure!(
             (600..=365 * 86_400).contains(&policy.operation_retention_seconds),
             "invalid operation retention"
+        );
+        let external = &self.external_identity;
+        anyhow::ensure!(
+            (60..=1_800).contains(&external.flow_ttl_seconds),
+            "invalid external flow lifetime"
+        );
+        anyhow::ensure!(
+            (1_000..=15_000).contains(&external.http_timeout_millis),
+            "invalid external HTTP timeout"
+        );
+        anyhow::ensure!(
+            (1..=1_024).contains(&external.upstream_concurrency),
+            "invalid external upstream concurrency"
         );
         for allowed in &policy.logout_private_origins {
             let origin = url::Url::parse(allowed)
@@ -287,6 +324,32 @@ mod tests {
         assert!(config.validate_identity_policy().is_ok());
         config.http.listen = "0.0.0.0:4000".parse().unwrap();
         assert!(config.validate_identity_policy().is_err());
+    }
+
+    #[test]
+    fn external_identity_defaults_closed_and_bounded() {
+        let config = production();
+        assert!(!config.external_identity.enabled);
+        assert_eq!(
+            config.external_identity.registration,
+            crate::domain::identity::external::RegistrationPolicy::Disabled
+        );
+        assert_eq!(config.external_identity.flow_ttl_seconds, 600);
+        assert_eq!(config.external_identity.http_timeout_millis, 10_000);
+        assert_eq!(config.external_identity.upstream_concurrency, 32);
+        let changes: Vec<fn(&mut ExternalIdentity)> = vec![
+            |p| p.flow_ttl_seconds = 59,
+            |p| p.flow_ttl_seconds = 1_801,
+            |p| p.http_timeout_millis = 999,
+            |p| p.http_timeout_millis = 15_001,
+            |p| p.upstream_concurrency = 0,
+            |p| p.upstream_concurrency = 1_025,
+        ];
+        for change in changes {
+            let mut config = config.clone();
+            change(&mut config.external_identity);
+            assert!(config.validate_identity_policy().is_err());
+        }
     }
 
     #[test]

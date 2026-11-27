@@ -2,7 +2,7 @@ use std::{env, net::SocketAddr, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
-pub use crate::config_identity::Identity;
+pub use crate::config_identity::{ExternalIdentity, Identity};
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -14,6 +14,8 @@ pub struct Config {
     pub oidc: Oidc,
     #[serde(default)]
     pub identity: Identity,
+    #[serde(default)]
+    pub external_identity: ExternalIdentity,
     #[serde(default)]
     pub log: Log,
     #[serde(default)]

@@ -7,6 +7,7 @@ pub mod audit;
 pub mod authorization;
 pub mod console;
 pub mod error;
+pub mod external;
 pub mod introspection;
 pub mod migration;
 pub mod operation;

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, reactive, ref, onScopeDispose, watch } from 'vue'
+import { computed, reactive, ref, onMounted, onScopeDispose, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowRight, Info } from '@lucide/vue'
 import { centerLogin } from '@/pages/account/api'
+import { getExternalProviders, startExternalLogin, type ExternalProvider } from '@/pages/account/api/identities'
 import { useUserStore } from '@/pinia/stores/user'
 import { useTabsStore } from '@/pinia/stores/tabs'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
@@ -30,6 +31,36 @@ const remembered = getRememberUser(),
     capsLock = ref(false),
     mutation = useAsyncMutation(),
     { pending, error } = mutation
+const providers = ref<ExternalProvider[]>([]),
+    externalPending = ref(''),
+    externalError = ref(''),
+    providerController = new AbortController()
+onMounted(async () => {
+    try {
+        providers.value = await getExternalProviders(providerController.signal)
+    } catch {
+        providers.value = []
+    }
+})
+onScopeDispose(() => providerController.abort())
+async function externalLogin(provider: ExternalProvider) {
+    if (pending.value || externalPending.value) return
+    externalError.value = ''
+    if (provider.mode === 'native') {
+        externalError.value = '请打开 Yufu 微信小程序完成登录'
+        return
+    }
+    externalPending.value = provider.key
+    try {
+        const flowId = props.flowId || (typeof route.query.flow_id === 'string' ? route.query.flow_id : undefined)
+        const result = await startExternalLogin(provider.key, flowId)
+        window.location.assign(result.authorize_url)
+    } catch (e) {
+        externalError.value = e instanceof Error ? e.message : '无法发起第三方登录'
+    } finally {
+        externalPending.value = ''
+    }
+}
 const retrying = ref(false)
 const restoreUnavailable = computed(() => !props.oidc && !props.actionId && (!!user.identityError || retrying.value))
 function workspaceTarget() {
@@ -124,8 +155,8 @@ async function submit() {
         </div>
         <form v-else class="space-y-4" novalidate @submit.prevent="submit">
             <p v-if="sessionExpiredNotice" class="form-alert" role="status">中心会话已失效，请重新登录后继续。</p>
-            <p v-if="validation || error" class="form-alert" role="alert">
-                {{ validation || error }}
+            <p v-if="validation || error || externalError" class="form-alert" role="alert">
+                {{ validation || error || externalError }}
             </p>
             <UiFormField id="login-username" label="用户名" required>
                 <UiInput
@@ -168,6 +199,25 @@ async function submit() {
                 登录
                 <ArrowRight v-if="!pending" :size="15" aria-hidden="true" />
             </UiButton>
+            <div v-if="providers.length" class="space-y-3">
+                <div class="flex items-center gap-3">
+                    <span class="h-px flex-1 bg-border" />
+                    <span class="text-[10.5px] text-muted-foreground">或使用第三方账号</span>
+                    <span class="h-px flex-1 bg-border" />
+                </div>
+                <UiButton
+                    v-for="provider in providers"
+                    :key="provider.key"
+                    type="button"
+                    variant="outline"
+                    block
+                    :loading="externalPending === provider.key"
+                    :disabled="!!externalPending || pending"
+                    @click="externalLogin(provider)"
+                >
+                    {{ provider.mode === 'native' ? provider.label + '（小程序）' : provider.label }}
+                </UiButton>
+            </div>
             <div v-if="!oidc" class="auth-links">
                 <span>还没有账户？</span>
                 <RouterLink :to="{ name: 'register' }">凭企业邀请创建账户</RouterLink>

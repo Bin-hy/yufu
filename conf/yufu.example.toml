@@ -104,3 +104,24 @@ timeout_millis = 1500
 # Console login lifetime: 12 hours from password authentication, without sliding renewal.
 # Independent of auth.exp_seconds and OIDC access tokens. Applies to new sessions.
 sso_session_ttl_seconds = 43200
+
+# 外部身份认证（GitHub / QQ / 微信小程序）
+# 默认关闭；Provider 的 Client ID/Secret 在管理控制台配置，Secret 以 AEAD 密文入库。
+# 主密钥只从环境变量读取，绝不写入本文件：
+#   YUFU_EXTERNAL_SECRET_KEY=<base64 32 bytes>
+# 缺少主密钥且数据库中已有 Secret 时，服务拒绝启动（fail closed）。
+[external_identity]
+enabled = false
+# disabled | invite_only | open
+# disabled: 未绑定的第三方身份不能登录，也不自动创建 Yufu 账户。
+registration = "disabled"
+flow_ttl_seconds = 600
+http_timeout_millis = 10000
+upstream_concurrency = 32
+
+# 可选：首次启动时从环境变量引导 GitHub 配置（仅在对应列为空时写入，绝不覆盖已有 Secret）。
+# 生产环境建议后续通过管理控制台配置；这些变量不会写入本文件或镜像。
+# YUFU_EXTERNAL_SECRET_KEY=<base64 32 bytes>
+# YUFU_EXTERNAL_GITHUB_CLIENT_ID=<github oauth app client id>
+# YUFU_EXTERNAL_GITHUB_CLIENT_SECRET=<github oauth app client secret>
+# YUFU_EXTERNAL_GITHUB_ENABLED=true

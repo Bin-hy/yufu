@@ -287,6 +287,9 @@ pub(crate) fn validate_summary(summary: &serde_json::Value) -> Result<(), Identi
         "developer_grant",
         "revoked",
         "profile_changed",
+        "provider",
+        "idempotent",
+        "existing",
     ];
     if map.len() > 32
         || map.iter().any(|(key, value)| {
@@ -335,6 +338,9 @@ mod tests {
         assert!(
             validate_summary(&serde_json::json!({"application_id":7,"enabled":false,"revision":3}))
                 .is_ok()
+        );
+        assert!(
+            validate_summary(&serde_json::json!({"provider":"github","idempotent":true})).is_ok()
         );
         assert!(
             validate_summary(&serde_json::json!({"application_id":{"code":"nested"}})).is_err()

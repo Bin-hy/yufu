@@ -26,3 +26,4 @@ impl MigratorTrait for Migrator {
 }
 
 pub(crate) mod m20261117_000002_site_branding_operations;
+pub(crate) mod m20261127_000002_external_identity_operations;

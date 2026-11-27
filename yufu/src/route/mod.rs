@@ -12,11 +12,13 @@ pub mod authority;
 pub mod developer;
 pub mod enforce;
 pub mod enterprise_admin;
+pub mod external_admin;
 pub mod identity_actions;
 pub mod identity_authorization;
 pub mod identity_browser;
 mod identity_console;
 pub(crate) mod identity_cors;
+pub mod identity_external;
 mod identity_logout;
 mod identity_migration;
 pub mod identity_status;
@@ -77,7 +79,9 @@ pub fn get_service_routes() -> Router<AppState> {
 }
 
 pub fn get_no_prefix_routes() -> Router<AppState> {
-    Router::new().merge(oidc::get_public_routes())
+    Router::new()
+        .merge(oidc::get_public_routes())
+        .merge(identity_external::get_callback_routes())
 }
 
 pub mod site_branding;

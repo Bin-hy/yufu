@@ -24,6 +24,9 @@ pub enum IdentityError {
     LoginRequired,
     ConsentRequired,
     AccessDenied,
+    ExternalIdentityNotLinked,
+    ExternalStateInvalid,
+    LastCredential,
     DependencyUnavailable,
     DeadlineExceeded,
     CapacityExceeded,
@@ -53,6 +56,9 @@ impl IdentityError {
             Self::LoginRequired => "login_required",
             Self::ConsentRequired => "consent_required",
             Self::AccessDenied => "access_denied",
+            Self::ExternalIdentityNotLinked => "external_identity_not_linked",
+            Self::ExternalStateInvalid => "external_state_invalid",
+            Self::LastCredential => "last_credential",
             Self::DependencyUnavailable => "dependency_unavailable",
             Self::DeadlineExceeded => "deadline_exceeded",
             Self::CapacityExceeded => "capacity_exceeded",
@@ -93,6 +99,7 @@ impl From<IdentityError> for SecurityError {
             | IdentityError::AlreadyConsumed
             | IdentityError::LoginRequired => Self::InvalidCredential,
             IdentityError::Conflict | IdentityError::ApprovalObsolete => Self::Conflict,
+            IdentityError::LastCredential => Self::Conflict,
             IdentityError::DeadlineExceeded => Self::DeadlineExceeded,
             IdentityError::CapacityExceeded => Self::CapacityExceeded,
             IdentityError::CommitUncertain => Self::CommitUncertain,
@@ -100,6 +107,7 @@ impl From<IdentityError> for SecurityError {
             IdentityError::NotFound
             | IdentityError::InvalidInput
             | IdentityError::InvalidScope
+            | IdentityError::ExternalStateInvalid
             | IdentityError::InvalidImageFormat
             | IdentityError::InvalidImageContent
             | IdentityError::ImageLimitExceeded

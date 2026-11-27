@@ -541,6 +541,89 @@ impl IdentityTransaction for PgSecurityTransaction {
     {
         self.identity_authorization_flow(id).await
     }
+    async fn external_flow_by_state_digest(
+        &mut self,
+        digest: &crate::domain::identity::account::SecretDigest,
+    ) -> Result<Option<crate::domain::identity::external::ExternalFlowSnapshot>, IdentityError>
+    {
+        self.identity_external_flow_by_digest(digest).await
+    }
+    async fn external_identity_by_subject(
+        &mut self,
+        provider_key: crate::domain::identity::external::ExternalProviderKey,
+        subject: &str,
+    ) -> Result<Option<crate::domain::identity::external::ExternalIdentityRecord>, IdentityError>
+    {
+        self.identity_external_identity_by_subject(provider_key, subject)
+            .await
+    }
+    async fn external_identity_by_id(
+        &mut self,
+        id: Uuid,
+    ) -> Result<Option<crate::domain::identity::external::ExternalIdentityRecord>, IdentityError>
+    {
+        self.identity_external_identity_by_id(id).await
+    }
+    async fn external_identities_for_user(
+        &mut self,
+        user_id: i32,
+    ) -> Result<Vec<crate::domain::identity::external::ExternalIdentityRecord>, IdentityError> {
+        self.identity_external_identities_for_user(user_id).await
+    }
+    async fn external_login_credential_count(
+        &mut self,
+        user_id: i32,
+    ) -> Result<u32, IdentityError> {
+        self.identity_external_login_credential_count(user_id).await
+    }
+    async fn external_provider_admin_rows(
+        &mut self,
+    ) -> Result<Vec<crate::domain::identity::external::ExternalProviderAdminView>, IdentityError>
+    {
+        self.identity_external_provider_admin_rows().await
+    }
+    async fn update_external_provider(
+        &mut self,
+        provider_key: crate::domain::identity::external::ExternalProviderKey,
+        expected_revision: u64,
+        update: &crate::domain::identity::external::UpdateExternalProvider,
+        secret_ciphertext: Option<String>,
+        actor_id: i32,
+    ) -> Result<crate::domain::identity::external::ExternalProviderAdminView, IdentityError> {
+        self.identity_update_external_provider(
+            provider_key,
+            expected_revision,
+            update,
+            secret_ciphertext,
+            actor_id,
+        )
+        .await
+    }
+    async fn rotate_external_provider_secret(
+        &mut self,
+        provider_key: crate::domain::identity::external::ExternalProviderKey,
+        expected_revision: u64,
+        secret_ciphertext: String,
+        secret_key_version: u32,
+        actor_id: i32,
+    ) -> Result<crate::domain::identity::external::ExternalProviderAdminView, IdentityError> {
+        self.identity_rotate_external_provider_secret(
+            provider_key,
+            expected_revision,
+            secret_ciphertext,
+            secret_key_version,
+            actor_id,
+        )
+        .await
+    }
+    async fn external_login_stats(
+        &mut self,
+        from_millis: u64,
+        to_millis: u64,
+    ) -> Result<Vec<crate::domain::identity::external::ProviderStat>, IdentityError> {
+        self.identity_external_login_stats(from_millis, to_millis)
+            .await
+    }
     async fn apply(
         &mut self,
         command: IdentityWrite,
@@ -594,6 +677,14 @@ impl IdentityTransaction for PgSecurityTransaction {
             | IdentityWrite::RecomputeGeneration { .. }
             | IdentityWrite::EnsureAccessGeneration { .. }) => {
                 self.write_identity_admission(command).await
+            }
+            command @ (IdentityWrite::CreateExternalFlow(_)
+            | IdentityWrite::ConsumeExternalFlow { .. }
+            | IdentityWrite::CreateExternalIdentity(_)
+            | IdentityWrite::DeleteExternalIdentity { .. }
+            | IdentityWrite::UpdateExternalIdentityLastLogin { .. }
+            | IdentityWrite::CreateExternalAccount(_)) => {
+                self.write_identity_external(command).await
             }
             command @ (IdentityWrite::CreateCenter(_)
             | IdentityWrite::AttachManagementSession { .. }
@@ -710,6 +801,15 @@ impl PgSecurityTransaction {
                 IdentityLockKey::User(id) => (
                     "UPDATE \"user\" SET identity_revision=identity_revision WHERE id=$1 RETURNING id",
                     vec![(*id).into()],
+                ),
+                IdentityLockKey::ExternalIdentity {
+                    provider_key,
+                    subject,
+                } => (
+                    // The mapping may not exist before the first bind, so lock a
+                    // namespaced advisory key rather than a table row.
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+                    vec![format!("external:{provider_key}:{subject}").into()],
                 ),
                 IdentityLockKey::Center(id) => (
                     "SELECT id FROM identity_sso_session WHERE id=$1 FOR UPDATE",

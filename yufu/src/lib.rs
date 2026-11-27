@@ -6,7 +6,7 @@ use http::{HeaderMap, HeaderValue, Method, StatusCode};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, DbErr, EntityTrait, QueryFilter, Set};
 use sea_orm_migration::MigratorTrait;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 
@@ -20,6 +20,9 @@ use crate::rbac::authority_check_middleware_rbac_abac;
 use crate::route::get_no_prefix_routes;
 use crate::service::authority::Service;
 use crate::service::database::DatabaseService;
+use crate::service::identity::external::{
+    ExternalHttpClient, ExternalIdentityRegistry, ExternalRateLimiter, SecretCipher,
+};
 use auth::access_middleware_local_rs256;
 use auth::claims::AccessTokenClaims;
 use auth::token_manager::{IdTokenSigner, TokenManager};
@@ -326,12 +329,51 @@ async fn serve_internal<F>(
     let database = Arc::new(database_service);
     let id_token_signer = Arc::new(id_token_signer);
 
+    let external_cipher = match SecretCipher::from_env() {
+        Ok(cipher) => cipher.map(Arc::new),
+        Err(error) => {
+            error!(
+                reason = error.code(),
+                "external secret key unavailable; server not started"
+            );
+            return;
+        }
+    };
+    let external_http = match ExternalHttpClient::new(
+        Duration::from_millis(cfg.external_identity.http_timeout_millis),
+        cfg.auth.allow_insecure_loopback_cookies,
+    ) {
+        Ok(client) => Arc::new(client),
+        Err(error) => {
+            error!(
+                reason = error.code(),
+                "external HTTP client unavailable; server not started"
+            );
+            return;
+        }
+    };
+    let external_rate_limiter =
+        match ExternalRateLimiter::new(cfg.external_identity.upstream_concurrency) {
+            Ok(limiter) => Arc::new(limiter),
+            Err(error) => {
+                error!(
+                    reason = error.code(),
+                    "external rate limiter unavailable; server not started"
+                );
+                return;
+            }
+        };
+
     let app_state = AppState {
         config: cfg.clone(),
         database: database.clone(),
         refresh_token_manager: refresh_token_manager.clone(),
         id_token_signer: id_token_signer.clone(),
         security_clock,
+        external_registry: Arc::new(RwLock::new(ExternalIdentityRegistry::default())),
+        external_cipher,
+        external_http,
+        external_rate_limiter,
     };
     if app_state.init().await.is_err() {
         error!("identity initialization failed; server not started");
@@ -547,6 +589,10 @@ pub struct AppState {
     /// RS256 signer for cross-service access tokens (also exposed via JWKS).
     id_token_signer: Arc<IdTokenSigner>,
     security_clock: Option<Arc<dyn auth::security::budget::Clock>>,
+    external_registry: Arc<RwLock<ExternalIdentityRegistry>>,
+    external_cipher: Option<Arc<SecretCipher>>,
+    external_http: Arc<ExternalHttpClient>,
+    external_rate_limiter: Arc<ExternalRateLimiter>,
 }
 pub type IdType = i32;
 
@@ -573,7 +619,78 @@ impl AppState {
         )
         .await?;
         self.init_oidc_bootstrap_clients().await?;
+        self.bootstrap_external_providers().await?;
+        self.reload_external_registry().await?;
         Ok(())
+    }
+
+    async fn bootstrap_external_providers(&self) -> result::Result<()> {
+        let now = u64::try_from(chrono::Utc::now().timestamp_millis())
+            .map_err(|_| anyhow::anyhow!("invalid current time"))?;
+        crate::service::identity::external::bootstrap::bootstrap_github(
+            &self.database.connection,
+            self.external_cipher.as_deref(),
+            now,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn reload_external_registry(&self) -> result::Result<()> {
+        let adapters: Vec<Arc<dyn crate::service::identity::external::ExternalIdentityAdapter>> = vec![
+            Arc::new(crate::service::identity::external::GitHubAdapter::new()),
+            Arc::new(crate::service::identity::external::QqAdapter::new()),
+            Arc::new(crate::service::identity::external::WechatQrAdapter::new()),
+        ];
+        let registry = ExternalIdentityRegistry::load(
+            &self.database.connection,
+            self.external_cipher.as_deref(),
+            adapters,
+        )
+        .await?;
+        *self
+            .external_registry
+            .write()
+            .map_err(|_| anyhow::anyhow!("external registry lock poisoned"))? = registry;
+        Ok(())
+    }
+
+    pub fn external_catalog(&self) -> Vec<crate::service::identity::external::PublicProvider> {
+        self.external_registry
+            .read()
+            .map(|registry| registry.public_catalog().to_vec())
+            .unwrap_or_default()
+    }
+
+    pub fn external_registry(
+        &self,
+    ) -> std::result::Result<
+        std::sync::RwLockReadGuard<'_, ExternalIdentityRegistry>,
+        crate::domain::identity::error::IdentityError,
+    > {
+        self.external_registry
+            .read()
+            .map_err(|_| crate::domain::identity::error::IdentityError::DependencyUnavailable)
+    }
+
+    pub fn external_http(&self) -> &Arc<ExternalHttpClient> {
+        &self.external_http
+    }
+
+    pub fn external_cipher(&self) -> Option<&SecretCipher> {
+        self.external_cipher.as_deref()
+    }
+
+    pub fn external_cipher_arc(&self) -> Option<Arc<SecretCipher>> {
+        self.external_cipher.clone()
+    }
+
+    pub fn external_registry_arc(&self) -> Arc<RwLock<ExternalIdentityRegistry>> {
+        self.external_registry.clone()
+    }
+
+    pub fn external_rate_limiter(&self) -> &Arc<ExternalRateLimiter> {
+        &self.external_rate_limiter
     }
 
     /// OIDC access token expiry: oidc.access_token_expire_seconds > auth.exp_seconds

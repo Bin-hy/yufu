@@ -9,6 +9,7 @@ export const navigationGroups: NavigationGroup[] = [
         { name: 'account-profile', title: '账户资料', icon: UserRound },
         { name: 'account-apps', title: '可访问应用', icon: AppWindow },
         { name: 'account-consents', title: '资料授权', icon: KeyRound },
+        { name: 'account-identities', title: '第三方身份', icon: Network },
         { name: 'account-sessions', title: '登录会话', icon: ShieldCheck },
     ] },
     { title: '开发者控制台', qualification: 'developer', items: [
@@ -18,6 +19,7 @@ export const navigationGroups: NavigationGroup[] = [
     { title: '企业管理', qualification: 'administrator', items: [
         { name: 'admin-overview', title: '管理总览', icon: LayoutDashboard },
         { name: 'admin-accounts', title: '账户与邀请', icon: Users },
+        { name: 'admin-external-providers', title: '第三方登录', icon: KeyRound },
         { name: 'admin-groups', title: '用户组', icon: Network },
         { name: 'admin-apps', title: '应用与审批', icon: AppWindow },
         { name: 'admin-migrations', title: '历史接入纳管', icon: ShieldCheck },

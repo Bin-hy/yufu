@@ -45,6 +45,7 @@ hex = "0.4"
 urlencoding = "2.1"
 rsa = "0.10"
 getrandom = { version = "0.4", features = ["sys_rng"] }
+aes-gcm = "0.10"
 
 # Database dependencies
 sea-orm = { version = "2.0.0-rc.2",features = [

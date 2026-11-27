@@ -1,9 +1,13 @@
 pub use crate::domain::identity::application::AssignmentTarget;
+use crate::domain::identity::external::{
+    ExternalProviderAdminView, ProviderStat, UpdateExternalProvider,
+};
 use crate::domain::identity::{
     account::{AccountSnapshot, InvitationPurpose, ManagementMode, PersonKind, SecretDigest},
     admission::ManagedAdmission,
     application::{ApprovalSnapshot, EnvironmentConfig, IdentityScopeSet},
     error::IdentityError,
+    external::{ExternalFlowSnapshot, ExternalIdentityRecord, ExternalProviderKey},
     session::{BrowserSessionSnapshot, FlowHandle, IdentityRevocationScope},
 };
 use crate::service::security::repository::SecurityTransaction;
@@ -262,6 +266,49 @@ pub trait IdentityTransaction: SecurityTransaction {
         &mut self,
         id: Uuid,
     ) -> Result<Option<crate::domain::identity::session::AuthorizationFlowSnapshot>, IdentityError>;
+    async fn external_flow_by_state_digest(
+        &mut self,
+        digest: &SecretDigest,
+    ) -> Result<Option<ExternalFlowSnapshot>, IdentityError>;
+    async fn external_identity_by_subject(
+        &mut self,
+        provider_key: ExternalProviderKey,
+        subject: &str,
+    ) -> Result<Option<ExternalIdentityRecord>, IdentityError>;
+    async fn external_identity_by_id(
+        &mut self,
+        id: Uuid,
+    ) -> Result<Option<ExternalIdentityRecord>, IdentityError>;
+    async fn external_identities_for_user(
+        &mut self,
+        user_id: i32,
+    ) -> Result<Vec<ExternalIdentityRecord>, IdentityError>;
+    async fn external_login_credential_count(&mut self, user_id: i32)
+    -> Result<u32, IdentityError>;
+    async fn external_provider_admin_rows(
+        &mut self,
+    ) -> Result<Vec<ExternalProviderAdminView>, IdentityError>;
+    async fn update_external_provider(
+        &mut self,
+        provider_key: ExternalProviderKey,
+        expected_revision: u64,
+        update: &UpdateExternalProvider,
+        secret_ciphertext: Option<String>,
+        actor_id: i32,
+    ) -> Result<ExternalProviderAdminView, IdentityError>;
+    async fn rotate_external_provider_secret(
+        &mut self,
+        provider_key: ExternalProviderKey,
+        expected_revision: u64,
+        secret_ciphertext: String,
+        secret_key_version: u32,
+        actor_id: i32,
+    ) -> Result<ExternalProviderAdminView, IdentityError>;
+    async fn external_login_stats(
+        &mut self,
+        from_millis: u64,
+        to_millis: u64,
+    ) -> Result<Vec<ProviderStat>, IdentityError>;
     async fn apply(&mut self, command: IdentityWrite)
     -> Result<IdentityWriteResult, IdentityError>;
     async fn append_audit(&mut self, event: &AuditEvent) -> Result<(), IdentityError>;
@@ -280,6 +327,10 @@ pub enum IdentityLockKey {
     Reader(Uuid),
     Group(Uuid),
     User(i32),
+    ExternalIdentity {
+        provider_key: String,
+        subject: String,
+    },
     Center(Uuid),
     Flow(Uuid),
     Action(Uuid),
@@ -290,7 +341,10 @@ pub enum IdentityLockKey {
     Grant(Uuid),
     SecuritySession(Uuid),
     Family(Uuid),
-    Credential { issuer: String, jti: String },
+    Credential {
+        issuer: String,
+        jti: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -306,6 +360,10 @@ impl IdentityLockScope {
                 | IdentityLockKey::User(id)
                 | IdentityLockKey::Code(id) => *id <= 0,
                 IdentityLockKey::Credential { issuer, jti } => issuer.is_empty() || jti.is_empty(),
+                IdentityLockKey::ExternalIdentity {
+                    provider_key,
+                    subject,
+                } => provider_key.is_empty() || subject.is_empty(),
                 _ => false,
             })
         {
@@ -737,6 +795,20 @@ pub enum IdentityWrite {
         scopes: IdentityScopeSet,
     },
     CreateCenter(BrowserSessionSnapshot),
+    CreateExternalFlow(crate::domain::identity::external::ExternalFlowWrite),
+    ConsumeExternalFlow {
+        id: Uuid,
+    },
+    CreateExternalIdentity(crate::domain::identity::external::ExternalIdentityWrite),
+    DeleteExternalIdentity {
+        id: Uuid,
+        user_id: i32,
+    },
+    UpdateExternalIdentityLastLogin {
+        id: Uuid,
+        at: u64,
+    },
+    CreateExternalAccount(crate::domain::identity::external::NewExternalAccountWrite),
     AttachManagementSession {
         session_id: Uuid,
         sso_session_id: Uuid,

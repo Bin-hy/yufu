@@ -6,6 +6,8 @@ pub enum IdentityOperation {
     SiteSettingsReset,
     SiteAssetUpload,
     SiteAssetPreview,
+    ExternalProviderRead,
+    ExternalProviderConfigure,
 
     InvitationIssue,
     InvitationRevoke,
@@ -48,6 +50,8 @@ impl IdentityOperation {
         Self::SiteSettingsReset,
         Self::SiteAssetUpload,
         Self::SiteAssetPreview,
+        Self::ExternalProviderRead,
+        Self::ExternalProviderConfigure,
         Self::InvitationIssue,
         Self::InvitationRevoke,
         Self::PasswordResetIssue,
@@ -89,6 +93,8 @@ impl IdentityOperation {
             Self::SiteSettingsReset => ("POST", "/admin/site-settings/reset"),
             Self::SiteAssetUpload => ("POST", "/admin/site-assets"),
             Self::SiteAssetPreview => ("GET", "/admin/site-assets/{id}"),
+            Self::ExternalProviderRead => ("GET", "/admin/external-providers"),
+            Self::ExternalProviderConfigure => ("PUT", "/admin/external-providers/{provider}"),
             Self::AuditRead => ("GET", "/admin/audit-events"),
             Self::DeliveryRead => ("GET", "/admin/logout-deliveries"),
             Self::DeliveryRetry => ("POST", "/admin/logout-deliveries/{id}/retry"),
@@ -145,6 +151,8 @@ impl IdentityOperation {
             | Self::SiteSettingsReset
             | Self::SiteAssetUpload
             | Self::SiteAssetPreview => self.registration(),
+            Self::ExternalProviderRead => ("GET", "/admin/site-settings"),
+            Self::ExternalProviderConfigure => ("PUT", "/admin/site-settings"),
             Self::AuditRead | Self::DeliveryRead => ("GET", "/recordings"),
             Self::DeliveryRetry => ("PATCH", "/application"),
             Self::MigrationRead => ("GET", "/oidc/clients"),

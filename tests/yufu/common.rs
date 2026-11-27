@@ -115,11 +115,32 @@ pub struct IdentityFixture {
     container: Option<testcontainers::ContainerAsync<GenericImage>>,
 }
 
+type FixtureSetup = Box<
+    dyn FnOnce(
+            sea_orm::DatabaseConnection,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send,
+>;
+
 impl IdentityFixture {
     pub async fn start() -> Self {
         Self::start_configured(|_| {}).await
     }
     pub async fn start_configured(configure: impl FnOnce(&mut Config)) -> Self {
+        Self::start_inner(configure, None).await
+    }
+    pub async fn start_configured_with<F, Fut>(
+        configure: impl FnOnce(&mut Config),
+        setup: F,
+    ) -> Self
+    where
+        F: FnOnce(sea_orm::DatabaseConnection) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let setup: FixtureSetup = Box::new(move |db| Box::pin(setup(db)));
+        Self::start_inner(configure, Some(setup)).await
+    }
+    async fn start_inner(configure: impl FnOnce(&mut Config), setup: Option<FixtureSetup>) -> Self {
         use rsa::pkcs8::EncodePrivateKey;
         use yufu::migration::MigratorTrait;
         let (container, database_url) = get_postgres_container().await.unwrap();
@@ -127,6 +148,9 @@ impl IdentityFixture {
             .await
             .unwrap();
         yufu::migration::Migrator::up(&db, None).await.unwrap();
+        if let Some(setup) = setup {
+            setup(db.clone()).await;
+        }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let base_url = format!("http://{address}");

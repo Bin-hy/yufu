@@ -84,11 +84,11 @@ impl IntoResponse for AppError {
                 use crate::domain::identity::error::IdentityError;
                 let status = match reason {
                     IdentityError::Unauthenticated | IdentityError::LoginRequired => StatusCode::UNAUTHORIZED,
-                    IdentityError::Forbidden | IdentityError::CookieRequiresHttps | IdentityError::SelfApproval | IdentityError::AccessDenied | IdentityError::ConsentRequired => StatusCode::FORBIDDEN,
+                    IdentityError::Forbidden | IdentityError::CookieRequiresHttps | IdentityError::SelfApproval | IdentityError::AccessDenied | IdentityError::ConsentRequired | IdentityError::ExternalIdentityNotLinked => StatusCode::FORBIDDEN,
                     IdentityError::NotFound => StatusCode::NOT_FOUND,
-                    IdentityError::Conflict | IdentityError::AlreadyConsumed | IdentityError::OwnerRequired | IdentityError::LastAdministrator | IdentityError::ApprovalObsolete => StatusCode::CONFLICT,
+                    IdentityError::Conflict | IdentityError::AlreadyConsumed | IdentityError::OwnerRequired | IdentityError::LastAdministrator | IdentityError::ApprovalObsolete | IdentityError::LastCredential => StatusCode::CONFLICT,
                     IdentityError::Expired => StatusCode::GONE,
-                    IdentityError::InvalidInput | IdentityError::InvalidScope | IdentityError::InvalidImageFormat | IdentityError::InvalidImageContent | IdentityError::ImageLimitExceeded | IdentityError::AnimatedImageNotAllowed => StatusCode::BAD_REQUEST,
+                    IdentityError::InvalidInput | IdentityError::InvalidScope | IdentityError::ExternalStateInvalid | IdentityError::InvalidImageFormat | IdentityError::InvalidImageContent | IdentityError::ImageLimitExceeded | IdentityError::AnimatedImageNotAllowed => StatusCode::BAD_REQUEST,
                     IdentityError::DependencyUnavailable | IdentityError::DeadlineExceeded | IdentityError::CapacityExceeded | IdentityError::CommitUncertain => StatusCode::SERVICE_UNAVAILABLE,
                 };
                 tracing::warn!(%request_id, reason = reason.code(), "identity request rejected");

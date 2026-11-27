@@ -1,6 +1,7 @@
 use crate::service::identity::{
     account::AccountService,
     browser,
+    external::PublicProvider,
     repository::PgIdentityRepository,
     session::SessionService,
     sso::{LoginFlowProof, SsoService},
@@ -32,10 +33,13 @@ pub(crate) struct IdentityRequest {
 pub fn get_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/identity/csrf", get(csrf))
+        .route("/identity/external/providers", get(external_providers))
         .route("/identity/login", post(login))
         .route("/identity/logout", post(logout))
         .merge(super::account::get_routes())
         .merge(super::identity_console::get_routes())
+        .merge(super::identity_external::get_routes())
+        .merge(super::external_admin::get_routes())
         .merge(super::identity_actions::get_routes())
         .merge(super::enterprise_admin::get_routes())
         .merge(super::assignment::get_routes())
@@ -157,6 +161,10 @@ pub(crate) fn login_flow(
             })
         })
         .transpose()
+}
+
+async fn external_providers(State(state): State<AppState>) -> Json<Vec<PublicProvider>> {
+    Json(state.external_catalog())
 }
 
 async fn csrf(
