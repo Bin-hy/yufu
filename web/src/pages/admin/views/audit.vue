@@ -137,13 +137,13 @@ async function exportCsv() {
         <PageHeader
             title="身份审计"
             eyebrow="AUDIT"
-            description="按时间、操作者与结果检索已提交的账户、应用与授权操作摘要。此页面只读；审计记录保存在部署方数据库中。"
+            hint="只读检索已提交的账户、应用与授权操作摘要。"
         >
             <UiButton variant="outline" :loading="exporting" :disabled="exporting" @click="exportCsv">
                 <Download v-if="!exporting" :size="14" aria-hidden="true" />导出 CSV
             </UiButton>
             <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.refresh()">
-                <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />重新读取
+                <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />刷新
             </UiButton>
         </PageHeader>
 
@@ -156,7 +156,7 @@ async function exportCsv() {
                     <button class="filter-chip" type="button" :aria-pressed="resultFilter === 'failure'" @click="resultFilter = 'failure'">失败</button>
                 </div>
                 <span class="toolbar-spacer inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <Search :size="13" aria-hidden="true" />筛选在服务端执行 · 已加载 {{ items.length }} 条{{ hasMore ? '，还有更多' : '' }}
+                    <Search :size="13" aria-hidden="true" />服务端筛选 · {{ items.length }}
                 </span>
             </div>
             <div class="grid gap-3 border-b border-border px-5 py-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -192,7 +192,7 @@ async function exportCsv() {
                 :refreshing="refreshing"
                 :empty="!items.length"
                 empty-title="没有匹配的审计记录"
-                empty-description="放宽时间范围或清除筛选条件后再试。"
+                empty-description="调整时间或筛选条件后重试。"
                 :skeleton-rows="4"
                 @retry="list.refresh()"
             >

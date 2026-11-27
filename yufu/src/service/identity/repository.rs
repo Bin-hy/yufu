@@ -236,6 +236,10 @@ pub trait IdentityTransaction: SecurityTransaction {
         &mut self,
         id: Uuid,
     ) -> Result<Option<crate::domain::identity::account::InvitationSnapshot>, IdentityError>;
+    async fn list_invitations(
+        &mut self,
+        query: crate::domain::identity::account::InvitationListQuery,
+    ) -> Result<Vec<crate::domain::identity::account::InvitationRow>, IdentityError>;
     async fn load_reset(
         &mut self,
         id: Uuid,

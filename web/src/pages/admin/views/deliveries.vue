@@ -80,10 +80,10 @@ function reload() {
         <PageHeader
             title="退出通知"
             eyebrow="DELIVERIES"
-            description="通知结果用于运维追踪。授权撤销在通知发送前已经生效，投递失败不会影响本地退出。"
+            hint="授权撤销先于通知生效；投递失败不影响本地退出。"
         >
             <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="reload">
-                <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />重新读取
+                <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />刷新
             </UiButton>
         </PageHeader>
         <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
@@ -92,17 +92,16 @@ function reload() {
             <article class="metric-card">
                 <span class="metric-label"><Send :size="13" aria-hidden="true" />进行中</span>
                 <strong class="metric-value">{{ stats.pending + stats.leased + stats.retry }}</strong>
-                <span class="metric-meta">等待发送 {{ stats.pending }} · 处理中 {{ stats.leased }} · 待重试 {{ stats.retry }}</span>
+                <span class="metric-meta">等待 {{ stats.pending }} · 处理中 {{ stats.leased }} · 重试 {{ stats.retry }}</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><TriangleAlert :size="13" aria-hidden="true" />需要关注</span>
                 <strong class="metric-value" :class="attention ? '!text-destructive' : ''">{{ attention }}</strong>
-                <span class="metric-meta">全库统计：失败 {{ stats.permanent_failure }} · 待重试 {{ stats.retry }} · 过期 {{ stats.expired }}</span>
+                <span class="metric-meta">失败 {{ stats.permanent_failure }} · 重试 {{ stats.retry }} · 过期 {{ stats.expired }}</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><RotateCcw :size="13" aria-hidden="true" />已送达</span>
                 <strong class="metric-value">{{ stats.delivered }}</strong>
-                <span class="metric-meta">重试按原目标排队，不会撤销已生效的本地授权</span>
             </article>
         </div>
 
@@ -126,7 +125,7 @@ function reload() {
                         {{ deliveryStatusName(value) }}
                     </button>
                 </div>
-                <span class="toolbar-spacer text-[11px] text-muted-foreground">已加载 {{ items.length }} 条{{ hasMore ? '，还有更多' : '' }}</span>
+                <span class="toolbar-spacer text-[11px] text-muted-foreground">已加载 {{ items.length }}</span>
             </div>
             <DataState
                 :status="status"
@@ -134,7 +133,7 @@ function reload() {
                 :refreshing="refreshing"
                 :empty="!items.length"
                 :empty-title="statusFilter === 'all' ? '暂无退出通知' : '该状态下没有通知'"
-                :empty-description="statusFilter === 'all' ? '应用登记退出通知地址后，投递结果会显示在这里。' : '切换到其他状态，或查看全部通知。'"
+                :empty-description="statusFilter === 'all' ? '应用登记退出通知地址后会显示在这里。' : '切换到其他状态或查看全部。'"
                 :skeleton-rows="3"
                 @retry="list.refresh()"
             >

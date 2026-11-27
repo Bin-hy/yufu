@@ -27,6 +27,7 @@ mod repository_authorization;
 mod repository_cleanup;
 mod repository_console;
 mod repository_external;
+mod repository_invitation;
 mod repository_migration;
 pub mod repository_outbox;
 mod repository_protocol;

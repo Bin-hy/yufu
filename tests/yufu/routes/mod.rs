@@ -25,6 +25,7 @@ mod identity_developer;
 mod identity_dispatcher;
 mod identity_governance;
 mod identity_introspection;
+mod identity_invitations;
 mod identity_legacy;
 mod identity_logout;
 mod identity_logout_transport;

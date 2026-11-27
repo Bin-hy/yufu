@@ -34,8 +34,8 @@ function back() {
             <p class="text-sm text-muted-foreground leading-6 mt-4">
                 {{
                     status === 403
-                        ? '当前账户没有访问权限，请联系管理员。'
-                        : '地址可能已经变更，你可以返回工作台继续。'
+                        ? '当前账户无访问权限。'
+                        : '地址可能已变更。'
                 }}
             </p>
             <div class="flex justify-center gap-3 mt-8">

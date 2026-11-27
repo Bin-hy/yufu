@@ -19,6 +19,7 @@ const mocked = vi.hoisted(() => ({
     groupChange: vi.fn(), searchGroups: vi.fn(), listAudit: vi.fn(), searchAudit: vi.fn(),
     listDeliveries: vi.fn(), retryDelivery: vi.fn(), getOverview: vi.fn(), listMigrations: vi.fn(),
     scanMigrations: vi.fn(), adoptLegacy: vi.fn(), getAssignments: vi.fn(), setAssignment: vi.fn(), setTestUser: vi.fn(),
+    listInvitations: vi.fn(), reissueInvitation: vi.fn(),
 }))
 vi.mock('@/pages/admin/api', () => mocked)
 const overview = {
@@ -33,6 +34,7 @@ beforeEach(() => {
     resetSession(); vi.clearAllMocks()
     useUserStore(pinia).setCenterSession({ user_id: 12, sub: '12', username: 'operator', nickname: '操作人', person_kind: 'employee', developer_enabled: true, administrator: true, super_administrator: false, sso_session_id: 'root', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' })
     mocked.listAccounts.mockResolvedValue({ items: [], next: null })
+    mocked.listInvitations.mockResolvedValue({ items: [], next: null })
     mocked.listGroups.mockResolvedValue({ items: [], next: null })
     mocked.searchAudit.mockResolvedValue({ items: [], next: null })
     mocked.listDeliveries.mockResolvedValue({ items: [], next: null })
@@ -58,7 +60,7 @@ async function render(component: Component, path: string): Promise<{ page: VueWr
     return { page, router }
 }
 function dialogButton(label: string) {
-    return [...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find(b => b.textContent?.trim() === label)!
+    return [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button, [role="alertdialog"] button')].find(b => b.textContent?.trim() === label)!
 }
 
 it('账户状态筛选在服务端执行并写入地址栏，批量停用经确认后逐个提交', async () => {
@@ -68,24 +70,58 @@ it('账户状态筛选在服务端执行并写入地址栏，批量停用经确�
     ]
     mocked.listAccounts.mockResolvedValue({ items: accounts, next: null })
     const { page, router } = await render(Accounts, '/admin/accounts')
-    await page.findAll('.filter-chip').find(b => b.text() === '停用')!.trigger('click')
+    const accountsPanel = page.get('.account-directory')
+    await accountsPanel.findAll('.filter-chip').find(b => b.text() === '停用')!.trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.query.status).toBe('disabled')
     const lastCall = mocked.listAccounts.mock.calls.at(-1)!
     expect(lastCall[3]).toBe(false)
-    await page.findAll('.filter-chip').find(b => b.text() === '全部')!.trigger('click')
+    await accountsPanel.findAll('.filter-chip').find(b => b.text() === '全部')!.trigger('click')
     await flushPromises()
     expect(mocked.listAccounts.mock.calls.at(-1)![3]).toBeUndefined()
 
     mocked.setAccount.mockResolvedValue({})
-    await page.find('thead input[type="checkbox"]').setValue(true)
-    await page.findAll('button').find(b => b.text() === '批量停用')!.trigger('click')
+    await accountsPanel.find('thead input[type="checkbox"]').setValue(true)
+    await accountsPanel.findAll('button').find(b => b.text() === '批量停用')!.trigger('click')
     await flushPromises()
     expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('2 个账户')
     dialogButton('停用 2 个账户').click(); await flushPromises()
     expect(mocked.setAccount).toHaveBeenCalledTimes(2)
     expect(mocked.setAccount).toHaveBeenCalledWith(21, 'enabled', false, 3)
     expect(mocked.setAccount).toHaveBeenCalledWith(22, 'enabled', false, 7)
+})
+it('邀请记录展示状态，筛选走服务端，撤销与重新签发刷新列表', async () => {
+    const pending = {
+        id: '11111111-1111-1111-1111-111111111111', purpose: 'onboarding', person_kind: 'employee',
+        developer_grant: false, target_user_id: null, target_username: null, target_nickname: null,
+        created_by: 12, creator_username: 'operator', creator_nickname: '操作人', created_at: 100,
+        expires_at: 9999999999, status: 'pending', accepted_user_id: null, accepted_username: null,
+        accepted_nickname: null, accepted_at: null, revoked_at: null,
+    }
+    const accepted = {
+        ...pending, id: '22222222-2222-2222-2222-222222222222', status: 'accepted',
+        accepted_user_id: 31, accepted_username: 'member', accepted_nickname: '成员甲', accepted_at: 200,
+    }
+    mocked.listInvitations.mockResolvedValue({ items: [pending, accepted], next: null })
+    mocked.revokeAction.mockResolvedValue({ revoked: true })
+    mocked.reissueInvitation.mockResolvedValue({ id: '33333333-3333-3333-3333-333333333333', secret: 'new-secret', expires_at: 9999999999 })
+    const { page } = await render(Accounts, '/admin/accounts')
+    expect(page.text()).toContain('邀请记录')
+    expect(page.text()).toContain('待用')
+    expect(page.text()).toContain('成员甲')
+    const invitations = page.get('.invitation-history')
+    await invitations.findAll('.filter-chip').find(b => b.text() === '待用')!.trigger('click')
+    await flushPromises()
+    expect(mocked.listInvitations.mock.calls.at(-1)![2].status).toBe('pending')
+    await invitations.findAll('button').find(b => b.text().includes('重新签发'))!.trigger('click')
+    await flushPromises()
+    dialogButton('重新签发').click(); await flushPromises()
+    expect(mocked.reissueInvitation).toHaveBeenCalledWith(pending.id)
+    expect(page.text()).toContain('new-secret')
+    await invitations.findAll('button').find(b => b.text() === '撤销')!.trigger('click')
+    await flushPromises()
+    dialogButton('撤销邀请').click(); await flushPromises()
+    expect(mocked.revokeAction).toHaveBeenCalledWith(pending.id, false)
 })
 it('移除组成员需要确认并说明影响，批量添加成员沿用回执中的新修订号', async () => {
     const group = {
@@ -134,7 +170,7 @@ it('退出通知状态筛选走服务端，统计卡展示全库数字，重试�
     ], next: null })
     const { page, router } = await render(Deliveries, '/admin/deliveries')
     expect(page.text()).toContain('需要关注')
-    expect(page.text()).toContain('失败 3 · 待重试 2 · 过期 1')
+    expect(page.text()).toContain('失败 3 · 重试 2 · 过期 1')
     const retryButtons = page.findAll('.desktop-table button').filter(b => b.text() === '按原目标重新排队')
     expect(retryButtons).toHaveLength(1)
     await page.findAll('.filter-chip').find(b => b.text() === '发送失败')!.trigger('click')

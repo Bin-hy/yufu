@@ -2,9 +2,9 @@
 defineOptions({ name: 'AdminAccounts' })
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Copy, Link2, Search, UserPlus, Users } from '@lucide/vue'
-import { listAccounts, searchAccounts, setAccount, issueInvitation, issueReset, revokeAction, setCandidate } from '../api'
-import type { EnterpriseAccount, IssuedAction } from '../api/type'
+import { Copy, History, Link2, RotateCcw, Search, UserPlus, Users } from '@lucide/vue'
+import { listAccounts, searchAccounts, setAccount, issueInvitation, issueReset, revokeAction, setCandidate, listInvitations, reissueInvitation } from '../api'
+import type { EnterpriseAccount, InvitationRecord, IssuedAction } from '../api/type'
 import { useCursorList } from '@/composables/use-cursor-list'
 import { useRowMutation } from '@/composables/use-row-mutation'
 import { useRouteFilters } from '@/composables/use-route-filters'
@@ -16,6 +16,7 @@ import { formatUntil, nowSeconds, subscribeClock } from '@/utils/time'
 import { personKindName } from '@/lib/identity-labels'
 import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
@@ -45,6 +46,7 @@ watch(
 const unsubscribeClock = subscribeClock()
 onBeforeUnmount(() => {
     window.clearTimeout(directoryTimer)
+    window.clearTimeout(invitationTimer)
     unsubscribeClock()
 })
 const list = useCursorList<EnterpriseAccount, number>(
@@ -60,6 +62,62 @@ const list = useCursorList<EnterpriseAccount, number>(
         ),
 ),
     { items, hasMore, status, error, refreshing } = list
+const invitationStatus = ref<'all' | 'pending' | 'accepted' | 'revoked' | 'expired'>('all')
+const invitationPurpose = ref<'all' | 'onboarding' | 'qualification'>('all')
+const invitationPerson = ref<'all' | 'employee' | 'collaborator'>('all')
+const invitationQuery = ref('')
+const invitationSearch = ref('')
+let invitationTimer: number | undefined
+watch(invitationQuery, (value) => {
+    window.clearTimeout(invitationTimer)
+    invitationTimer = window.setTimeout(() => {
+        invitationSearch.value = value.trim()
+    }, 240)
+})
+const invitations = useCursorList<InvitationRecord, string>(
+    () =>
+        `admin-invitations:${invitationStatus.value}:${invitationPurpose.value}:${invitationPerson.value}:${invitationSearch.value}`,
+    (after, signal) =>
+        listInvitations(after, signal, {
+            status: invitationStatus.value === 'all' ? undefined : invitationStatus.value,
+            purpose: invitationPurpose.value === 'all' ? undefined : invitationPurpose.value,
+            person_kind: invitationPerson.value === 'all' ? undefined : invitationPerson.value,
+            q: invitationSearch.value || undefined,
+        }),
+)
+const {
+    items: invitationItems,
+    hasMore: invitationHasMore,
+    status: invitationState,
+    error: invitationError,
+    refreshing: invitationRefreshing,
+} = invitations
+function invitationStatusName(status: InvitationRecord['status']) {
+    return { pending: '待用', accepted: '已接受', revoked: '已撤销', expired: '已过期' }[status]
+}
+function invitationStatusClass(status: InvitationRecord['status']) {
+    return {
+        pending: 'status-warning',
+        accepted: 'status-success',
+        revoked: 'status-danger',
+        expired: 'status-muted',
+    }[status]
+}
+function invitationPurposeName(purpose: InvitationRecord['purpose']) {
+    return purpose === 'qualification' ? '资格邀请' : '开户邀请'
+}
+function invitationTarget(record: InvitationRecord) {
+    return record.target_nickname || record.target_username || '任何人'
+}
+function invitationActor(record: InvitationRecord) {
+    return record.creator_nickname || record.creator_username
+}
+function invitationAccepted(record: InvitationRecord) {
+    return record.accepted_nickname || record.accepted_username || ''
+}
+function formatTime(value: number | null) {
+    return value ? new Date(value * 1000).toLocaleString('zh-CN') : ''
+}
 const loadAccountOptions = async (query: string, signal: AbortSignal): Promise<PickerOption[]> => {
     const page = await searchAccounts(query, signal)
     return page.items.map(accountOption)
@@ -168,6 +226,7 @@ async function invite() {
             opened.value = false
             clearInvitationTarget()
             form.developer_grant = false
+            void invitations.refresh()
             emitToast({ type: 'success', message: '一次性邀请已签发' })
         },
     )
@@ -262,8 +321,42 @@ async function revoke() {
     }, () => revokeAction(action, reset))
     if (saved) {
         issued.clear()
+        void invitations.refresh()
         emitToast({ type: 'success', message: '链接已撤销' })
     }
+}
+async function revokeHistory(record: InvitationRecord) {
+    const saved = await mutation.confirmRow(
+        `invitation:${record.id}:revoke`,
+        {
+            title: '撤销待用邀请',
+            content: '撤销后该邀请链接立即失效；其他并行链接不受影响。',
+            confirmText: '撤销邀请',
+            destructive: true,
+        },
+        () => revokeAction(record.id, false),
+    )
+    if (!saved) return
+    await invitations.refresh()
+    emitToast({ type: 'success', message: '邀请已撤销' })
+}
+async function reissue(record: InvitationRecord) {
+    let issuedAction: IssuedAction | null = null
+    const saved = await mutation.confirmRow(
+        `invitation:${record.id}:reissue`,
+        {
+            title: '重新签发邀请',
+            content: '将创建一条新邀请记录并生成新链接；原记录和其他待用链接仍保持有效。',
+            confirmText: '重新签发',
+        },
+        async () => {
+            issuedAction = await reissueInvitation(record.id)
+        },
+    )
+    if (!saved || !issuedAction) return
+    result.value = { action: issuedAction, reset: false }
+    await invitations.refresh()
+    emitToast({ type: 'success', message: '新邀请链接已签发' })
 }
 
 async function allowCandidate() {
@@ -286,7 +379,7 @@ async function allowCandidate() {
         <PageHeader
             title="企业账户与邀请"
             eyebrow="DIRECTORY"
-            description="受控邀请创建或扩充账户资格；开发者资格不自动授予生产应用访问。"
+            hint="受控邀请创建或扩充账户资格；开发者资格不自动获得生产访问。"
         >
             <UiButton @click="opened = true">
                 <UserPlus :size="14" aria-hidden="true" />签发邀请
@@ -315,7 +408,7 @@ async function allowCandidate() {
                         <Copy :size="14" aria-hidden="true" />
                     </button>
                 </div>
-                <p class="form-help">通过企业认可的渠道交给指定接收人。离开页面后链接会从界面清除，但撤销前仍然有效。</p>
+                <p class="form-help">一次性链接，请通过可信渠道交给接收人；撤销前有效。</p>
                 <div class="flex flex-wrap gap-2">
                     <UiButton variant="outline" :disabled="pending" :loading="pending" @click="revoke">提前撤销此链接</UiButton>
                     <UiButton variant="ghost" @click="issued.clear()">隐藏链接</UiButton>
@@ -323,7 +416,184 @@ async function allowCandidate() {
             </div>
         </section>
 
-        <section class="panel">
+        <section class="panel mb-5 invitation-history">
+            <header class="panel-heading">
+                <h2 class="flex items-center gap-2">
+                    <History :size="15" aria-hidden="true" />邀请记录
+                </h2>
+                <span class="status-badge status-muted">
+                    {{ invitationItems.length }}{{ invitationHasMore ? '+' : '' }}
+                </span>
+            </header>
+            <div class="table-toolbar">
+                <div class="search-box">
+                    <Search :size="15" aria-hidden="true" />
+                    <UiInput
+                        v-model="invitationQuery"
+                        clearable
+                        placeholder="搜索目标、创建人或接受人…"
+                        aria-label="搜索邀请记录"
+                    />
+                </div>
+                <div class="filter-chips" role="group" aria-label="邀请状态筛选">
+                    <button class="filter-chip" type="button" :aria-pressed="invitationStatus === 'all'" @click="invitationStatus = 'all'">全部</button>
+                    <button class="filter-chip" type="button" :aria-pressed="invitationStatus === 'pending'" @click="invitationStatus = 'pending'">待用</button>
+                    <button class="filter-chip" type="button" :aria-pressed="invitationStatus === 'accepted'" @click="invitationStatus = 'accepted'">已接受</button>
+                    <button class="filter-chip" type="button" :aria-pressed="invitationStatus === 'revoked'" @click="invitationStatus = 'revoked'">已撤销</button>
+                    <button class="filter-chip" type="button" :aria-pressed="invitationStatus === 'expired'" @click="invitationStatus = 'expired'">已过期</button>
+                </div>
+                <UiSelect v-model="invitationPurpose" aria-label="邀请用途">
+                    <option value="all">全部用途</option>
+                    <option value="onboarding">开户邀请</option>
+                    <option value="qualification">资格邀请</option>
+                </UiSelect>
+                <UiSelect v-model="invitationPerson" aria-label="人员类型">
+                    <option value="all">全部人员</option>
+                    <option value="employee">企业员工</option>
+                    <option value="collaborator">受邀合作方</option>
+                </UiSelect>
+            </div>
+            <DataState
+                :status="invitationState"
+                :error="invitationError"
+                :refreshing="invitationRefreshing"
+                :empty="!invitationItems.length"
+                :empty-title="invitationStatus !== 'all' || invitationPurpose !== 'all' || invitationPerson !== 'all' || invitationQuery ? '没有匹配的邀请' : '还没有邀请记录'"
+                :empty-description="invitationStatus !== 'all' || invitationPurpose !== 'all' || invitationPerson !== 'all' || invitationQuery ? '换个关键词或筛选条件。' : '签发邀请后会在这里保留记录。'"
+                :skeleton-rows="3"
+                @retry="invitations.refresh()"
+            >
+                <div class="table-scroll desktop-table">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>状态</th>
+                                <th>邀请</th>
+                                <th>目标账户</th>
+                                <th>创建</th>
+                                <th>接受 / 失效</th>
+                                <th class="text-right">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="record in invitationItems" :key="record.id">
+                                <td>
+                                    <span class="status-badge" :class="invitationStatusClass(record.status)">
+                                        {{ invitationStatusName(record.status) }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="flex flex-wrap items-center gap-1.5">
+                                        <span class="cell-primary">{{ invitationPurposeName(record.purpose) }}</span>
+                                        <span class="status-badge status-muted">{{ record.person_kind === 'employee' ? '员工' : '合作方' }}</span>
+                                        <span v-if="record.developer_grant" class="status-badge status-info">开发者</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <p class="cell-primary">{{ invitationTarget(record) }}</p>
+                                    <p v-if="record.target_username" class="cell-muted mt-0.5">{{ record.target_username }}</p>
+                                </td>
+                                <td>
+                                    <p class="cell-primary">{{ invitationActor(record) }}</p>
+                                    <p class="cell-muted mt-0.5">{{ formatTime(record.created_at) }}</p>
+                                </td>
+                                <td>
+                                    <template v-if="record.status === 'accepted'">
+                                        <p class="cell-primary">{{ invitationAccepted(record) || '已接受' }}</p>
+                                        <p class="cell-muted mt-0.5">{{ formatTime(record.accepted_at) }}</p>
+                                    </template>
+                                    <template v-else-if="record.status === 'revoked'">
+                                        <p class="cell-primary">已撤销</p>
+                                        <p class="cell-muted mt-0.5">{{ formatTime(record.revoked_at) }}</p>
+                                    </template>
+                                    <template v-else>
+                                        <p class="cell-primary">{{ record.status === 'expired' ? '已过期' : '有效至' }}</p>
+                                        <p class="cell-muted mt-0.5">{{ formatTime(record.expires_at) }}</p>
+                                    </template>
+                                </td>
+                                <td class="cell-actions">
+                                    <div class="table-actions">
+                                        <UiButton
+                                            v-if="record.status === 'pending'"
+                                            variant="ghost"
+                                            size="sm"
+                                            :disabled="pending"
+                                            :loading="rowPending(`invitation:${record.id}:revoke`)"
+                                            @click="revokeHistory(record)"
+                                        >
+                                            撤销
+                                        </UiButton>
+                                        <UiButton
+                                            variant="ghost"
+                                            size="sm"
+                                            :disabled="pending"
+                                            :loading="rowPending(`invitation:${record.id}:reissue`)"
+                                            @click="reissue(record)"
+                                        >
+                                            <RotateCcw :size="13" aria-hidden="true" />重新签发
+                                        </UiButton>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mobile-list">
+                    <article v-for="record in invitationItems" :key="record.id" class="list-card">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <h3 class="list-title">{{ invitationPurposeName(record.purpose) }}</h3>
+                                    <span class="status-badge" :class="invitationStatusClass(record.status)">
+                                        {{ invitationStatusName(record.status) }}
+                                    </span>
+                                    <span v-if="record.developer_grant" class="status-badge status-info">开发者</span>
+                                </div>
+                                <p class="list-meta">{{ record.person_kind === 'employee' ? '员工' : '合作方' }} · {{ invitationTarget(record) }}</p>
+                                <p class="list-meta">{{ invitationActor(record) }} · {{ formatTime(record.created_at) }}</p>
+                                <p class="list-meta">
+                                    <template v-if="record.status === 'accepted'">
+                                        接受：{{ invitationAccepted(record) || '已接受' }} · {{ formatTime(record.accepted_at) }}
+                                    </template>
+                                    <template v-else-if="record.status === 'revoked'">
+                                        撤销：{{ formatTime(record.revoked_at) }}
+                                    </template>
+                                    <template v-else>有效期至：{{ formatTime(record.expires_at) }}</template>
+                                </p>
+                            </div>
+                        </div>
+                        <div class="list-row-actions">
+                            <UiButton
+                                v-if="record.status === 'pending'"
+                                variant="outline"
+                                size="sm"
+                                :disabled="pending"
+                                :loading="rowPending(`invitation:${record.id}:revoke`)"
+                                @click="revokeHistory(record)"
+                            >
+                                撤销
+                            </UiButton>
+                            <UiButton
+                                variant="outline"
+                                size="sm"
+                                :disabled="pending"
+                                :loading="rowPending(`invitation:${record.id}:reissue`)"
+                                @click="reissue(record)"
+                            >
+                                重新签发
+                            </UiButton>
+                        </div>
+                    </article>
+                </div>
+                <div v-if="invitationHasMore" class="flex justify-center border-t border-border p-4">
+                    <UiButton variant="outline" :loading="invitationRefreshing" :disabled="invitationRefreshing" @click="invitations.next()">
+                        加载更多邀请
+                    </UiButton>
+                </div>
+            </DataState>
+        </section>
+
+        <section class="panel account-directory">
             <div class="table-toolbar">
                 <div class="search-box">
                     <Search :size="15" aria-hidden="true" />
@@ -350,7 +620,7 @@ async function allowCandidate() {
                 :refreshing="refreshing"
                 :empty="!items.length"
                 :empty-title="filters.values.value.q || statusFilter !== 'all' ? '没有匹配的账户' : '还没有企业账户'"
-                :empty-description="filters.values.value.q || statusFilter !== 'all' ? '换个关键词，或切换状态筛选。' : '签发第一张企业邀请，受控创建账户。'"
+                :empty-description="filters.values.value.q || statusFilter !== 'all' ? '换个关键词或状态筛选。' : '签发第一张企业邀请。'"
                 :skeleton-rows="3"
                 @retry="list.refresh()"
             >
@@ -454,11 +724,14 @@ async function allowCandidate() {
 
         <section class="panel mt-5">
             <header class="panel-heading">
-                <div><h2>合作方候选可见性</h2><p>只为明确合作关系授予候选可见性，不开放企业人员目录。</p></div>
+                <h2 class="flex items-center gap-2">
+                    合作方候选可见性
+                    <InfoHint text="只为明确合作关系授予候选可见性，不开放企业人员目录。" />
+                </h2>
                 <Users :size="18" class="text-muted-foreground" aria-hidden="true" />
             </header>
             <form class="surface-body flex flex-wrap items-end gap-3" @submit.prevent="allowCandidate">
-                <UiFormField id="candidate-requester" label="请求方账户" class="min-w-[220px] flex-1" required hint="需要看到候选人的合作方或开发者。">
+                <UiFormField id="candidate-requester" label="请求方账户" class="min-w-[220px] flex-1" required>
                     <EntityPicker
                         id="candidate-requester"
                         :model-value="candidate.requester"
@@ -471,7 +744,7 @@ async function allowCandidate() {
                         @select="(option) => chooseCandidate('requester', option)"
                     />
                 </UiFormField>
-                <UiFormField id="candidate-target" label="候选账户" class="min-w-[220px] flex-1" required hint="被搜索和选择的合作方账户。">
+                <UiFormField id="candidate-target" label="候选账户" class="min-w-[220px] flex-1" required>
                     <EntityPicker
                         id="candidate-target"
                         :model-value="candidate.target"

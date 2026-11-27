@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'AdminMigrations' })
 import { reactive, ref } from 'vue'
-import { ArrowLeft, ArrowRight, ScanSearch, ShieldCheck } from '@lucide/vue'
+import { ArrowLeft, ArrowRight, ScanSearch } from '@lucide/vue'
 import { listMigrations, scanMigrations, adoptLegacy, searchAccounts } from '../api'
 import type { LegacyClient, Adoption } from '../api/type'
 import { emptyConfig, type RegistrationReceipt } from '@/pages/developer/api/type'
@@ -207,21 +207,14 @@ function conflictTitle(kind: string) {
         <PageHeader
             title="历史接入纳管"
             eyebrow="GOVERNANCE"
-            description="扫描记录关联与冲突，明确选择负责人、保留环境及分配后纳入统一治理。"
+            hint="纳管保留选定环境原 Client ID 与密钥，撤销旧授权，并为另一环境补建配置。"
         >
-            <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.refresh()">重新读取</UiButton>
+            <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="list.refresh()">刷新</UiButton>
             <UiButton :disabled="pending" :loading="pending" @click="scan">
-                <ScanSearch v-if="!pending" :size="14" aria-hidden="true" />扫描首批历史关联
+                <ScanSearch v-if="!pending" :size="14" aria-hidden="true" />扫描历史接入
             </UiButton>
         </PageHeader>
         <p v-if="writeError" role="alert" class="form-alert mb-4">{{ writeError }}</p>
-
-        <div class="inline-notice mb-5">
-            <ShieldCheck :size="15" class="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
-            <p>
-                纳管会保留选定环境的原 Client ID 与密钥，撤销旧授权，并为另一环境补建配置。执行前请确认负责人、保留环境与生产分配范围。
-            </p>
-        </div>
 
         <section v-if="receipt" class="panel mb-5 border-success/30">
             <header class="panel-heading bg-success/[0.04]">
@@ -356,7 +349,7 @@ function conflictTitle(kind: string) {
                 :refreshing="refreshing"
                 :empty="!items.length"
                 empty-title="没有待纳管的历史接入"
-                empty-description="运行扫描后，历史客户端会显示在这里。"
+                empty-description="运行扫描后显示结果。"
                 :skeleton-rows="3"
                 @retry="list.refresh()"
             >

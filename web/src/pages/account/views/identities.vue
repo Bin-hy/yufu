@@ -1,8 +1,10 @@
 <script setup lang="ts">
 defineOptions({ name: 'AccountIdentities' })
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
-import { ShieldCheck, Unlink } from '@lucide/vue'
+import { useRoute } from 'vue-router'
+import { KeyRound, Link2, ShieldCheck, Unlink } from '@lucide/vue'
 import ExternalProviderIcon from '@/components/brand/external-provider-icon.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import {
     getExternalIdentities,
     getExternalProviders,
@@ -22,6 +24,7 @@ const loading = ref(true)
 const error = ref('')
 const pending = ref('')
 const controller = new AbortController()
+const route = useRoute()
 
 const bindable = computed(() =>
     providers.value.filter(provider => provider.mode === 'oauth' && !identities.value.some(identity => identity.provider_key === provider.key)),
@@ -45,8 +48,27 @@ async function load() {
     }
 }
 
-onMounted(load)
+onMounted(async () => {
+    await load()
+    applyQueryFeedback()
+})
 onScopeDispose(() => controller.abort())
+
+function providerLabel(key: string) {
+    return providers.value.find(provider => provider.key === key)?.label ?? key
+}
+function applyQueryFeedback() {
+    const bound = typeof route.query.bound === 'string' ? route.query.bound : ''
+    if (bound) emitToast({ type: 'success', message: `${providerLabel(bound)} 已绑定` })
+    const failure = typeof route.query.error === 'string' ? route.query.error : ''
+    if (!failure) return
+    const provider = typeof route.query.bind === 'string' ? route.query.bind : ''
+    const prefix = provider ? `${providerLabel(provider)} ` : ''
+    error.value =
+        failure === 'external_start_failed'
+            ? `${prefix}绑定未开始，账户已创建，请稍后重试`
+            : `${prefix}绑定未完成，账户仍可正常使用`
+}
 
 async function bind(provider: ExternalProvider) {
     if (pending.value) return
@@ -100,7 +122,7 @@ function date(value: number | null) {
         <PageHeader
             title="第三方身份"
             eyebrow="IDENTITIES"
-            description="使用 GitHub、QQ 或微信身份登录 Yufu，无需额外记忆密码。"
+            hint="第三方账号只用于认证身份；下游应用仍然只看到 Yufu 统一身份。"
         />
 
         <p v-if="error" role="alert" class="form-alert mb-4">{{ error }}</p>
@@ -109,15 +131,15 @@ function date(value: number | null) {
             <div class="section-stack">
                 <section class="panel">
                     <header class="panel-heading">
-                        <div>
-                            <h2>已绑定身份</h2>
-                            <p>每个第三方身份只能绑定一个 Yufu 账户。</p>
-                        </div>
+                        <h2 class="flex items-center gap-2">
+                            已绑定身份
+                            <InfoHint text="每个第三方身份只能绑定一个 Yufu 账户。" />
+                        </h2>
                         <span class="status-badge status-brand">{{ identities.length }}</span>
                     </header>
                     <div v-if="loading" class="surface-body text-sm text-muted-foreground">正在读取…</div>
                     <div v-else-if="!identities.length" class="surface-body text-sm text-muted-foreground">
-                        暂无绑定的第三方身份。绑定后可以直接用第三方账号登录。
+                        暂无绑定身份
                     </div>
                     <ul v-else class="divide-y divide-border">
                         <li
@@ -154,10 +176,10 @@ function date(value: number | null) {
 
                 <section v-if="bindable.length || nativeProviders.length" class="panel">
                     <header class="panel-heading">
-                        <div>
-                            <h2>绑定新的第三方身份</h2>
-                            <p>绑定过程会跳转到对应平台完成授权，然后返回 Yufu。</p>
-                        </div>
+                        <h2 class="flex items-center gap-2">
+                            绑定新身份
+                            <InfoHint text="绑定过程会跳转到对应平台完成授权，然后返回 Yufu。" />
+                        </h2>
                         <ShieldCheck :size="18" class="text-muted-foreground" aria-hidden="true" />
                     </header>
                     <div class="surface-body space-y-4">
@@ -177,7 +199,7 @@ function date(value: number | null) {
                             </UiButton>
                         </div>
                         <p v-if="nativeProviders.length" class="text-[11px] leading-5 text-muted-foreground">
-                            微信身份请在 Yufu 微信小程序中绑定；桌面浏览器无法直接调用微信登录。
+                            微信身份请在小程序中绑定。
                         </p>
                     </div>
                 </section>
@@ -189,9 +211,9 @@ function date(value: number | null) {
                         <ShieldCheck :size="15" class="text-success" aria-hidden="true" />安全提示
                     </p>
                     <ul class="mt-3 space-y-2 text-[11px] leading-5 text-muted-foreground">
-                        <li>第三方账号只用于证明身份，不会获得 Yufu 管理权限。</li>
-                        <li>不要仅凭相同昵称或邮箱自动合并账户；绑定必须由已登录用户主动完成。</li>
-                        <li>如果这是最后一个登录方式，请先设置密码或绑定其他身份再解绑。</li>
+                        <li class="flex items-center gap-2"><ShieldCheck :size="12" class="shrink-0" aria-hidden="true" />仅证明身份，不授予管理权限</li>
+                        <li class="flex items-center gap-2"><Link2 :size="12" class="shrink-0" aria-hidden="true" />绑定必须由已登录用户主动完成</li>
+                        <li class="flex items-center gap-2"><KeyRound :size="12" class="shrink-0" aria-hidden="true" />保留至少一个可用登录方式</li>
                     </ul>
                 </section>
             </aside>

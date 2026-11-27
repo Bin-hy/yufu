@@ -5,6 +5,7 @@ import type { EnvironmentConfigField } from '../api/validation'
 import UiInput from '@/components/ui/input/input.vue'
 import UiSelect from '@/components/ui/select/select.vue'
 import UiFormField from '@/components/ui/form-field/form-field.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 
 const props = defineProps<{
     prefix: string
@@ -74,10 +75,12 @@ const count = (value: string) => value.split('\n').filter(Boolean).length
             :id="props.prefix + '-launch-url'"
             label="应用启动地址"
             optional
-            :hint="'填写应用首页；' + uriHint + ' 留空时成员应用卡片不提供启动入口。生产变更经审批后生效。'"
             :error="errorFor('launch_url')"
             :error-id="errorId('launch_url')"
         >
+            <template #aside>
+                <InfoHint :text="'填写应用首页；' + uriHint + ' 留空时成员应用卡片不提供启动入口。生产变更经审批后生效。'" />
+            </template>
             <UiInput
                 :id="props.prefix + '-launch-url'"
                 v-model="launchUrl"
@@ -93,7 +96,6 @@ const count = (value: string) => value.split('\n').filter(Boolean).length
             :id="props.prefix + '-launch-description'"
             label="启动说明"
             optional
-            hint="最多 1000 字符，向成员说明应用用途。"
             :error="errorFor('launch_description')"
             :error-id="errorId('launch_description')"
         >
@@ -127,11 +129,13 @@ const count = (value: string) => value.split('\n').filter(Boolean).length
             <UiFormField
                 :id="props.prefix + '-audience'"
                 label="API 资源标识（Audience）"
-                hint="已为每个环境自动生成。保护业务 API 时需与后端校验值一致；仅接入登录可保留默认值。这不是 Client ID。"
                 required
                 :error="errorFor('access_audience')"
                 :error-id="errorId('access_audience')"
             >
+                <template #aside>
+                    <InfoHint text="已为每个环境自动生成。保护业务 API 时需与后端校验值一致；仅接入登录可保留默认值。这不是 Client ID。" />
+                </template>
                 <UiInput
                     :id="props.prefix + '-audience'"
                     v-model="config.access_audience"
@@ -156,10 +160,12 @@ const count = (value: string) => value.split('\n').filter(Boolean).length
                     :id="props.prefix + '-redirects'"
                     label="登录回调地址"
                     :required="redirectsRequired"
-                    :hint="uriHint"
                     :error="errorFor('redirect_uris')"
                     :error-id="errorId('redirect_uris')"
                 >
+                    <template #aside>
+                        <InfoHint :text="uriHint" />
+                    </template>
                     <textarea
                         :id="props.prefix + '-redirects'"
                         v-model="redirects"
@@ -173,16 +179,18 @@ const count = (value: string) => value.split('\n').filter(Boolean).length
                         :aria-invalid="isInvalid('redirect_uris')"
                         :aria-describedby="isInvalid('redirect_uris') ? errorId('redirect_uris') : undefined"
                     />
-                    <p class="form-help">每行一个地址，精确匹配；当前 {{ count(redirects) }} 个。</p>
+                    <p class="form-help">每行一个 · {{ count(redirects) }}</p>
                 </UiFormField>
                 <UiFormField
                     :id="props.prefix + '-logout-redirects'"
                     label="退出后回调地址"
                     optional
-                    :hint="uriHint"
                     :error="errorFor('post_logout_redirect_uris')"
                     :error-id="errorId('post_logout_redirect_uris')"
                 >
+                    <template #aside>
+                        <InfoHint :text="uriHint" />
+                    </template>
                     <textarea
                         :id="props.prefix + '-logout-redirects'"
                         v-model="logouts"
@@ -201,10 +209,12 @@ const count = (value: string) => value.split('\n').filter(Boolean).length
                     :id="props.prefix + '-origins'"
                     label="浏览器来源"
                     required
-                    hint="须与登录回调地址的来源完全一致（协议、主机与端口；http 80 / https 443 默认端口需省略）。"
                     :error="errorFor('browser_origins')"
                     :error-id="errorId('browser_origins')"
                 >
+                    <template #aside>
+                        <InfoHint text="须与登录回调地址的来源完全一致（协议、主机与端口；http 80 / https 443 默认端口需省略）。" />
+                    </template>
                     <textarea
                         :id="props.prefix + '-origins'"
                         v-model="origins"

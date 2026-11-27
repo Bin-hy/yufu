@@ -475,6 +475,12 @@ impl IdentityTransaction for PgSecurityTransaction {
             None => Ok(None),
         }
     }
+    async fn list_invitations(
+        &mut self,
+        query: crate::domain::identity::account::InvitationListQuery,
+    ) -> Result<Vec<crate::domain::identity::account::InvitationRow>, IdentityError> {
+        self.identity_list_invitations(query).await
+    }
     async fn load_reset(
         &mut self,
         id: uuid::Uuid,

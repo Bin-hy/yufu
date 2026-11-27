@@ -765,7 +765,8 @@ async fn identity_account_service_invitation_onboarding_is_atomic_and_does_not_g
                 InvitationAcceptance::NewAccount {
                     username: "invited-collaborator",
                     password: &password,
-                    nickname: "Partner"
+                    nickname: "Partner",
+                    bind_provider: None,
                 },
                 Uuid::new_v4(),
                 &budget(&f)
@@ -785,15 +786,21 @@ async fn identity_account_service_invitation_onboarding_is_atomic_and_does_not_g
                 username: "invited-collaborator",
                 password: &password,
                 nickname: "Partner",
+                bind_provider: None,
             },
             Uuid::new_v4(),
             &budget(&f),
         )
         .await
         .unwrap();
-    assert!(result.requires_login);
+    assert!(!result.continuation.requires_login);
+    assert!(result.session.is_some());
     let mut tx = repository(&f).begin(&budget(&f)).await.unwrap();
-    let account = tx.load_account(result.user_id).await.unwrap().unwrap();
+    let account = tx
+        .load_account(result.continuation.user_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(account.person_kind, PersonKind::Collaborator);
     assert!(account.developer_enabled && !account.administrator);
     tx.rollback().await.unwrap();
@@ -825,7 +832,7 @@ async fn identity_account_service_invitation_onboarding_is_atomic_and_does_not_g
             .err(),
         Some(IdentityError::AlreadyConsumed)
     );
-    let (_, partner_center) = center_secret(&f, result.user_id).await;
+    let (_, partner_center) = center_secret(&f, result.continuation.user_id).await;
     let partner = write_evidence(&f, Some(&partner_center), &browser);
     assert_eq!(
         service
@@ -861,7 +868,8 @@ async fn identity_account_service_invitation_onboarding_is_atomic_and_does_not_g
                 InvitationAcceptance::NewAccount {
                     username: "invited-collaborator",
                     password: &password,
-                    nickname: "Duplicate"
+                    nickname: "Duplicate",
+                    bind_provider: None,
                 },
                 Uuid::new_v4(),
                 &budget(&f)
@@ -883,8 +891,8 @@ async fn identity_account_service_invitation_onboarding_is_atomic_and_does_not_g
         )
         .await
         .unwrap();
-    assert_eq!(linked.user_id, result.user_id);
-    assert!(!linked.requires_login);
+    assert_eq!(linked.continuation.user_id, result.continuation.user_id);
+    assert!(!linked.continuation.requires_login);
     assert_eq!(
         scalar(
             &f,

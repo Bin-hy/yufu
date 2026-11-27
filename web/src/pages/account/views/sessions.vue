@@ -10,6 +10,7 @@ import { useUserStore } from '@/pinia/stores/user'
 import { emitToast } from '@/utils/toast'
 import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiButton from '@/components/ui/button/button.vue'
 const centers = useCursorPage('personal-centers', getCenters),
@@ -57,10 +58,10 @@ async function revoke(kind: 'center' | 'rp' | 'all', id = '') {
         <PageHeader
             title="登录会话"
             eyebrow="SESSIONS"
-            description="中心会话关联多项应用登录，应用会话可以单独撤销。发现异常访问时，先退出全部会话。"
+            hint="中心会话关联多项应用登录；异常访问时先退出全部会话。"
         >
             <UiButton variant="destructive" :disabled="pending" :loading="pending" @click="revoke('all')">
-                <LogOut v-if="!pending" :size="14" aria-hidden="true" />退出全部中心与应用授权
+                <LogOut v-if="!pending" :size="14" aria-hidden="true" />退出全部会话
             </UiButton>
         </PageHeader>
         <FailureFeedback :failure="mutation.failure.value" :message="writeError"
@@ -71,26 +72,23 @@ async function revoke(kind: 'center' | 'rp' | 'all', id = '') {
             <article class="metric-card">
                 <span class="metric-label"><ShieldCheck :size="13" aria-hidden="true" />有效中心会话</span>
                 <strong class="metric-value">{{ activeCenters }}</strong>
-                <span class="metric-meta">当前账户的中心登录会话</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><Laptop :size="13" aria-hidden="true" />有效应用会话</span>
                 <strong class="metric-value">{{ activeRps }}</strong>
-                <span class="metric-meta">仍可访问的应用登录</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><Clock :size="13" aria-hidden="true" />当前会话到期</span>
                 <strong class="metric-value !text-sm">
                     {{ user.centerSession?.expires_at ? date(user.centerSession.expires_at) : '—' }}
                 </strong>
-                <span class="metric-meta">到期后需要重新认证</span>
             </article>
         </div>
 
         <section class="panel mb-5">
             <header class="panel-heading">
-                <div><h2>中心会话</h2><p>同一浏览器中的中心登录记录。</p></div>
-                <span class="status-badge status-muted">{{ roots?.items.length ?? 0 }} 条</span>
+                <h2>中心会话</h2>
+                <span class="status-badge status-muted">{{ roots?.items.length ?? 0 }}</span>
             </header>
             <DataState
                 :status="status"
@@ -138,7 +136,7 @@ async function revoke(kind: 'center' | 'rp' | 'all', id = '') {
 
         <section class="panel">
             <header class="panel-heading">
-                <div><h2>应用会话</h2><p>应用登录可以独立撤销，不影响其他应用。</p></div>
+                <h2 class="flex items-center gap-2">应用会话 <InfoHint text="应用登录可以独立撤销，不影响其他应用。" /></h2>
                 <span class="status-badge status-muted">{{ applications?.items.length ?? 0 }} 条</span>
             </header>
             <DataState
@@ -190,7 +188,7 @@ async function revoke(kind: 'center' | 'rp' | 'all', id = '') {
 
         <div class="mt-5 inline-notice is-warning">
             <ShieldAlert :size="15" class="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
-            <p><strong>安全提示：</strong>如果你不认识某个应用会话，请立即撤销，并修改账户密码以撤销全部授权。</p>
+            <p><strong>不认识某个会话？</strong>立即撤销并修改密码。</p>
         </div>
     </div>
 </template>

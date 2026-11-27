@@ -9,6 +9,7 @@ import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { onSessionReset } from '@/workspace/session'
 import { emitToast } from '@/utils/toast'
 import PageHeader from '@/components/workspace/page-header.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiFormField from '@/components/ui/form-field/form-field.vue'
@@ -111,7 +112,7 @@ async function password() {
         <PageHeader
             title="账户中心"
             eyebrow="ACCOUNT"
-            description="使用同一个企业账户登录获准接入的应用。资料与密码修改会记录在身份审计中。"
+            hint="资料与密码修改会写入身份审计。"
         >
             <UiButton variant="outline" @click="router.push('/account/sessions')">
                 <ShieldCheck :size="14" aria-hidden="true" />登录会话
@@ -127,8 +128,10 @@ async function password() {
                 <section class="panel">
                     <header class="panel-heading">
                         <div>
-                            <h2>账户资料</h2>
-                            <p>这些信息会作为应用登录时的账户资料。</p>
+                            <h2 class="flex items-center gap-2">
+                                账户资料
+                                <InfoHint text="这些信息会作为应用登录时的账户资料。" />
+                            </h2>
                         </div>
                         <span class="status-badge status-brand">统一身份</span>
                     </header>
@@ -138,7 +141,6 @@ async function password() {
                                 id="account-nickname"
                                 label="显示名称"
                                 required
-                                hint="用于应用内展示，可随时修改。"
                             >
                                 <UiInput
                                     id="account-nickname"
@@ -155,8 +157,10 @@ async function password() {
                                 id="account-email"
                                 label="邮箱"
                                 optional
-                                hint="邮箱尚未验证；更改邮箱不会自动标记为已验证。"
                             >
+                                <template #aside>
+                                    <InfoHint text="邮箱尚未验证；更改邮箱不会自动标记为已验证。" />
+                                </template>
                                 <UiInput
                                     id="account-email"
                                     v-model="profile.email"
@@ -180,8 +184,10 @@ async function password() {
                 <section class="panel">
                     <header class="panel-heading">
                         <div>
-                            <h2>修改密码</h2>
-                            <p>成功修改后会撤销全部中心与应用授权，需要重新认证。</p>
+                            <h2 class="flex items-center gap-2">
+                                修改密码
+                                <InfoHint text="成功修改后会撤销全部中心与应用授权，需要重新认证。" />
+                            </h2>
                         </div>
                         <LockKeyhole :size="18" class="text-muted-foreground" aria-hidden="true" />
                     </header>
@@ -273,11 +279,11 @@ async function password() {
                     </dl>
                 </section>
                 <section class="surface p-5">
-                    <p class="flex items-center gap-2 text-xs font-semibold"><BadgeCheck :size="15" class="text-success" aria-hidden="true" />账户安全建议</p>
+                    <p class="flex items-center gap-2 text-xs font-semibold"><BadgeCheck :size="15" class="text-success" aria-hidden="true" />安全状态</p>
                     <ul class="mt-3 space-y-2 text-[11px] leading-5 text-muted-foreground">
-                        <li class="flex gap-2"><Mail :size="12" class="mt-1 shrink-0" aria-hidden="true" />定期确认邮箱可用，便于接收安全通知。</li>
-                        <li class="flex gap-2"><UserRound :size="12" class="mt-1 shrink-0" aria-hidden="true" />不要在共享账户中保存个人资料。</li>
-                        <li class="flex gap-2"><ArrowRight :size="12" class="mt-1 shrink-0" aria-hidden="true" />发现异常登录时，立即在登录会话中撤销。</li>
+                        <li class="flex items-center gap-2"><Mail :size="12" class="shrink-0" aria-hidden="true" />邮箱可用于安全通知</li>
+                        <li class="flex items-center gap-2"><UserRound :size="12" class="shrink-0" aria-hidden="true" />不共享个人账户</li>
+                        <li class="flex items-center gap-2"><ArrowRight :size="12" class="shrink-0" aria-hidden="true" />异常会话可随时撤销</li>
                     </ul>
                 </section>
             </aside>

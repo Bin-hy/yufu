@@ -96,6 +96,11 @@ async function centerLogin(
   await expect(page.locator('.nav-group-title').first()).toBeVisible()
 }
 
+async function centerSession(page: Page, cfg: SsoConfig): Promise<void> {
+  await page.goto(cfg.opOrigin + '/account')
+  await expect(page.locator('.nav-group-title').first()).toBeVisible()
+}
+
 async function issueInvitation(
   request: APIRequestContext,
   cfg: SsoConfig,
@@ -129,7 +134,7 @@ async function acceptInvitation(
     nickname: account.nickname,
   })
   const receipt = await json<{ requires_login: boolean; user_id: number }>(accepted)
-  expect(receipt.requires_login).toBe(true)
+  expect(receipt.requires_login).toBe(false)
   return receipt.user_id
 }
 
@@ -292,8 +297,14 @@ test('a real administrator establishes the enterprise directory and its access b
       const accountPage = await context.newPage()
       accountPage.setDefaultTimeout(30_000)
       const userId = await acceptInvitation(context, cfg, account, secret)
+      await centerSession(accountPage, cfg)
       onboarded.push({ ...account, context, page: accountPage, userId })
     }
+
+    const invitationHistory = await json<{ items: unknown[] }>(
+      await adminRequest.get(cfg.opOrigin + '/api/v1/admin/invitations?limit=50'),
+    )
+    expect(invitationHistory.items.length).toBeGreaterThanOrEqual(all.length)
 
     const directory = await accounts(adminRequest, cfg)
     for (const account of onboarded) {

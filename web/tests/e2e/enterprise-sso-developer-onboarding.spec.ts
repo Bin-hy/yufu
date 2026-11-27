@@ -144,7 +144,7 @@ async function acceptInvitation(
     nickname: account.nickname,
   })
   const receipt = await json<{ requires_login: boolean; user_id: number }>(accepted)
-  expect(receipt.requires_login).toBe(true)
+  expect(receipt.requires_login).toBe(false)
   return receipt.user_id
 }
 

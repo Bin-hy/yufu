@@ -404,3 +404,198 @@ async fn github_bind_and_unbind_requires_center_session_and_keeps_password() {
         1
     );
 }
+
+async fn register_with_github_bind(
+    port: u16,
+) -> (IdentityFixture, BrowserCookies, String, String, i32) {
+    let f = fixture_with_github(port).await;
+    let _ = app(&f, "ext-register-bind", true).await;
+    let mut guest = BrowserCookies::default();
+    let mut authorize = reqwest::Url::parse(&format!("{}/oidc/authorize", f.base_url)).unwrap();
+    authorize.query_pairs_mut().extend_pairs([
+        ("client_id", "ext-register-bind-dev"),
+        ("redirect_uri", "https://rp.example/callback"),
+        ("response_type", "code"),
+        ("scope", "openid profile"),
+        ("state", "registration-state"),
+        ("nonce", "registration-nonce"),
+        (
+            "code_challenge",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ),
+        ("code_challenge_method", "S256"),
+    ]);
+    let response = f.client.get(authorize).send().await.unwrap();
+    assert_eq!(response.status(), 303);
+    let location = response.headers()[reqwest::header::LOCATION]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    guest.absorb(response.headers());
+    let flow_id = reqwest::Url::parse(&format!("{}{}", f.base_url, location))
+        .unwrap()
+        .query_pairs()
+        .find(|(key, _)| key == "flow_id")
+        .unwrap()
+        .1
+        .into_owned();
+
+    let mut admin = BrowserCookies::default();
+    let admin_csrf = http_login(&f, &mut admin).await;
+    let issued: Value = f
+        .client
+        .post(format!("{}/api/v1/admin/invitations", f.base_url))
+        .header("cookie", admin.header())
+        .header("origin", &f.base_url)
+        .header("x-csrf-token", admin_csrf)
+        .json(&json!({
+            "purpose":"onboarding",
+            "person_kind":"employee",
+            "developer_grant":false,
+            "target_user_id":null
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let secret = issued["secret"].as_str().unwrap();
+    let guest_csrf = http_csrf(&f, &mut guest).await;
+    let exchanged = f
+        .client
+        .post(format!("{}/api/v1/identity/actions/exchange", f.base_url))
+        .header("cookie", guest.header())
+        .header("origin", &f.base_url)
+        .header("x-csrf-token", &guest_csrf)
+        .json(&json!({"kind":"invitation","secret":secret,"flow_id":flow_id}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(exchanged.status(), 200);
+    guest.absorb(exchanged.headers());
+    let exchanged: Value = exchanged.json().await.unwrap();
+    let action_id = exchanged["action_id"].as_str().unwrap();
+    let accepted = f
+        .client
+        .post(format!("{}/api/v1/identity/invitations/accept", f.base_url))
+        .header("cookie", guest.header())
+        .header("origin", &f.base_url)
+        .header("x-csrf-token", &guest_csrf)
+        .json(&json!({
+            "action_id":action_id,
+            "existing_account":false,
+            "username":"github-invited",
+            "password":"github invitation password",
+            "nickname":"GitHub Invited",
+            "bind_provider":"github"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), 200);
+    guest.absorb(accepted.headers());
+    let accepted: Value = accepted.json().await.unwrap();
+    assert_eq!(accepted["requires_login"], false);
+    assert_eq!(accepted["bind_provider"], "github");
+    assert_eq!(accepted["oidc_flow_id"], flow_id);
+    let user_id = i32::try_from(accepted["user_id"].as_i64().unwrap()).unwrap();
+
+    let csrf = http_csrf(&f, &mut guest).await;
+    let started = f
+        .client
+        .post(format!(
+            "{}/api/v1/identity/external/github/bind/start",
+            f.base_url
+        ))
+        .header("cookie", guest.header())
+        .header("origin", &f.base_url)
+        .header("x-csrf-token", csrf)
+        .json(&json!({"flow_id": flow_id}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(started.status(), 200);
+    let started: Value = started.json().await.unwrap();
+    let state = reqwest::Url::parse(started["authorize_url"].as_str().unwrap())
+        .unwrap()
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    (f, guest, flow_id, state, user_id)
+}
+
+#[tokio::test]
+async fn invitation_registration_binds_github_and_continues_oidc() {
+    let port = fake_github().await;
+    let (f, mut guest, flow_id, state, user_id) = register_with_github_bind(port).await;
+    let response = callback(&f, &mut guest, "bound", &state).await;
+    assert_eq!(response.status(), 303);
+    assert_eq!(
+        response.headers()[reqwest::header::LOCATION],
+        format!("/oidc/consent?flow_id={flow_id}")
+    );
+    assert_eq!(
+        scalar(
+            &f,
+            &format!(
+                "SELECT user_id::bigint AS value FROM identity_external_identity WHERE provider_key='github' AND user_id={user_id}"
+            )
+        )
+        .await,
+        i64::from(user_id)
+    );
+
+    let summary: Value = f
+        .client
+        .get(format!("{}/api/v1/identity/flows/{flow_id}", f.base_url))
+        .header("cookie", guest.header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_ne!(summary["interaction"], "login");
+    f.close().await;
+}
+
+#[tokio::test]
+async fn invitation_registration_bind_denial_keeps_account_and_oidc_flow() {
+    let port = fake_github().await;
+    let (f, guest, flow_id, state, user_id) = register_with_github_bind(port).await;
+    let response = f
+        .client
+        .get(format!("{}/identity/external/github/callback", f.base_url))
+        .query(&[("error", "access_denied"), ("state", state.as_str())])
+        .header("cookie", guest.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 303);
+    assert_eq!(
+        response.headers()[reqwest::header::LOCATION],
+        format!("/oidc/consent?flow_id={flow_id}")
+    );
+    assert_eq!(
+        scalar(
+            &f,
+            &format!(
+                "SELECT COUNT(*)::bigint AS value FROM identity_external_identity WHERE user_id={user_id}"
+            )
+        )
+        .await,
+        0
+    );
+    let response = f
+        .client
+        .get(format!("{}/api/v1/account/session", f.base_url))
+        .header("cookie", guest.header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    f.close().await;
+}

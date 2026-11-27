@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowRight, CalendarDays, Command, KeyRound, ShieldCheck, Sparkles, UserRound } from '@lucide/vue'
+import { ArrowRight, Clock, Command, KeyRound, ScrollText, ShieldCheck, UserRound } from '@lucide/vue'
 import { navigationFor } from '@/router/navigation'
 import PageHeader from '@/components/workspace/page-header.vue'
 import UiButton from '@/components/ui/button/button.vue'
@@ -44,11 +44,6 @@ const roleLabel = computed(() =>
             ? '开发者'
             : '企业成员',
 )
-const today = new Intl.DateTimeFormat('zh-CN', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-}).format(new Date())
 const expiry = computed(() => {
     const value = user.centerSession?.expires_at
     return value ? new Date(value * 1000).toLocaleString('zh-CN') : '当前会话'
@@ -59,10 +54,10 @@ const expiry = computed(() => {
         <PageHeader
             title="工作台"
             eyebrow="OVERVIEW"
-            description="从这里管理身份、访问权限和应用授权。"
+            hint="集中查看身份、访问范围、应用授权与会话状态。"
         >
             <UiButton variant="outline" @click="command.show()">
-                <Command :size="14" aria-hidden="true" />搜索页面
+                <Command :size="14" aria-hidden="true" />搜索
                 <kbd class="kbd">{{ commandKey }}</kbd>
             </UiButton>
         </PageHeader>
@@ -71,21 +66,18 @@ const expiry = computed(() => {
             <div class="hero-copy">
                 <div class="page-eyebrow !mb-4">IDENTITY & ACCESS</div>
                 <h2>你好，{{ displayName }}</h2>
-                <p>
-                    当前账户已通过企业统一身份认证。你的访问范围、应用授权与会话状态，都可以在这里集中查看。
-                </p>
+                <div class="hero-badges">
+                    <span><ShieldCheck :size="13" aria-hidden="true" />统一身份</span>
+                    <span><KeyRound :size="13" aria-hidden="true" />会话保护</span>
+                    <span><ScrollText :size="13" aria-hidden="true" />审计写入</span>
+                </div>
                 <div class="flex flex-wrap items-center gap-2.5">
                     <UiButton @click="router.push('/account')">
                         账户中心<ArrowRight :size="14" aria-hidden="true" />
                     </UiButton>
                     <UiButton variant="outline" @click="router.push('/account/sessions')">
-                        查看登录会话
+                        登录会话
                     </UiButton>
-                </div>
-                <div class="hero-facts">
-                    <div><span>统一身份</span><strong>已验证</strong></div>
-                    <div><span>会话保护</span><strong>已启用</strong></div>
-                    <div><span>审计记录</span><strong>持续写入</strong></div>
                 </div>
                 <p v-if="user.identityError" role="alert" class="inline-error mt-4">
                     {{ user.identityError }}
@@ -117,30 +109,22 @@ const expiry = computed(() => {
 
         <div class="metric-grid mt-4">
             <article class="metric-card">
-                <span class="metric-label"><CalendarDays :size="13" aria-hidden="true" />今天</span>
-                <strong class="metric-value !text-base">{{ today }}</strong>
-                <span class="metric-meta">身份服务运行正常</span>
-            </article>
-            <article class="metric-card">
                 <span class="metric-label"><UserRound :size="13" aria-hidden="true" />账户资格</span>
                 <strong class="metric-value !text-base">{{ roleLabel }}</strong>
-                <span class="metric-meta">
-                    {{ user.centerSession?.developer_enabled ? '具备开发者控制台入口' : '由企业管理员维护访问范围' }}
-                </span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><KeyRound :size="13" aria-hidden="true" />工作入口</span>
                 <strong class="metric-value">{{ shortcuts.length }}</strong>
-                <span class="metric-meta">个与你当前资格匹配的控制台入口</span>
+            </article>
+            <article class="metric-card">
+                <span class="metric-label"><Clock :size="13" aria-hidden="true" />会话有效至</span>
+                <strong class="metric-value !text-sm">{{ expiry }}</strong>
             </article>
         </div>
 
         <div class="page-section-title">
-            <div>
-                <h2>常用工作区</h2>
-                <p class="mt-0.5">按任务选择入口，页面状态会自动保留。</p>
-            </div>
-            <span class="hidden text-[11px] text-muted-foreground sm:block">共 {{ shortcuts.length }} 个入口</span>
+            <h2>常用工作区</h2>
+            <span class="status-badge status-muted">{{ shortcuts.length }}</span>
         </div>
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <router-link
@@ -148,6 +132,7 @@ const expiry = computed(() => {
                 :key="item.name"
                 :to="{ name: item.name }"
                 class="shortcut-card group"
+                :title="item.description"
             >
                 <span class="shortcut-icon">
                     <component :is="item.icon" :size="18" aria-hidden="true" />
@@ -155,7 +140,6 @@ const expiry = computed(() => {
                 <span class="min-w-0 flex-1">
                     <span class="shortcut-group">{{ item.group }}</span>
                     <span class="shortcut-title">{{ item.title }}</span>
-                    <span class="shortcut-description">{{ item.description }}</span>
                 </span>
                 <ArrowRight
                     :size="15"
@@ -163,13 +147,6 @@ const expiry = computed(() => {
                     aria-hidden="true"
                 />
             </router-link>
-        </div>
-
-        <div class="mt-5 inline-notice">
-            <Sparkles :size="15" class="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
-            <p>
-                <strong>小提示：</strong>按 <kbd class="kbd">{{ commandKey }}</kbd> 可以随时搜索页面、切换主题或退出登录。
-            </p>
         </div>
     </div>
 </template>
@@ -194,36 +171,23 @@ const expiry = computed(() => {
     font-weight: 650;
     letter-spacing: -0.045em;
 }
-.hero-copy > p {
-    max-width: 560px;
-    margin: 10px 0 20px;
-    color: hsl(var(--muted-foreground));
-    font-size: 12.5px;
-    line-height: 1.75;
-}
-.hero-facts {
+.hero-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 22px;
-    margin-top: 26px;
-    padding-top: 18px;
-    border-top: 1px solid hsl(var(--border));
+    gap: 8px;
+    margin: 14px 0 20px;
 }
-.hero-facts > div {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-.hero-facts span {
+.hero-badges span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 9px;
+    border: 1px solid hsl(var(--border));
+    border-radius: 999px;
+    background: hsl(var(--muted) / 0.35);
     color: hsl(var(--muted-foreground));
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-.hero-facts strong {
-    font-size: 11.5px;
-    font-weight: 650;
+    font-size: 10.5px;
+    font-weight: 600;
 }
 .identity-card {
     display: flex;
@@ -343,13 +307,6 @@ const expiry = computed(() => {
     font-size: 13.5px;
     font-weight: 650;
     letter-spacing: -0.01em;
-}
-.shortcut-description {
-    display: block;
-    margin-top: 4px;
-    color: hsl(var(--muted-foreground));
-    font-size: 11.5px;
-    line-height: 1.55;
 }
 @media (max-width: 1023px) {
     .hero-panel {

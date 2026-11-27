@@ -365,7 +365,7 @@ async function copy(value: string, label: string) {
         <PageHeader
             :title="administrator ? '企业应用' : '开发者控制台'"
             eyebrow="APPLICATIONS"
-            :description="administrator ? '审核生产接入、管理访问分配，或由管理员直接配置应用。' : '一次注册建立开发与生产环境，生产接入需独立审批。'"
+            :hint="administrator ? '审核生产接入、管理访问分配，或直接配置应用。' : '开发与生产环境独立，生产接入需要审批。'"
         >
             <UiButton :aria-expanded="opened" @click="toggleRegistration">
                 <Plus v-if="!opened" :size="14" aria-hidden="true" />
@@ -387,17 +387,14 @@ async function copy(value: string, label: string) {
             <article class="metric-card">
                 <span class="metric-label"><Sparkles :size="13" aria-hidden="true" />应用总数</span>
                 <strong class="metric-value">{{ data?.items.length ?? 0 }}</strong>
-                <span class="metric-meta">当前页面加载的应用</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><ShieldCheck :size="13" aria-hidden="true" />启用中</span>
                 <strong class="metric-value">{{ data?.items.filter((app) => app.active).length ?? 0 }}</strong>
-                <span class="metric-meta">可以继续维护接入配置</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><ArrowRight :size="13" aria-hidden="true" />待审批环境</span>
                 <strong class="metric-value">{{ pendingApprovals }}</strong>
-                <span class="metric-meta">生产配置等待管理员审核</span>
             </article>
         </div>
 
@@ -502,7 +499,7 @@ async function copy(value: string, label: string) {
                                 :disabled="pending"
                             />
                         </UiFormField>
-                        <UiFormField v-if="administrator" id="app-owner" label="负责人账户" class="md:col-span-2" required :error="fieldError('owner_user_id')" error-id="app-owner-error" hint="按显示名称、用户名或账户 ID 搜索。">
+                        <UiFormField v-if="administrator" id="app-owner" label="负责人账户" class="md:col-span-2" required :error="fieldError('owner_user_id')" error-id="app-owner-error">
                             <EntityPicker
                                 id="app-owner"
                                 :model-value="owner"
@@ -519,7 +516,7 @@ async function copy(value: string, label: string) {
                     </div>
                     <details data-application-identity class="rounded-xl border border-border p-4">
                         <summary class="cursor-pointer text-sm font-medium">高级设置：自定义应用标识</summary>
-                        <UiFormField id="app-key" label="应用标识" optional class="mt-4" :error="fieldError('app_key')" error-id="app-key-error" hint="留空由系统生成，用于中心内部识别应用，创建后不可修改。登录接入请使用创建后提供的 Client ID；此标识不是密钥。">
+                        <UiFormField id="app-key" label="应用标识" optional class="mt-4" :error="fieldError('app_key')" error-id="app-key-error" hint="留空自动生成；创建后不可修改。不是 Client ID 或密钥。">
                             <UiInput id="app-key" v-model="customAppKey" name="app-key" autocomplete="off" spellcheck="false" placeholder="自动生成，一般无需填写" :invalid="!!fieldError('app_key')" :disabled="pending" />
                         </UiFormField>
                     </details>
@@ -527,7 +524,7 @@ async function copy(value: string, label: string) {
                         <input v-model="form.third_party" type="checkbox" :disabled="pending" />
                         <span>第三方应用</span>
                     </label>
-                    <p class="form-help">{{ administrator ? '由管理员直接配置，生产环境建立后立即生效；仍需明确分配访问。' : '第三方表示由外部供应商提供，不改变当前负责人与生产审批要求。' }}</p>
+                    <p class="form-help">{{ administrator ? '管理员配置后立即生效；仍需分配生产访问。' : '第三方应用不改变负责人与生产审批要求。' }}</p>
                 </section>
 
                 <section v-else-if="step === 'development'" class="space-y-4">
@@ -590,7 +587,7 @@ async function copy(value: string, label: string) {
                         <span>接受已记录的退出能力限制</span>
                     </label>
                     <p v-if="fieldError('accept_logout_limitation')" class="field-error" role="alert">{{ fieldError('accept_logout_limitation') }}</p>
-                    <p class="form-help">{{ administrator ? '确认后开发和生产环境立即生效；还需在应用详情中明确分配生产访问。' : '确认后开发环境立即生效，生产环境保存为草稿，不会自动提交生产审批。准备上线时，请在应用详情保存生产配置并提交审核。' }}服务端 Web 应用的密钥仅在回执中展示一次。</p>
+                    <p class="form-help">{{ administrator ? '确认后开发与生产立即生效；仍需分配生产访问。' : '开发环境立即生效；生产保存草稿，需另行提交审批。' }}密钥仅展示一次。</p>
                 </section>
 
                 <p v-if="pending" class="form-help" role="status">正在建立应用…</p>
@@ -620,7 +617,7 @@ async function copy(value: string, label: string) {
                 :refreshing="refreshing"
                 :empty="!data?.items.length"
                 empty-title="还没有应用"
-                :empty-description="administrator ? '配置第一个获批第三方应用后，会在这里显示。' : '注册第一个应用后，可以在这里查看开发与生产接入状态。'"
+                :empty-description="administrator ? '配置第一个第三方应用后会显示在这里。' : '注册第一个应用后会显示在这里。'"
                 :skeleton-rows="3"
                 @retry="list.refresh()"
             >

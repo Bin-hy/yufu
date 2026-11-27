@@ -177,7 +177,7 @@ async function removeMember(group: Group, profile: GroupMember) {
         <PageHeader
             title="用户组"
             eyebrow="GROUPS"
-            description="扁平用户组仅汇总已明确分配的应用访问。组成员关系不会自动扩大到其他应用。"
+            hint="用户组只汇总明确分配的应用访问，不会自动扩大权限。"
         >
             <UiButton @click="create"><Plus :size="14" aria-hidden="true" />新建用户组</UiButton>
         </PageHeader>
@@ -206,7 +206,7 @@ async function removeMember(group: Group, profile: GroupMember) {
             :refreshing="refreshing"
             :empty="!items.length"
             :empty-title="filters.values.value.q ? '没有匹配的用户组' : '还没有用户组'"
-            :empty-description="filters.values.value.q ? '换个关键词再试试。' : '创建第一个用户组，把成员和访问来源集中管理。'"
+            :empty-description="filters.values.value.q ? '换个关键词再试试。' : '创建第一个用户组。'"
             :skeleton-rows="3"
             @retry="list.refresh()"
         >

@@ -10,6 +10,8 @@ mod actions;
 pub use actions::*;
 #[path = "account_governance.rs"]
 mod governance;
+#[path = "account_invitations.rs"]
+mod invitations;
 #[path = "account_password.rs"]
 mod password;
 pub use governance::AccountChangeResult;

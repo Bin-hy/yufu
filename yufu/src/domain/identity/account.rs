@@ -37,6 +37,92 @@ pub struct InvitationSnapshot {
     pub consumed_at: Option<u64>,
     pub revoked_at: Option<u64>,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InvitationStatus {
+    Pending,
+    Accepted,
+    Revoked,
+    Expired,
+}
+impl InvitationStatus {
+    pub const ALL: &'static [Self] = &[Self::Pending, Self::Accepted, Self::Revoked, Self::Expired];
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Accepted => "accepted",
+            Self::Revoked => "revoked",
+            Self::Expired => "expired",
+        }
+    }
+}
+impl std::str::FromStr for InvitationStatus {
+    type Err = IdentityError;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|status| status.as_str() == value)
+            .ok_or(IdentityError::InvalidInput)
+    }
+}
+#[derive(Debug, Clone)]
+pub struct InvitationListQuery {
+    pub after: Option<String>,
+    pub limit: u32,
+    pub status: Option<InvitationStatus>,
+    pub purpose: Option<InvitationPurpose>,
+    pub person_kind: Option<PersonKind>,
+    pub search: Option<String>,
+    pub now_millis: u64,
+}
+#[derive(Debug, Clone)]
+pub struct InvitationRow {
+    pub id: Uuid,
+    pub purpose: InvitationPurpose,
+    pub target_user_id: Option<i32>,
+    pub target_username: Option<String>,
+    pub target_nickname: Option<String>,
+    pub person_kind: PersonKind,
+    pub developer_grant: bool,
+    pub created_by: i32,
+    pub creator_username: String,
+    pub creator_nickname: String,
+    pub created_at_millis: u64,
+    pub expires_at_millis: u64,
+    pub status: InvitationStatus,
+    pub accepted_user_id: Option<i32>,
+    pub accepted_username: Option<String>,
+    pub accepted_nickname: Option<String>,
+    pub accepted_at_millis: Option<u64>,
+    pub revoked_at_millis: Option<u64>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct InvitationView {
+    pub id: Uuid,
+    pub purpose: InvitationPurpose,
+    pub target_user_id: Option<i32>,
+    pub target_username: Option<String>,
+    pub target_nickname: Option<String>,
+    pub person_kind: PersonKind,
+    pub developer_grant: bool,
+    pub created_by: i32,
+    pub creator_username: String,
+    pub creator_nickname: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub status: InvitationStatus,
+    pub accepted_user_id: Option<i32>,
+    pub accepted_username: Option<String>,
+    pub accepted_nickname: Option<String>,
+    pub accepted_at: Option<u64>,
+    pub revoked_at: Option<u64>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct InvitationPage {
+    pub items: Vec<InvitationView>,
+    pub next: Option<String>,
+}
 impl InvitationSnapshot {
     pub fn validate(
         &self,

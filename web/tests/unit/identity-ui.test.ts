@@ -16,19 +16,22 @@ import AccountAction from '@/pages/account/views/action.vue'
 const mocked = vi.hoisted(() => ({
     session: vi.fn(), login: vi.fn(), profile: vi.fn(), password: vi.fn(), centers: vi.fn(), rps: vi.fn(), revokeCenter: vi.fn(), revokeRp: vi.fn(), logout: vi.fn(),
     apps: vi.fn(), register: vi.fn(), registerAdmin: vi.fn(), inspect: vi.fn(), complete: vi.fn(), exchange: vi.fn(), action: vi.fn(), accept: vi.fn(), reset: vi.fn(),
+    providers: vi.fn(), bind: vi.fn(),
 }))
 vi.mock('@/pages/account/api', () => ({ getCenterSession: mocked.session, centerLogin: mocked.login, updateProfile: mocked.profile, changePassword: mocked.password, getCenters: mocked.centers, getRps: mocked.rps, revokeCenter: mocked.revokeCenter, revokeRp: mocked.revokeRp, centerLogout: mocked.logout }))
 vi.mock('@/pages/developer/api', () => ({ listApps: mocked.apps, registerApp: mocked.register, registerAdminApp: mocked.registerAdmin }))
 vi.mock('@/pages/oidc-consent/api', () => ({ inspectFlow: mocked.inspect, completeFlow: mocked.complete }))
 vi.mock('@/pages/account/api/actions', async () => ({ ...await vi.importActual<object>('@/pages/account/api/actions'), exchangeAction: mocked.exchange, inspectAction: mocked.action, acceptInvitation: mocked.accept, completePasswordReset: mocked.reset }))
+vi.mock('@/pages/account/api/identities', () => ({ getExternalProviders: mocked.providers, startExternalBind: mocked.bind }))
 const identity = { user_id: 12, sub: '12', username: 'employee', nickname: 'Employee', person_kind: 'employee' as const, developer_enabled: true, administrator: false, super_administrator: false, sso_session_id: 'root-one', auth_time: 10, expires_at: 9999999999, csrf_token: 'proof' }
 let wrappers: VueWrapper[] = []
-beforeEach(() => { resetSession(); for (const fn of Object.values(mocked)) fn.mockReset(); mocked.session.mockResolvedValue(identity); mocked.apps.mockResolvedValue({ items: [], next: null }); useUserStore(pinia).setCenterSession(identity) })
+beforeEach(() => { resetSession(); for (const fn of Object.values(mocked)) fn.mockReset(); mocked.session.mockResolvedValue(identity); mocked.apps.mockResolvedValue({ items: [], next: null }); mocked.providers.mockResolvedValue([]); useUserStore(pinia).setCenterSession(identity) })
 afterEach(() => { for (const wrapper of wrappers) wrapper.unmount(); wrappers = []; window.history.replaceState({}, '', '/') })
 async function render(component: Component, path = '/account') {
     const router = createRouter({ history: createMemoryHistory(), routes: [
         { path: '/account', name: 'account-profile', component: {} }, { path: '/login', name: 'login', component: {} },
         { path: '/account/action', name: 'account-action', component: {} }, { path: '/register', name: 'register', component: {} },
+        { path: '/account/identities', name: 'account-identities', component: {} },
         { path: '/account/sessions', name: 'account-sessions', component: {} },
         { path: '/developer/apps', name: 'developer-apps', component: {} }, { path: '/developer/apps/:id', name: 'developer-app', component: {} },
         { path: '/admin/apps', name: 'admin-apps', component: {} }, { path: '/admin/apps/:id', name: 'admin-app', component: {} }, { path: '/oidc/consent', name: 'oidc-consent', component: {} },
@@ -115,13 +118,13 @@ it('开发者注册按环境区分回调必填与 https 规则，生产草稿可
     const dev = wrapper.find('#registration-dev-redirects')
     let prod = wrapper.find('#registration-prod-redirects')
     expect((dev.element as HTMLTextAreaElement).required).toBe(true)
-    expect(wrapper.text()).toContain('本机调试可使用 http://localhost')
+    expect(wrapper.find('[aria-label*="本机调试可使用 http://localhost"]').exists()).toBe(true)
     await dev.setValue('http://127.0.0.1:5173/callback')
     await wrapper.find('#registration-dev-audience').setValue('urn:app:api')
     await nextRegistrationStep(wrapper)
     prod = wrapper.find('#registration-prod-redirects')
     expect((prod.element as HTMLTextAreaElement).required).toBe(false)
-    expect(wrapper.text()).toContain('可先留空，生产配置经审批后生效；填写时必须使用 https')
+    expect(wrapper.find('[aria-label*="可先留空，生产配置经审批后生效"]').exists()).toBe(true)
     await wrapper.find('#registration-prod-audience').setValue('urn:app:api')
     await nextRegistrationStep(wrapper)
     await wrapper.find('form').trigger('submit'); await flushPromises()
@@ -138,7 +141,7 @@ it('管理员注册的生产回调必填且不显示草稿留空提示', async (
     await nextRegistrationStep(wrapper)
     expect((wrapper.find('#registration-prod-redirects').element as HTMLTextAreaElement).required).toBe(true)
     expect((wrapper.find('#registration-prod-redirects').element as HTMLTextAreaElement).required).toBe(true)
-    expect(wrapper.text()).toContain('必须使用 https；http 地址（包括 127.0.0.1）会被拒绝')
+    expect(wrapper.find('[aria-label*="必须使用 https；http 地址（包括 127.0.0.1）会被拒绝"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('可先留空')
 })
 it('进入确认前本地校验拦截生产 http 回调，行内显示错误且不发起请求', async () => {
@@ -195,6 +198,34 @@ it('粘贴 43 位邀请码后兑换并进入接受邀请页面', async () => {
     expect(wrapper.text()).toContain('接受企业邀请')
     expect(wrapper.find('#invitation-username').exists()).toBe(true)
 })
+it('注册页展示 OAuth Provider，选择后携带并自动开始绑定', async () => {
+    useUserStore(pinia).logout()
+    mocked.exchange.mockResolvedValue({ action_id: 'action-one', expires_at: 9999999999, oidc_flow_id: null })
+    mocked.action.mockResolvedValue({ action_id: 'action-one', kind: 'invitation', expires_at: 9999999999, person_kind: 'employee', developer_grant: false, requires_existing_account: false, oidc_flow_id: null, csrf_token: 'proof' })
+    mocked.providers.mockResolvedValue([
+        { key: 'github', family: 'github', label: 'GitHub', mode: 'oauth', enabled: true },
+        { key: 'wechat_mini', family: 'wechat', label: '微信小程序', mode: 'native', enabled: true },
+    ])
+    mocked.accept.mockResolvedValue({ requires_login: false, user_id: 12, oidc_flow_id: null, bind_provider: 'github' })
+    mocked.bind.mockRejectedValue(new Error('network down'))
+    const { wrapper, router } = await render(AccountAction, '/register')
+    await wrapper.find('#invitation-code').setValue('A'.repeat(43))
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(wrapper.text()).toContain('GitHub')
+    expect(wrapper.text()).not.toContain('微信小程序')
+    const github = wrapper.findAll('button').find(button => button.text().includes('GitHub'))!
+    await github.trigger('click')
+    await wrapper.find('#invitation-username').setValue('github-user')
+    await wrapper.find('#invitation-nickname').setValue('GitHub User')
+    await wrapper.find('#action-password').setValue('github-password')
+    await wrapper.find('#action-confirm').setValue('github-password')
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(mocked.accept.mock.calls.at(-1)![0]).toMatchObject({ bind_provider: 'github' })
+    expect(mocked.bind).toHaveBeenCalledWith('github', undefined)
+    expect(router.currentRoute.value.path).toBe('/account/identities')
+    expect(router.currentRoute.value.query.error).toBe('external_start_failed')
+    expect(wrapper.text()).toContain('账户已创建，但第三方绑定未开始')
+})
 it('授权界面仅使用服务端 flow 摘要，拒绝时不透传 query 中的回调和权限', async () => {
     mocked.inspect.mockResolvedValue({ flow_id: 'flow-one', application_name: 'Trusted A', scopes: 'openid profile', interaction: 'consent', expires_at: 9999999999, username: 'employee', csrf_token: 'proof' })
     mocked.complete.mockRejectedValue({ response: { status: 410, data: { code: 'expired' } } })
@@ -221,7 +252,7 @@ it('只填名称与开发回调即可创建，自动标识和两环境 Audience 
     await wrapper.get('#registration-dev-redirects').setValue('http://localhost:3000/callback')
     await nextRegistrationStep(wrapper)
     await nextRegistrationStep(wrapper)
-    expect(wrapper.text()).toContain('不会自动提交生产审批')
+    expect(wrapper.text()).toContain('需另行提交审批')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('提交结果待确认')
@@ -244,7 +275,7 @@ it('会话恢复暂时失败时先重试原会话，不要求再次提交密码'
     mocked.session.mockRejectedValueOnce(new Error('身份服务暂不可用'))
     await store.ensureSession()
     const { wrapper, router } = await render(LoginForm, '/login?redirect=//outside.example')
-    expect(wrapper.text()).toContain('暂时无法验证登录状态')
+    expect(wrapper.text()).toContain('会话状态不可用')
     expect(wrapper.find('#login-password').exists()).toBe(false)
     mocked.session.mockResolvedValue(identity)
     await wrapper.findAll('button').find(button => button.text() === '重新验证登录状态')!.trigger('click')

@@ -3,7 +3,7 @@ use super::identity_browser::{IdentityRequest, accounts};
 use crate::{
     AppState,
     domain::identity::{
-        account::{InvitationPurpose, PersonKind},
+        account::{InvitationListQuery, InvitationPurpose, InvitationStatus, PersonKind},
         error::IdentityError,
         session::ActionTarget,
     },
@@ -13,10 +13,10 @@ use crate::{
 use axum::{
     Extension, Json, Router,
     extract::{
-        Path, State,
-        rejection::{JsonRejection, PathRejection},
+        Path, Query, State,
+        rejection::{JsonRejection, PathRejection, QueryRejection},
     },
-    routing::{patch, post},
+    routing::{get, patch, post},
 };
 use http::HeaderMap;
 use serde::Deserialize;
@@ -24,8 +24,12 @@ use uuid::Uuid;
 
 pub fn get_routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/invitations", post(issue_invitation))
+        .route(
+            "/admin/invitations",
+            get(list_invitations).post(issue_invitation),
+        )
         .route("/admin/password-resets", post(issue_reset))
+        .route("/admin/invitations/{id}/reissue", post(reissue_invitation))
         .route("/admin/invitations/{id}/revoke", post(revoke_invitation))
         .route("/admin/password-resets/{id}/revoke", post(revoke_reset))
         .route("/admin/accounts/{id}/enabled", patch(set_enabled))
@@ -125,6 +129,76 @@ struct InvitationBody {
     target_user_id: Option<i32>,
     person_kind: PersonKind,
     developer_grant: bool,
+}
+fn default_limit() -> u32 {
+    25
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InvitationListParams {
+    after: Option<String>,
+    #[serde(default = "default_limit")]
+    limit: u32,
+    status: Option<InvitationStatus>,
+    purpose: Option<InvitationPurpose>,
+    person_kind: Option<PersonKind>,
+    q: Option<String>,
+}
+async fn list_invitations(
+    State(state): State<AppState>,
+    Extension(context): Extension<IdentityRequest>,
+    headers: HeaderMap,
+    query: Result<Query<InvitationListParams>, QueryRejection>,
+) -> Result<(HeaderMap, Json<serde_json::Value>), AppError> {
+    let result = async {
+        let Query(params) = query.map_err(|_| IdentityError::InvalidInput)?;
+        let secret = browser::read_sso_cookie(&state.config, &headers)?;
+        let page = accounts(&state)?
+            .list_invitations(
+                &secret,
+                InvitationListQuery {
+                    after: params.after,
+                    limit: params.limit,
+                    status: params.status,
+                    purpose: params.purpose,
+                    person_kind: params.person_kind,
+                    search: params.q,
+                    now_millis: 0,
+                },
+                &context.budget,
+            )
+            .await?;
+        Ok::<_, IdentityError>((browser::protected_headers(), Json(serde_json::json!(page))))
+    }
+    .await;
+    result.map_err(|reason| AppError::identity(reason, context.id))
+}
+async fn reissue_invitation(
+    State(state): State<AppState>,
+    Extension(context): Extension<IdentityRequest>,
+    headers: HeaderMap,
+    path: Result<Path<Uuid>, PathRejection>,
+) -> Result<(HeaderMap, Json<serde_json::Value>), AppError> {
+    let result = async {
+        let Path(id) = path.map_err(|_| IdentityError::InvalidInput)?;
+        let clock = state.security_clock()?;
+        let evidence = browser::verify_write(
+            &state.config,
+            clock.as_ref(),
+            &headers,
+            None,
+            &context.budget,
+        )?;
+        let action = accounts(&state)?
+            .reissue_invitation(&evidence, id, context.id, &context.budget)
+            .await?;
+        Ok::<_, IdentityError>((
+            browser::protected_headers(),
+            Json(serde_json::json!({"id":action.id,"secret":action.secret.into_response(),"expires_at":action.expires_at/1000})),
+        ))
+    }
+    .await;
+    result.map_err(|reason| AppError::identity(reason, context.id))
 }
 async fn issue_invitation(
     State(state): State<AppState>,

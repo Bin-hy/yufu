@@ -1,7 +1,9 @@
 use super::identity_browser::{IdentityRequest, accounts, login_flow};
 use crate::{
     AppState,
-    domain::identity::{account::AccountPassword, error::IdentityError},
+    domain::identity::{
+        account::AccountPassword, error::IdentityError, external::ExternalProviderKey,
+    },
     error::AppError,
     service::identity::{
         account::{ActionProof, InvitationAcceptance},
@@ -91,6 +93,7 @@ struct AcceptRequest {
     username: Option<String>,
     password: Option<String>,
     nickname: Option<String>,
+    bind_provider: Option<String>,
 }
 async fn accept(
     State(state): State<AppState>,
@@ -110,8 +113,23 @@ async fn accept(
         )?;
         let proof = browser::read_action_proof(&state.config, &headers, payload.action_id)?;
         let password = payload.password.map(AccountPassword::new).transpose()?;
+        let bind_provider = payload
+            .bind_provider
+            .as_deref()
+            .map(str::parse::<ExternalProviderKey>)
+            .transpose()
+            .map_err(|_| IdentityError::InvalidInput)?;
+        if let Some(provider) = bind_provider
+            && (provider.is_native() || !state.external_registry()?.is_enabled(provider))
+        {
+            return Err(IdentityError::InvalidInput);
+        }
         let acceptance = if payload.existing_account {
-            if payload.username.is_some() || password.is_some() || payload.nickname.is_some() {
+            if payload.username.is_some()
+                || password.is_some()
+                || payload.nickname.is_some()
+                || bind_provider.is_some()
+            {
                 return Err(IdentityError::InvalidInput);
             }
             InvitationAcceptance::ExistingAccount
@@ -126,6 +144,7 @@ async fn accept(
                     .nickname
                     .as_deref()
                     .ok_or(IdentityError::InvalidInput)?,
+                bind_provider,
             }
         };
         let receipt = accounts(&state)?
@@ -140,9 +159,22 @@ async fn accept(
                 &context.budget,
             )
             .await?;
+        let mut response_headers = browser::clear_action_cookie(&state.config, payload.action_id)?;
+        if let Some(session) = receipt.session {
+            let challenge = browser::authenticated_cookies(
+                &state.config,
+                clock.as_ref(),
+                session.secret,
+                session.expires_at,
+                crate::service::security::repository::now(clock.as_ref())?,
+            )?;
+            for (name, value) in challenge.headers.iter() {
+                response_headers.append(name, value.clone());
+            }
+        }
         Ok::<_, IdentityError>((
-            browser::clear_action_cookie(&state.config, payload.action_id)?,
-            Json(serde_json::json!(receipt)),
+            response_headers,
+            Json(serde_json::json!(receipt.continuation)),
         ))
     }
     .await;

@@ -88,7 +88,7 @@ void load()
 </script>
 <template>
     <div class="site-settings-page">
-        <PageHeader title="站点设置" description="统一维护网站品牌、认证页面与页脚。仅超级管理员可修改。" />
+        <PageHeader title="站点设置" hint="维护网站品牌、认证页面与页脚；仅超级管理员可修改。" />
         <p v-if="error" class="form-alert" role="alert">{{ error }}</p>
         <UiButton v-if="!loaded || conflict" variant="outline" :disabled="loading || busy" @click="reload">{{ loading ? '正在读取…' : '重新加载当前配置' }}</UiButton>
         <template v-if="draft && loaded">
@@ -107,7 +107,7 @@ void load()
                         <UiFormField id="welcome-title" label="欢迎标题"><UiInput id="welcome-title" v-model="draft.branding.welcome_title" :maxlength="loaded.limits.welcome_title" /></UiFormField>
                         <UiFormField id="welcome-description" label="欢迎说明"><UiTextarea id="welcome-description" v-model="draft.branding.welcome_description" :maxlength="loaded.limits.welcome_description" /></UiFormField>
                     </fieldset>
-                    <fieldset :disabled="busy || loading" class="site-settings-section"><legend>OIDC 登录与授权页</legend><p class="form-help">默认继承全站品牌。清除覆盖后恢复继承；自定义文字留空则隐藏该项。应用名和授权范围由系统提供。</p>
+                    <fieldset :disabled="busy || loading" class="site-settings-section"><legend>OIDC 登录与授权页</legend><p class="form-help">默认继承全站品牌；留空则隐藏。</p>
                         <SiteAssetField v-model="draft.oidc.cover_asset_id" kind="cover" label="OIDC 独立封面" :max-bytes="loaded.limits.cover_bytes" :preview="previews[draft.oidc.cover_asset_id ?? draft.branding.cover_asset_id ?? '']" :inherited="true" :disabled="busy" @uploaded="received" @busy="setBusy('oidc-cover', $event)" />
                         <label class="checkbox-field"><input type="checkbox" :checked="draft.oidc.welcome_title !== null" @change="draft.oidc.welcome_title = ($event.target as HTMLInputElement).checked ? draft.branding.welcome_title : null" />自定义 OIDC 欢迎标题</label>
                         <UiInput v-if="draft.oidc.welcome_title !== null" v-model="draft.oidc.welcome_title" aria-label="OIDC 欢迎标题" :maxlength="loaded.limits.welcome_title" />
@@ -121,7 +121,7 @@ void load()
                         <div v-for="(link, index) in draft.branding.footer.links" :key="index" class="site-footer-link-editor"><UiInput v-model="link.label" :aria-label="'链接名称 ' + (index + 1)" placeholder="链接名称" :maxlength="loaded.limits.link_label" required /><UiInput v-model="link.url" :aria-label="'链接地址 ' + (index + 1)" placeholder="https://" :maxlength="loaded.limits.link_url" required /><UiButton variant="ghost" size="sm" @click="draft.branding.footer.links.splice(index, 1)">移除链接</UiButton></div>
                         <UiButton variant="outline" size="sm" :disabled="draft.branding.footer.links.length >= loaded.limits.links" @click="draft.branding.footer.links.push({ label: '', url: '' })">添加页脚链接</UiButton>
                     </fieldset>
-                    <p class="form-help">未使用的上传图片保留 24 小时；过期草稿需要重新上传。图片和设置统一保存在数据库中。</p>
+                    <p class="form-help">未使用图片保留 24 小时；过期草稿需重新上传。</p>
                     <div class="site-settings-actions"><UiButton type="submit" :loading="pending" :disabled="busy || loading || conflict">保存设置</UiButton><UiButton variant="outline" :disabled="busy || loading || conflict" @click="save(true)">恢复默认</UiButton><UiButton variant="ghost" :disabled="busy || loading" @click="reload">重新加载</UiButton></div>
                 </div>
                 <SiteBrandingPreview v-if="preview" :value="preview" />
