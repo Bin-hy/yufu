@@ -31,11 +31,16 @@ try {
     fragmentError = (error as Error).message
 }
 const actionId = ref(typeof route.query.action_id === 'string' ? route.query.action_id : '')
+const manualMode = ref(!actionId.value && !secret)
+const manualCode = ref('')
+const manualError = ref(fragmentError)
+const exchanging = ref(false)
 const form = reactive({ username: '', nickname: '', password: '', confirm: '' }),
     validation = ref(''),
     done = ref(false)
 const state = useAsyncQuery({
     key: () => actionId.value,
+    active: () => !manualMode.value,
     loader: async (signal) => {
         if (fragmentError) throw new Error(fragmentError)
         if (secret) {
@@ -48,6 +53,10 @@ const state = useAsyncQuery({
                 })
                 actionId.value = receipt.action_id
                 await router.replace({ name: 'account-action', query: { action_id: receipt.action_id } })
+            } catch (error) {
+                manualMode.value = true
+                manualError.value = error instanceof Error ? error.message : '邀请链接无效，请重新输入邀请码'
+                throw error
             } finally {
                 input.secret = ''
             }
@@ -69,6 +78,52 @@ const clear = () => {
 }
 onScopeDispose(onSessionReset(clear))
 onScopeDispose(clear)
+
+function parseManualAction(raw: string) {
+    const value = raw.trim()
+    let secret = value
+    let kind = 'invitation'
+    try {
+        const url = new URL(value)
+        const hash = new URLSearchParams(url.hash.replace(/^#/, ''))
+        const fromHash = hash.get('secret')
+        const fromQuery = url.searchParams.get('secret')
+        const parsed = fromHash ?? fromQuery ?? ''
+        if (parsed) {
+            secret = parsed
+            const parsedKind = hash.get('kind') ?? url.searchParams.get('kind')
+            if (parsedKind === 'password_reset') kind = 'password_reset'
+        }
+    } catch {
+        // A raw 43-character secret is not a URL; use it as-is.
+    }
+    if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) {
+        throw new Error('邀请码格式不正确，请粘贴管理员提供的 43 位邀请码或完整邀请链接')
+    }
+    return { kind, secret }
+}
+
+async function exchangeManual() {
+    if (exchanging.value) return
+    manualError.value = ''
+    try {
+        const parsed = parseManualAction(manualCode.value)
+        exchanging.value = true
+        const receipt = await exchangeAction({
+            ...parsed,
+            flow_id: typeof route.query.flow_id === 'string' ? route.query.flow_id : undefined,
+        })
+        manualCode.value = ''
+        manualMode.value = false
+        actionId.value = receipt.action_id
+        await router.replace({ name: 'account-action', query: { action_id: receipt.action_id } })
+    } catch (error) {
+        manualError.value = error instanceof Error ? error.message : '邀请码无效，请联系管理员重新生成'
+    } finally {
+        exchanging.value = false
+    }
+}
+
 async function submit() {
     validation.value = ''
     if (!data.value || done.value) return
@@ -115,7 +170,45 @@ async function submit() {
 }
 </script>
 <template>
-    <LoginForm v-if="data?.requires_existing_account && !user.centerSession" :action-id="actionId" />
+    <AuthLayout
+        v-if="manualMode"
+        title="输入邀请码"
+        description="凭企业邀请创建账户，或继续密码重置"
+    >
+        <form class="space-y-4" novalidate @submit.prevent="exchangeManual">
+            <div class="inline-notice">
+                <KeyRound :size="16" class="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
+                <p>请输入管理员在「账户与邀请」中提供的 43 位邀请码，或直接粘贴完整邀请链接。</p>
+            </div>
+            <p v-if="manualError" class="form-alert" role="alert">{{ manualError }}</p>
+            <UiFormField
+                id="invitation-code"
+                label="邀请码或邀请链接"
+                required
+                hint="邀请码为一次性凭证；完整链接通常形如 /account/action#kind=invitation&secret=..."
+            >
+                <UiInput
+                    id="invitation-code"
+                    v-model="manualCode"
+                    :disabled="exchanging"
+                    required
+                    autofocus
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="粘贴 43 位邀请码或完整邀请链接"
+                />
+            </UiFormField>
+            <UiButton type="submit" size="lg" block :loading="exchanging" :disabled="exchanging">
+                <KeyRound v-if="!exchanging" :size="15" aria-hidden="true" />
+                继续
+            </UiButton>
+            <div class="auth-links">
+                <span>已有企业账户？</span>
+                <RouterLink :to="{ name: 'login' }">返回登录</RouterLink>
+            </div>
+        </form>
+    </AuthLayout>
+    <LoginForm v-else-if="data?.requires_existing_account && !user.centerSession" :action-id="actionId" />
     <AuthLayout
         v-else
         :title="isReset ? '重置密码' : '接受企业邀请'"

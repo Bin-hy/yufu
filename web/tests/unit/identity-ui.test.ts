@@ -176,12 +176,24 @@ it('账户邀请秘密在网络请求前从普通与 hash 路由地址删除，�
     expect(() => consumeSecretFragment({ hash: '#secret=bad&kind=evil', pathname: '/', search: '' }, history)).toThrow('无效')
     expect(history.replaceState).toHaveBeenCalled()
 })
-it('没有企业邀请的注册页面不能调用创建账户接口', async () => {
+it('没有企业邀请的注册页面要求输入邀请码且不调用创建账户接口', async () => {
     useUserStore(pinia).logout()
     const { wrapper } = await render(AccountAction, '/register')
-    expect(wrapper.text()).toContain('需要有效的企业邀请')
+    expect(wrapper.text()).toContain('输入邀请码')
+    expect(wrapper.find('#invitation-code').exists()).toBe(true)
     expect(mocked.accept).not.toHaveBeenCalled(); expect(mocked.exchange).not.toHaveBeenCalled()
-    expect(wrapper.find('form').exists()).toBe(false)
+})
+it('粘贴 43 位邀请码后兑换并进入接受邀请页面', async () => {
+    useUserStore(pinia).logout()
+    mocked.exchange.mockResolvedValue({ action_id: 'action-one', expires_at: 9999999999, oidc_flow_id: null })
+    mocked.action.mockResolvedValue({ action_id: 'action-one', kind: 'invitation', expires_at: 9999999999, person_kind: 'employee', developer_grant: false, requires_existing_account: false, oidc_flow_id: null, csrf_token: 'proof' })
+    const { wrapper } = await render(AccountAction, '/register')
+    await wrapper.find('#invitation-code').setValue('A'.repeat(43))
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(mocked.exchange).toHaveBeenCalledWith(expect.objectContaining({ kind: 'invitation', secret: 'A'.repeat(43) }))
+    expect(mocked.action).toHaveBeenCalledWith('action-one', expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('接受企业邀请')
+    expect(wrapper.find('#invitation-username').exists()).toBe(true)
 })
 it('授权界面仅使用服务端 flow 摘要，拒绝时不透传 query 中的回调和权限', async () => {
     mocked.inspect.mockResolvedValue({ flow_id: 'flow-one', application_name: 'Trusted A', scopes: 'openid profile', interaction: 'consent', expires_at: 9999999999, username: 'employee', csrf_token: 'proof' })
