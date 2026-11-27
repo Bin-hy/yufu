@@ -1,13 +1,14 @@
 <script setup lang="ts">
 defineOptions({ name: 'AccountConsents' })
 import { computed, ref } from 'vue'
-import { KeyRound, Search, ShieldCheck } from '@lucide/vue'
+import { KeyRound, Search } from '@lucide/vue'
 import { getConsents, revokeConsent } from '../api'
 import { useCursorPage } from '@/composables/use-cursor-page'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
 import { emitToast } from '@/utils/toast'
 import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiInput from '@/components/ui/input/input.vue'
@@ -50,7 +51,7 @@ async function withdraw(id: number, name: string) {
         <PageHeader
             title="资料授权"
             eyebrow="CONSENTS"
-            description="撤回后该应用环境需要重新获取你的同意；企业访问分配保持独立管理。"
+            hint="撤回后应用需重新获取同意；企业访问分配保持独立。"
         />
         <FailureFeedback :failure="mutation.failure.value" :message="writeError"
             :recovery-label="['reload', 'check-result'].includes(mutation.failure.value?.recovery ?? '') ? '重新加载并核对' : undefined"
@@ -63,8 +64,8 @@ async function withdraw(id: number, name: string) {
                     <UiInput v-model="query" clearable placeholder="搜索应用或资料范围…" aria-label="搜索资料授权" />
                 </div>
                 <span class="toolbar-spacer inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <ShieldCheck :size="13" aria-hidden="true" />
-                    授权变更会记录在审计日志
+                    <InfoHint text="授权变更会记录在审计日志" />
+                    审计
                 </span>
             </div>
             <DataState

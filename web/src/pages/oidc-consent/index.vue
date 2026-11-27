@@ -55,7 +55,7 @@ watch(data, (value) => {
         oidc
         v-else
         :title="data ? '授权 ' + data.application_name : '应用授权'"
-        description="企业统一身份认证"
+        description="确认授权范围"
     >
         <DataState :status="status" :error="error" :skeleton-rows="2" @retry="state.refresh()">
             <div class="space-y-5">
@@ -66,36 +66,34 @@ watch(data, (value) => {
                     <div class="min-w-0">
                         <p class="truncate text-sm font-semibold">{{ data?.application_name }}</p>
                         <p class="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                            <ShieldCheck :size="11" aria-hidden="true" />已通过企业身份验证
+                            <ShieldCheck :size="11" aria-hidden="true" />已验证
                         </p>
                     </div>
                 </div>
 
                 <div>
                     <p class="text-xs leading-5 text-muted-foreground">
-                        当前账户 <strong class="text-foreground">{{ data?.username }}</strong> 将向该应用提供：
+                        <strong class="text-foreground">{{ data?.username }}</strong> 将提供：
                     </p>
                     <ul class="mt-3 space-y-2">
                         <li
                             v-for="scope in scopes"
                             :key="scope.scope"
-                            class="flex items-start gap-3 rounded-lg border border-border bg-card p-3"
+                            class="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
+                            :title="scope.description"
                         >
-                            <span class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
+                            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground">
                                 <component :is="scope.icon" :size="14" aria-hidden="true" />
                             </span>
-                            <span class="min-w-0">
-                                <span class="block text-xs font-semibold">{{ scope.label }}</span>
-                                <span class="mt-0.5 block text-[10.5px] text-muted-foreground">{{ scope.description }}</span>
-                            </span>
-                            <Check :size="14" class="ml-auto mt-1 shrink-0 text-success" aria-hidden="true" />
+                            <span class="min-w-0 flex-1 text-xs font-semibold">{{ scope.label }}</span>
+                            <Check :size="14" class="shrink-0 text-success" aria-hidden="true" />
                         </li>
                     </ul>
                 </div>
 
                 <p v-if="writeError" role="alert" class="form-alert">{{ writeError }}</p>
                 <p class="text-[10.5px] leading-5 text-muted-foreground">
-                    授权后你可以随时在「账户中心 → 资料授权」中撤回。拒绝授权不会影响其他应用。
+                    可随时在账户中心撤回；拒绝不影响其他应用。
                 </p>
                 <div class="grid grid-cols-2 gap-3">
                     <UiButton variant="outline" :disabled="pending" @click="submit(false)">

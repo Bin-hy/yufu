@@ -31,7 +31,7 @@ const productionCount = computed(
         <PageHeader
             title="可访问应用"
             eyebrow="ASSIGNMENTS"
-            description="企业已明确分配给你的应用环境；应用维护关系仅提供开发环境准入，不等于生产访问授权。"
+            hint="仅显示企业明确分配给你的应用环境；维护关系不等于生产访问。"
         >
             <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="state.refresh()">
                 <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />刷新
@@ -42,17 +42,14 @@ const productionCount = computed(
             <article class="metric-card">
                 <span class="metric-label"><AppWindow :size="13" aria-hidden="true" />已分配环境</span>
                 <strong class="metric-value">{{ data?.items.length ?? 0 }}</strong>
-                <span class="metric-meta">当前页面加载的环境数量</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><ShieldCheck :size="13" aria-hidden="true" />生产环境</span>
                 <strong class="metric-value">{{ productionCount }}</strong>
-                <span class="metric-meta">需要管理员明确分配</span>
             </article>
             <article class="metric-card">
                 <span class="metric-label"><FlaskConical :size="13" aria-hidden="true" />开发环境</span>
                 <strong class="metric-value">{{ (data?.items.length ?? 0) - productionCount }}</strong>
-                <span class="metric-meta">开发者维护关系的准入范围</span>
             </article>
         </div>
 
@@ -76,7 +73,7 @@ const productionCount = computed(
                 :refreshing="refreshing"
                 :empty="!data?.items.length"
                 empty-title="还没有可访问的应用"
-                empty-description="联系企业管理员，为你的账户分配应用环境访问权。"
+                empty-description="联系管理员分配应用环境访问权。"
                 :skeleton-rows="2"
                 @retry="state.refresh()"
             >

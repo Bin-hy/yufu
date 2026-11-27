@@ -173,19 +173,15 @@ async function submit() {
     <AuthLayout
         v-if="manualMode"
         title="输入邀请码"
-        description="凭企业邀请创建账户，或继续密码重置"
+        description="输入邀请码或账户操作链接"
     >
         <form class="space-y-4" novalidate @submit.prevent="exchangeManual">
-            <div class="inline-notice">
-                <KeyRound :size="16" class="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
-                <p>请输入管理员在「账户与邀请」中提供的 43 位邀请码，或直接粘贴完整邀请链接。</p>
-            </div>
             <p v-if="manualError" class="form-alert" role="alert">{{ manualError }}</p>
             <UiFormField
                 id="invitation-code"
                 label="邀请码或邀请链接"
                 required
-                hint="邀请码为一次性凭证；完整链接通常形如 /account/action#kind=invitation&secret=..."
+                hint="一次性凭证。"
             >
                 <UiInput
                     id="invitation-code"
@@ -212,16 +208,16 @@ async function submit() {
     <AuthLayout
         v-else
         :title="isReset ? '重置密码' : '接受企业邀请'"
-        description="企业统一身份认证"
+        description="确认账户操作"
     >
         <DataState :status="status" :error="error" :skeleton-rows="2" @retry="state.refresh()">
             <form class="space-y-4" novalidate @submit.prevent="submit">
                 <div class="inline-notice">
                     <ShieldCheck :size="16" class="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
                     <p>
-                        <template v-if="isReset">设置新密码后，原有登录会话会全部失效。</template>
-                        <template v-else-if="existing">以当前账户接受邀请，保留同一个统一身份。</template>
-                        <template v-else>此邀请允许创建一个企业账户，请确认信息后继续。</template>
+                        <template v-if="isReset">设置后原会话全部失效。</template>
+                        <template v-else-if="existing">以当前账户接受邀请。</template>
+                        <template v-else>创建企业账户。</template>
                     </p>
                 </div>
                 <div v-if="data?.kind === 'invitation'" class="flex flex-wrap gap-2">
@@ -251,7 +247,7 @@ async function submit() {
                             placeholder="请输入显示名称"
                         />
                     </UiFormField>
-                    <p class="form-help">用户名已存在时，请先登录该账户，再重新打开邀请链接。</p>
+                    <p class="form-help">用户名已存在时，请先登录再打开邀请。</p>
                 </template>
                 <template v-if="isReset || !existing">
                     <UiFormField id="action-password" label="新密码" required hint="至少 8 位字符，建议混合大小写与数字。">

@@ -46,10 +46,10 @@ const attention = computed(() => {
         <PageHeader
             title="管理总览"
             eyebrow="OVERVIEW"
-            description="企业身份治理的当前状态与需要处理的事项。各区块按你的读取权限展示。"
+            hint="企业身份治理状态与需要跟进的事项。区块按读取权限展示。"
         >
             <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="overview.refresh()">
-                <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />重新读取
+                <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />刷新
             </UiButton>
         </PageHeader>
 
@@ -63,12 +63,10 @@ const attention = computed(() => {
         >
             <section v-if="attention.length" class="panel mb-5 border-warning/30">
                 <header class="panel-heading bg-warning/[0.04]">
-                    <div>
-                        <h2 class="flex items-center gap-2">
-                            <TriangleAlert :size="15" class="text-warning" aria-hidden="true" />今天需要处理
-                        </h2>
-                        <p>以下事项等待管理员跟进。</p>
-                    </div>
+                    <h2 class="flex items-center gap-2">
+                        <TriangleAlert :size="15" class="text-warning" aria-hidden="true" />待处理
+                    </h2>
+                    <span class="status-badge status-warning">{{ attention.length }}</span>
                 </header>
                 <ul class="divide-y divide-border">
                     <li v-for="entry in attention" :key="entry.label">
@@ -84,7 +82,7 @@ const attention = computed(() => {
             </section>
             <p v-else class="inline-notice mb-5">
                 <ShieldCheck :size="15" class="mt-0.5 shrink-0 text-success" aria-hidden="true" />
-                没有待处理事项：审批、投递、纳管与近期审计均无异常。
+                暂无待处理事项
             </p>
 
             <div class="metric-grid">
@@ -96,7 +94,6 @@ const attention = computed(() => {
                 <RouterLink v-if="data?.approvals" class="metric-card transition-colors hover:border-primary/40" :to="{ name: 'admin-apps' }">
                     <span class="metric-label"><AppWindow :size="13" aria-hidden="true" />待审批</span>
                     <strong class="metric-value" :class="data.approvals.pending ? '!text-warning' : ''">{{ data.approvals.pending }}</strong>
-                    <span class="metric-meta">等待管理员审批的生产配置</span>
                 </RouterLink>
                 <RouterLink v-if="data?.deliveries" class="metric-card transition-colors hover:border-primary/40" :to="{ name: 'admin-deliveries' }">
                     <span class="metric-label"><Network :size="13" aria-hidden="true" />退出通知</span>
@@ -108,12 +105,11 @@ const attention = computed(() => {
                 <RouterLink v-if="data?.migrations" class="metric-card transition-colors hover:border-primary/40" :to="{ name: 'admin-migrations' }">
                     <span class="metric-label"><ShieldCheck :size="13" aria-hidden="true" />历史接入</span>
                     <strong class="metric-value" :class="data.migrations.unmanaged ? '!text-warning' : ''">{{ data.migrations.unmanaged }}</strong>
-                    <span class="metric-meta">待纳管客户端 · 未解决冲突 {{ data.migrations.unresolved_conflicts }}</span>
+                    <span class="metric-meta">冲突 {{ data.migrations.unresolved_conflicts }}</span>
                 </RouterLink>
                 <RouterLink v-if="data?.audit" class="metric-card transition-colors hover:border-primary/40" :to="{ name: 'admin-audit' }">
-                    <span class="metric-label"><ScrollText :size="13" aria-hidden="true" />近 24 小时审计</span>
+                    <span class="metric-label"><ScrollText :size="13" aria-hidden="true" />24h 审计</span>
                     <strong class="metric-value" :class="data.audit.recent_failures ? '!text-destructive' : ''">{{ data.audit.recent_failures }}</strong>
-                    <span class="metric-meta">拒绝或失败的操作事件</span>
                 </RouterLink>
             </div>
         </DataState>

@@ -14,6 +14,7 @@ import {
 import { emitToast } from '@/utils/toast'
 import ExternalProviderIcon from '@/components/brand/external-provider-icon.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiCheckbox from '@/components/ui/checkbox/checkbox.vue'
 import UiInput from '@/components/ui/input/input.vue'
@@ -158,7 +159,7 @@ function date(value: number) {
         <PageHeader
             title="第三方登录"
             eyebrow="EXTERNAL IDENTITY"
-            description="配置 GitHub、QQ、微信开放平台扫码登录。Secret 只写不回显；修改后立即生效。"
+            hint="Secret 只写不回显；配置修改后立即生效。"
         >
             <UiButton variant="outline" :loading="loading" @click="load">
                 <RefreshCw :size="14" aria-hidden="true" />刷新
@@ -169,10 +170,10 @@ function date(value: number) {
 
         <section class="panel mb-5">
             <header class="panel-heading">
-                <div>
-                    <h2>登录统计</h2>
-                    <p>数据来自身份审计，仅统计第三方登录结果。</p>
-                </div>
+                    <h2 class="flex items-center gap-2">
+                        登录统计
+                        <InfoHint text="数据来自身份审计，仅统计第三方登录结果。" />
+                    </h2>
                 <div class="flex gap-2">
                     <UiButton
                         v-for="window in (['24h', '7d'] as const)"
@@ -288,9 +289,10 @@ function date(value: number) {
             </section>
         </div>
 
-        <p class="mt-4 flex items-start gap-2 text-[10.5px] leading-5 text-muted-foreground">
-            <ShieldCheck :size="13" class="mt-0.5 shrink-0" aria-hidden="true" />
-            Secret 使用服务端主密钥加密保存；接口、日志和审计都不会返回明文。未配置完整的 Provider 不会出现在登录页。
+        <p class="mt-4 flex items-center gap-2 text-[10.5px] leading-5 text-muted-foreground">
+            <ShieldCheck :size="13" class="shrink-0" aria-hidden="true" />
+            Secret 已加密保存
+            <InfoHint text="接口、日志和审计都不会返回明文；未配置完整的 Provider 不会出现在登录页。" />
         </p>
     </div>
 </template>

@@ -22,6 +22,7 @@ import type { Assignment, Environment, EnvironmentConfig, Reader, TestUserSummar
 import { validateEnvironmentConfig } from '../api/validation'
 import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
@@ -447,7 +448,7 @@ const envStatus = computed(() => {
         <PageHeader
             :title="data?.name || '应用接入'"
             eyebrow="APPLICATION"
-            description="开发和生产环境使用独立客户端。资料同意、生产访问分配与维护权分别管理。"
+            hint="开发与生产客户端独立；资料同意、生产分配与维护权分别管理。"
         >
             <UiButton variant="outline" :loading="refreshing" :disabled="refreshing" @click="state.refresh()">
                 <RefreshCw v-if="!refreshing" :size="14" aria-hidden="true" />重新读取
@@ -491,7 +492,7 @@ const envStatus = computed(() => {
                     <div class="content-grid content-grid-sidebar">
                         <section class="panel">
                             <header class="panel-heading">
-                                <div><h2>应用资料与负责人</h2><p>名称与说明会展示给授权用户和管理员。</p></div>
+                                <h2 class="flex items-center gap-2">应用资料与负责人 <InfoHint text="名称与说明会展示给授权用户和管理员。" /></h2>
                             </header>
                             <form class="surface-body space-y-5" @submit.prevent="update('', 'PATCH', { name: metadata.name, description: metadata.description || null, expected_revision: data.revision })">
                                 <div class="grid gap-4 md:grid-cols-2">
@@ -566,7 +567,7 @@ const envStatus = computed(() => {
 
                 <section id="environment" class="panel scroll-mt-24">
                     <header class="panel-heading">
-                        <div><h2>应用环境</h2><p>开发和生产的客户端、回调与访问边界独立维护。</p></div>
+                        <h2 class="flex items-center gap-2">应用环境 <InfoHint text="开发和生产的客户端、回调与访问边界独立维护。" /></h2>
                         <span class="status-badge" :class="env?.pending_approval ? 'status-warning' : env?.active_version_id ? 'status-success' : 'status-muted'">{{ envStatus }}</span>
                     </header>
                     <div class="surface-body space-y-5">
@@ -661,7 +662,7 @@ const envStatus = computed(() => {
                 <section id="integration" class="scroll-mt-24">
                     <div class="content-grid content-grid-2">
                         <section class="panel">
-                            <header class="panel-heading"><div><h2>标准接入配置</h2><p>从 Discovery 获取协议端点。</p></div></header>
+                            <header class="panel-heading"><h2 class="flex items-center gap-2">标准接入配置 <InfoHint text="授权码流程要求 S256 PKCE、state 与 nonce；验证签名、issuer、audience。保护 API 在线内省缓存最长 5 秒。" /></h2></header>
                             <div class="surface-body space-y-3 text-[11.5px] leading-6">
                                 <div class="copy-field">
                                     <div class="min-w-0">
@@ -671,7 +672,6 @@ const envStatus = computed(() => {
                                     <button type="button" class="icon-button" aria-label="复制 Issuer" title="复制 Issuer" @click="copy(provider.data.value?.issuer ?? '', 'Issuer')"><Copy :size="13" aria-hidden="true" /></button>
                                 </div>
                                 <p class="break-all text-muted-foreground">Discovery：{{ provider.data.value?.issuer }}/.well-known/openid-configuration</p>
-                                <p class="text-muted-foreground">授权码流程要求 S256 PKCE、state 与 nonce；验证签名、issuer、audience。保护 API 在线内省缓存最长 5 秒。</p>
                                 <p v-if="env?.active_config">生效范围 {{ env.active_config.identity_scopes }} · Audience <span class="mono">{{ env.active_config.access_audience }}</span></p>
                                 <p v-else class="text-muted-foreground">此环境尚无生效接入配置。</p>
                                 <UiButton
@@ -686,7 +686,7 @@ const envStatus = computed(() => {
                         </section>
 
                         <section class="panel">
-                            <header class="panel-heading"><div><h2>保护 API 内省凭据</h2><p>仅交给此环境的后端 API；浏览器不能保存该秘密。</p></div></header>
+                            <header class="panel-heading"><h2 class="flex items-center gap-2">保护 API 内省凭据 <InfoHint text="仅交给此环境的后端 API；浏览器不能保存该秘密。" /></h2></header>
                             <div class="surface-body space-y-3">
                                 <UiButton :disabled="pending || !env?.active_config" :loading="pending" variant="outline" @click="readerChange(null, false)"><KeyRound :size="14" aria-hidden="true" />为生效 Audience 创建后端凭据</UiButton>
                                 <p v-if="readers.error.value" role="alert" class="inline-error">{{ readers.error.value }}</p>
@@ -709,7 +709,7 @@ const envStatus = computed(() => {
                 <section id="deliveries" class="scroll-mt-24">
                     <div class="content-grid" :class="administrator ? 'content-grid-2' : ''">
                         <section class="panel">
-                            <header class="panel-heading"><div><h2>退出通知投递</h2><p>对端返回 2xx 只表示接受通知；本地授权撤销已在此之前生效。</p></div></header>
+                            <header class="panel-heading"><h2 class="flex items-center gap-2">退出通知投递 <InfoHint text="对端返回 2xx 只表示接受通知；本地授权撤销已在此之前生效。" /></h2></header>
                             <div class="surface-body space-y-2">
                                 <p v-if="deliveries.error.value" class="inline-error">{{ deliveries.error.value }}</p>
                                 <article v-for="delivery in deliveries.data.value?.items" :key="delivery.id" class="rounded-lg border border-border p-3">
@@ -722,7 +722,7 @@ const envStatus = computed(() => {
                         </section>
 
                         <section v-if="administrator" class="panel">
-                            <header class="panel-heading"><div><h2>可访问团队与账户</h2><p>生产环境只有明确分配的账户或用户组才能访问；开发环境额外允许维护者与本页列出的测试账户。</p></div></header>
+                            <header class="panel-heading"><h2 class="flex items-center gap-2">可访问团队与账户 <InfoHint text="生产环境只有明确分配的账户或用户组才能访问；开发环境额外允许维护者与本页列出的测试账户。" /></h2></header>
                             <div class="surface-body space-y-4">
                                 <p v-if="assignments.error.value" class="inline-error">{{ assignments.error.value }}</p>
                                 <div>

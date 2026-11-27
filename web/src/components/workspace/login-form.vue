@@ -5,6 +5,7 @@ import { ArrowRight, Info } from '@lucide/vue'
 import { centerLogin } from '@/pages/account/api'
 import { getExternalProviders, startExternalLogin, type ExternalProvider } from '@/pages/account/api/identities'
 import ExternalProviderIcon from '@/components/brand/external-provider-icon.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import { useUserStore } from '@/pinia/stores/user'
 import { useTabsStore } from '@/pinia/stores/tabs'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
@@ -148,13 +149,13 @@ async function submit() {
 <template>
     <AuthLayout
         :oidc="oidc"
-        :title="restoreUnavailable ? '暂时无法验证登录状态' : oidc ? '登录以继续授权' : '欢迎回来'"
+        :title="restoreUnavailable ? '会话状态不可用' : oidc ? '登录并授权' : '登录'"
         :description="
             restoreUnavailable
-                ? '身份服务暂不可用，还不能判断原会话是否过期。恢复连接后可重试。'
+                ? '恢复连接后可重试。'
                 : oidc
-                ? '使用企业统一账户登录，确认应用请求的访问范围。'
-                : '登录账户，进入身份与权限工作台。'
+                ? '使用企业账户继续授权。'
+                : '企业统一身份认证'
         "
     >
         <div v-if="restoreUnavailable" class="space-y-4" role="status">
@@ -179,6 +180,9 @@ async function submit() {
                 />
             </UiFormField>
             <UiFormField id="login-password" label="密码" required>
+                <template #aside>
+                    <InfoHint text="忘记密码请联系管理员重置" label="忘记密码说明" />
+                </template>
                 <UiInput
                     id="login-password"
                     v-model="form.password"
@@ -195,13 +199,11 @@ async function submit() {
                     <Info :size="12" aria-hidden="true" />大写锁定已开启
                 </p>
             </UiFormField>
-            <div class="flex items-center justify-between gap-3">
-                <label v-if="!oidc" class="checkbox-field">
+            <div v-if="!oidc" class="flex items-center justify-between gap-3">
+                <label class="checkbox-field">
                     <UiCheckbox v-model="form.remember" :disabled="pending" />
                     <span>记住用户名</span>
                 </label>
-                <span v-else class="text-[11px] text-muted-foreground">受企业安全策略保护</span>
-                <span class="text-[11px] text-muted-foreground">忘记密码请联系管理员</span>
             </div>
             <UiButton type="submit" size="lg" block :loading="pending" :disabled="pending">
                 登录
@@ -210,7 +212,7 @@ async function submit() {
             <div v-if="providers.length" class="space-y-3">
                 <div class="flex items-center gap-3">
                     <span class="h-px flex-1 bg-border" />
-                    <span class="text-[10.5px] text-muted-foreground">或使用第三方账号</span>
+                    <span class="text-[10.5px] text-muted-foreground">或</span>
                     <span class="h-px flex-1 bg-border" />
                 </div>
                 <div class="grid gap-2">
@@ -221,6 +223,8 @@ async function submit() {
                         variant="outline"
                         block
                         class="justify-start gap-3 px-3 py-2.5 text-left"
+                        :title="providerHint(provider)"
+                        :aria-label="(provider.mode === 'native' ? provider.label + '（小程序）' : provider.label) + '：' + providerHint(provider)"
                         :loading="externalPending === provider.key"
                         :disabled="!!externalPending || pending"
                         @click="externalLogin(provider)"
@@ -228,13 +232,8 @@ async function submit() {
                         <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
                             <ExternalProviderIcon :provider="provider.key" :size="17" />
                         </span>
-                        <span class="min-w-0 flex-1">
-                            <span class="block text-xs font-semibold">
-                                {{ provider.mode === 'native' ? provider.label + '（小程序）' : provider.label }}
-                            </span>
-                            <span class="mt-0.5 block text-[10px] font-normal leading-4 text-muted-foreground">
-                                {{ providerHint(provider) }}
-                            </span>
+                        <span class="min-w-0 flex-1 text-xs font-semibold">
+                            {{ provider.mode === 'native' ? provider.label + '（小程序）' : provider.label }}
                         </span>
                         <ArrowRight
                             v-if="externalPending !== provider.key"
@@ -246,12 +245,9 @@ async function submit() {
                 </div>
             </div>
             <div v-if="!oidc" class="auth-links">
-                <span>还没有账户？</span>
-                <RouterLink :to="{ name: 'register' }">凭企业邀请创建账户</RouterLink>
+                <span>没有账户？</span>
+                <RouterLink :to="{ name: 'register' }">使用邀请码</RouterLink>
             </div>
-            <p class="text-center text-[10.5px] leading-5 text-muted-foreground/80">
-                继续即表示你同意企业的身份认证与访问控制策略。
-            </p>
         </form>
     </AuthLayout>
 </template>

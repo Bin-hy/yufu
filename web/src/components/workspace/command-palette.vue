@@ -47,7 +47,7 @@ const navigationCommands = computed<CommandItem[]>(() =>
 const actionCommands: CommandItem[] = [
     {
         id: 'theme:light',
-        label: '切换到浅色主题',
+        label: '浅色',
         group: '外观',
         icon: Sun,
         run: () => {
@@ -57,7 +57,7 @@ const actionCommands: CommandItem[] = [
     },
     {
         id: 'theme:dark',
-        label: '切换到暗色主题',
+        label: '暗色',
         group: '外观',
         icon: Moon,
         run: () => {
@@ -67,7 +67,7 @@ const actionCommands: CommandItem[] = [
     },
     {
         id: 'theme:system',
-        label: '跟随系统主题',
+        label: '跟随系统',
         group: '外观',
         icon: Monitor,
         run: () => {

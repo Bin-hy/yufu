@@ -134,7 +134,7 @@ it('退出通知状态筛选走服务端，统计卡展示全库数字，重试�
     ], next: null })
     const { page, router } = await render(Deliveries, '/admin/deliveries')
     expect(page.text()).toContain('需要关注')
-    expect(page.text()).toContain('失败 3 · 待重试 2 · 过期 1')
+    expect(page.text()).toContain('失败 3 · 重试 2 · 过期 1')
     const retryButtons = page.findAll('.desktop-table button').filter(b => b.text() === '按原目标重新排队')
     expect(retryButtons).toHaveLength(1)
     await page.findAll('.filter-chip').find(b => b.text() === '发送失败')!.trigger('click')

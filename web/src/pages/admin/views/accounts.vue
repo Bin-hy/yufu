@@ -16,6 +16,7 @@ import { formatUntil, nowSeconds, subscribeClock } from '@/utils/time'
 import { personKindName } from '@/lib/identity-labels'
 import FailureFeedback from '@/components/Feedback/failure-feedback.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
+import InfoHint from '@/components/workspace/info-hint.vue'
 import DataState from '@/components/workspace/data-state.vue'
 import UiInput from '@/components/ui/input/input.vue'
 import UiButton from '@/components/ui/button/button.vue'
@@ -286,7 +287,7 @@ async function allowCandidate() {
         <PageHeader
             title="企业账户与邀请"
             eyebrow="DIRECTORY"
-            description="受控邀请创建或扩充账户资格；开发者资格不自动授予生产应用访问。"
+            hint="受控邀请创建或扩充账户资格；开发者资格不自动获得生产访问。"
         >
             <UiButton @click="opened = true">
                 <UserPlus :size="14" aria-hidden="true" />签发邀请
@@ -315,7 +316,7 @@ async function allowCandidate() {
                         <Copy :size="14" aria-hidden="true" />
                     </button>
                 </div>
-                <p class="form-help">通过企业认可的渠道交给指定接收人。离开页面后链接会从界面清除，但撤销前仍然有效。</p>
+                <p class="form-help">一次性链接，请通过可信渠道交给接收人；撤销前有效。</p>
                 <div class="flex flex-wrap gap-2">
                     <UiButton variant="outline" :disabled="pending" :loading="pending" @click="revoke">提前撤销此链接</UiButton>
                     <UiButton variant="ghost" @click="issued.clear()">隐藏链接</UiButton>
@@ -350,7 +351,7 @@ async function allowCandidate() {
                 :refreshing="refreshing"
                 :empty="!items.length"
                 :empty-title="filters.values.value.q || statusFilter !== 'all' ? '没有匹配的账户' : '还没有企业账户'"
-                :empty-description="filters.values.value.q || statusFilter !== 'all' ? '换个关键词，或切换状态筛选。' : '签发第一张企业邀请，受控创建账户。'"
+                :empty-description="filters.values.value.q || statusFilter !== 'all' ? '换个关键词或状态筛选。' : '签发第一张企业邀请。'"
                 :skeleton-rows="3"
                 @retry="list.refresh()"
             >
@@ -454,11 +455,14 @@ async function allowCandidate() {
 
         <section class="panel mt-5">
             <header class="panel-heading">
-                <div><h2>合作方候选可见性</h2><p>只为明确合作关系授予候选可见性，不开放企业人员目录。</p></div>
+                <h2 class="flex items-center gap-2">
+                    合作方候选可见性
+                    <InfoHint text="只为明确合作关系授予候选可见性，不开放企业人员目录。" />
+                </h2>
                 <Users :size="18" class="text-muted-foreground" aria-hidden="true" />
             </header>
             <form class="surface-body flex flex-wrap items-end gap-3" @submit.prevent="allowCandidate">
-                <UiFormField id="candidate-requester" label="请求方账户" class="min-w-[220px] flex-1" required hint="需要看到候选人的合作方或开发者。">
+                <UiFormField id="candidate-requester" label="请求方账户" class="min-w-[220px] flex-1" required>
                     <EntityPicker
                         id="candidate-requester"
                         :model-value="candidate.requester"
@@ -471,7 +475,7 @@ async function allowCandidate() {
                         @select="(option) => chooseCandidate('requester', option)"
                     />
                 </UiFormField>
-                <UiFormField id="candidate-target" label="候选账户" class="min-w-[220px] flex-1" required hint="被搜索和选择的合作方账户。">
+                <UiFormField id="candidate-target" label="候选账户" class="min-w-[220px] flex-1" required>
                     <EntityPicker
                         id="candidate-target"
                         :model-value="candidate.target"
