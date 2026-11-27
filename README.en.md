@@ -390,7 +390,7 @@ checks, and multi-platform packaging are documented in the
 SAML / LDAP / SCIM, MFA, and a directly consumable public PDP decision API. Developer eligibility
 is granted by invitation; there is no public self-service registration.
 
-**Current status:** v0.1.4 ships binary archives and multi-architecture container images. Some
+**Current status:** v0.1.5 ships binary archives and multi-architecture container images. Some
 capabilities are still marked "implemented, pending validation"; per-capability status and
 limitations are tracked in [capabilities.json](docs/product/capabilities.json) and the
 [product readiness record](docs/specs/product-readiness/verification.md). This README does not
