@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'AdminExternalProviders' })
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
-import { KeyRound, RefreshCw, ShieldCheck } from '@lucide/vue'
+import { RefreshCw, ShieldCheck } from '@lucide/vue'
 import {
     getExternalProviderStats,
     getExternalProvidersAdmin,
@@ -12,6 +12,7 @@ import {
     type ProviderStat,
 } from '../api/external-providers'
 import { emitToast } from '@/utils/toast'
+import ExternalProviderIcon from '@/components/brand/external-provider-icon.vue'
 import PageHeader from '@/components/workspace/page-header.vue'
 import UiButton from '@/components/ui/button/button.vue'
 import UiCheckbox from '@/components/ui/checkbox/checkbox.vue'
@@ -186,7 +187,10 @@ function date(value: number) {
             </header>
             <div class="surface-body grid gap-3 md:grid-cols-3">
                 <div v-for="provider in providers" :key="provider.provider_key" class="rounded-xl border border-border p-4">
-                    <p class="text-xs font-semibold">{{ labels[provider.provider_key] }}</p>
+                    <p class="flex items-center gap-2 text-xs font-semibold">
+                        <ExternalProviderIcon :provider="provider.provider_key" :size="15" />
+                        {{ labels[provider.provider_key] }}
+                    </p>
                     <dl class="mt-3 grid grid-cols-3 gap-2 text-center">
                         <div>
                             <dt class="text-[10px] text-muted-foreground">成功</dt>
@@ -219,6 +223,9 @@ function date(value: number) {
                 <header class="panel-heading">
                     <div>
                         <h2 class="flex items-center gap-2">
+                            <span class="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background">
+                                <ExternalProviderIcon :provider="provider.provider_key" :size="17" />
+                            </span>
                             {{ labels[provider.provider_key] }}
                             <span :class="provider.enabled ? 'status-badge status-success' : 'status-badge'">
                                 {{ provider.enabled ? '已启用' : '已禁用' }}
@@ -229,7 +236,6 @@ function date(value: number) {
                         </h2>
                         <p>回调地址：<span class="mono">{{ callbackUrl(provider.provider_key) }}</span></p>
                     </div>
-                    <KeyRound :size="18" class="text-muted-foreground" aria-hidden="true" />
                 </header>
                 <div v-if="drafts[provider.provider_key]" class="surface-body space-y-4">
                     <div class="grid gap-4 md:grid-cols-2">

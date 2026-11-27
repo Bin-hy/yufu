@@ -1,7 +1,8 @@
 <script setup lang="ts">
 defineOptions({ name: 'AccountIdentities' })
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
-import { Link2, ShieldCheck, Unlink } from '@lucide/vue'
+import { ShieldCheck, Unlink } from '@lucide/vue'
+import ExternalProviderIcon from '@/components/brand/external-provider-icon.vue'
 import {
     getExternalIdentities,
     getExternalProviders,
@@ -124,8 +125,8 @@ function date(value: number | null) {
                             :key="identity.id"
                             class="flex flex-wrap items-center gap-4 px-5 py-4"
                         >
-                            <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
-                                <Link2 :size="17" aria-hidden="true" />
+                            <span class="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background">
+                                <ExternalProviderIcon :provider="identity.provider_key" :size="18" />
                             </span>
                             <div class="min-w-0 flex-1">
                                 <p class="flex items-center gap-2 text-sm font-semibold">
@@ -166,10 +167,12 @@ function date(value: number | null) {
                                 :key="provider.key"
                                 variant="outline"
                                 block
+                                class="justify-start gap-2"
                                 :loading="pending === provider.key"
                                 :disabled="!!pending"
                                 @click="bind(provider)"
                             >
+                                <ExternalProviderIcon :provider="provider.key" :size="16" />
                                 绑定 {{ provider.label }}
                             </UiButton>
                         </div>

@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ArrowRight, Info } from '@lucide/vue'
 import { centerLogin } from '@/pages/account/api'
 import { getExternalProviders, startExternalLogin, type ExternalProvider } from '@/pages/account/api/identities'
+import ExternalProviderIcon from '@/components/brand/external-provider-icon.vue'
 import { useUserStore } from '@/pinia/stores/user'
 import { useTabsStore } from '@/pinia/stores/tabs'
 import { useAsyncMutation } from '@/composables/use-async-mutation'
@@ -60,6 +61,13 @@ async function externalLogin(provider: ExternalProvider) {
     } finally {
         externalPending.value = ''
     }
+}
+function providerHint(provider: ExternalProvider) {
+    if (provider.mode === 'native') return '请打开 Yufu 微信小程序'
+    if (provider.key === 'github') return '使用 GitHub 账号继续'
+    if (provider.key === 'qq') return '使用 QQ 账号继续'
+    if (provider.key === 'wechat_qr') return '使用微信扫码继续'
+    return '使用第三方账号继续'
 }
 const retrying = ref(false)
 const restoreUnavailable = computed(() => !props.oidc && !props.actionId && (!!user.identityError || retrying.value))
@@ -205,18 +213,37 @@ async function submit() {
                     <span class="text-[10.5px] text-muted-foreground">或使用第三方账号</span>
                     <span class="h-px flex-1 bg-border" />
                 </div>
-                <UiButton
-                    v-for="provider in providers"
-                    :key="provider.key"
-                    type="button"
-                    variant="outline"
-                    block
-                    :loading="externalPending === provider.key"
-                    :disabled="!!externalPending || pending"
-                    @click="externalLogin(provider)"
-                >
-                    {{ provider.mode === 'native' ? provider.label + '（小程序）' : provider.label }}
-                </UiButton>
+                <div class="grid gap-2">
+                    <UiButton
+                        v-for="provider in providers"
+                        :key="provider.key"
+                        type="button"
+                        variant="outline"
+                        block
+                        class="justify-start gap-3 px-3 py-2.5 text-left"
+                        :loading="externalPending === provider.key"
+                        :disabled="!!externalPending || pending"
+                        @click="externalLogin(provider)"
+                    >
+                        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+                            <ExternalProviderIcon :provider="provider.key" :size="17" />
+                        </span>
+                        <span class="min-w-0 flex-1">
+                            <span class="block text-xs font-semibold">
+                                {{ provider.mode === 'native' ? provider.label + '（小程序）' : provider.label }}
+                            </span>
+                            <span class="mt-0.5 block text-[10px] font-normal leading-4 text-muted-foreground">
+                                {{ providerHint(provider) }}
+                            </span>
+                        </span>
+                        <ArrowRight
+                            v-if="externalPending !== provider.key"
+                            :size="14"
+                            class="shrink-0 text-muted-foreground"
+                            aria-hidden="true"
+                        />
+                    </UiButton>
+                </div>
             </div>
             <div v-if="!oidc" class="auth-links">
                 <span>还没有账户？</span>
