@@ -355,7 +355,7 @@ pnpm build:website
 **明确不做**：多租户、公开应用市场、外部 IdP 联邦、SAML / LDAP / SCIM、MFA、
 以及可直接接入的公开 PDP 决策 API。企业开发者通过邀约获得资格，不开放公开自助注册。
 
-**当前状态**：v0.1.3 已发布二进制安装包与多架构容器镜像。部分能力仍标记为
+**当前状态**：v0.1.4 已发布二进制安装包与多架构容器镜像。部分能力仍标记为
 「已实现待验收」，逐项状态与限制见 [capabilities.json](docs/product/capabilities.json)
 和[产品可用性验收记录](docs/specs/product-readiness/verification.md)。
 README 不把「已实现」表述为「已验收」；部署前请结合自身场景评估。
